@@ -25,8 +25,8 @@ Then, using the select statement to retrieve all the samples containing the chem
 <SurrealistMini orientation="horizontal" query="-- Insert a sample & content field into a liquids table
 INSERT INTO liquids [
     {sample:'Sea water', content: 'The sea water contains some amount of lead'},
-    {sample:'Tap water', content: 'The team lead by Dr. Rose found out that the tap water in was potable'},
-    {sample:'Sewage water', content: 'High amounts of a were found in Sewage water'}
+    {sample:'Tap water', content: 'The team lead by Dr. Rose found out that the tap water was potable'},
+    {sample:'Sewage water', content: 'High amounts of heavy metals were found in the sewage water'}
 ];
 -- Define an analyzer for the liquid table and an index on the content field with the analyzer
 DEFINE ANALYZER liquid_analyzer TOKENIZERS blank,class,camel,punct FILTERS snowball(english);
@@ -42,45 +42,53 @@ If you read through the content of the tap water sample, you’ll notice that it
 
 The search pulled up both the records although the tap water sample had no lead in it. This example shows us that while full-text search does a great job at matching query terms with indexed documents, on its own it may not be the best solution for use cases where the query terms have deeper context and scope for ambiguity.
 
-For vector-side retrieval on the same example, see [Similarity search](/docs/learn/data-models/vector-search/similarity-search).
+A vector search compares meaning instead of words, so it can tell the metal from the other meaning of the word. For vector-side retrieval on its own, see [Similarity search](/docs/learn/data-models/vector-search/similarity-search).
 
 ## Hybrid search functions
 
 As mentioned above, full-text search and vector search can both be used in SurrealDB. In addition, some functions exist inside the [`search::`](/docs/reference/query-language/functions/database-functions/search) namespace that take both full-text and vector arguments in order to produce a single unified output.
 
-Here is an example of one of them called [`search::rrf()`](/docs/reference/query-language/functions/database-functions/search#searchrrf) which does this using an algorithm called reciprocal rank fusion.
+To try them on the liquid samples, each sample needs an embedding next to its text. An embedding model produces vectors with hundreds of dimensions; the three hand-written dimensions below stand for "chemical contamination", "people and organisations" and "water in general", so the sea water and sewage samples point the same way and the tap water sample does not.
 
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "[]"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
+value = "NONE"
 
 */
--- Sample data --
-CREATE test:1 SET text = "Graph databases are great.", embedding = [0.10, 0.20, 0.30];
-CREATE test:2 SET text = "Relational databases store tables.", embedding = [0.05, 0.10, 0.00];
-CREATE test:3 SET text = "This document mentions graphs.", embedding = [0.20, 0.10, 0.25];
+INSERT INTO liquids [
+	{
+		id: liquids:sea,
+		sample: 'Sea water',
+		content: 'The sea water contains some amount of lead',
+		embedding: [0.9, 0.1, 0.3]
+	},
+	{
+		id: liquids:tap,
+		sample: 'Tap water',
+		content: 'The team lead by Dr. Rose found out that the tap water was potable',
+		embedding: [0.1, 0.9, 0.4]
+	},
+	{
+		id: liquids:sewage,
+		sample: 'Sewage water',
+		content: 'High amounts of heavy metals were found in the sewage water',
+		embedding: [0.8, 0.1, 0.4]
+	}
+] RETURN NONE;
 
--- Analyzer used by the full‑text index
-DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
-
--- Full‑text index
-DEFINE INDEX idx_text
-  ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
+DEFINE ANALYZER liquid_analyzer TOKENIZERS blank, class, camel, punct FILTERS snowball(english);
+DEFINE INDEX liquid_content ON liquids FIELDS content FULLTEXT ANALYZER liquid_analyzer BM25;
 ```
+
+The vector index goes on the `embedding` field:
 
 <Tabs syncKey="hybrid-vector-index">
 <TabItem label="HNSW (in-memory)">
@@ -89,13 +97,10 @@ DEFINE INDEX idx_text
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
 
 */
-DEFINE INDEX idx_embedding
-    ON TABLE test 
-    FIELDS embedding 
-    HNSW DIMENSION 3 DIST COSINE;
+DEFINE INDEX liquid_embedding ON liquids FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
 ```
 
 </TabItem>
@@ -107,13 +112,10 @@ DEFINE INDEX idx_embedding
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
 
 */
-DEFINE INDEX idx_embedding
-    ON TABLE test 
-    FIELDS embedding 
-    DISKANN DIMENSION 3 DIST COSINE TYPE F32;
+DEFINE INDEX liquid_embedding ON liquids FIELDS embedding DISKANN DIMENSION 3 DIST COSINE;
 ```
 
 For very large embedding sets that do not fit comfortably in RAM, prefer DISKANN. It is available on 64-bit platforms and in WebAssembly builds, but not on other 32-bit platforms, where HNSW is the vector index.
@@ -121,69 +123,139 @@ For very large embedding sets that do not fit comfortably in RAM, prefer DISKANN
 </TabItem>
 </Tabs>
 
+The function [`search::rrf()`](/docs/reference/query-language/functions/database-functions/search#searchrrf) combines ranked lists with an algorithm called reciprocal rank fusion. The query below searches for lead both ways: the vector search ranks all three samples by how close they are to the query vector, and the full-text search returns the two best matches for the word `lead`.
+
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "[]"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
+value = '''
+[
+	{ id: liquids:sea, rrf_score: 0.03278688524590164f },
+	{ id: liquids:tap, rrf_score: 0.03200204813108039f },
+	{ id: liquids:sewage, rrf_score: 0.016129032258064516f }
+]'''
 
 */
 -- Setup from the examples above
-CREATE test:1 SET text = "Graph databases are great.", embedding = [0.10, 0.20, 0.30];
-CREATE test:2 SET text = "Relational databases store tables.", embedding = [0.05, 0.10, 0.00];
-CREATE test:3 SET text = "This document mentions graphs.", embedding = [0.20, 0.10, 0.25];
-DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
-DEFINE INDEX idx_text
-  ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
-DEFINE INDEX idx_embedding
-    ON TABLE test 
-    FIELDS embedding 
-    HNSW DIMENSION 3 DIST COSINE;
+INSERT INTO liquids [
+	{ id: liquids:sea, content: 'The sea water contains some amount of lead', embedding: [0.9, 0.1, 0.3] },
+	{ id: liquids:tap, content: 'The team lead by Dr. Rose found out that the tap water was potable', embedding: [0.1, 0.9, 0.4] },
+	{ id: liquids:sewage, content: 'High amounts of heavy metals were found in the sewage water', embedding: [0.8, 0.1, 0.4] }
+] RETURN NONE;
+DEFINE ANALYZER liquid_analyzer TOKENIZERS blank, class, camel, punct FILTERS snowball(english);
+DEFINE INDEX liquid_content ON liquids FIELDS content FULLTEXT ANALYZER liquid_analyzer BM25;
+DEFINE INDEX liquid_embedding ON liquids FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
 
--- Query vector (whatever your embedding model produced for "graph databases")
-LET $qvec = [0.12, 0.18, 0.27];
+-- Query vector (what the embedding model produced for "lead contamination")
+LET $qvec = [0.85, 0.05, 0.35];
 
--- Vector search: top 2 nearest neighbours
-LET $vs = SELECT id FROM test  WHERE embedding <|2,100|> $qvec;
+-- Vector search: the 3 nearest neighbours
+LET $vs = SELECT id FROM liquids WHERE embedding <|3,100|> $qvec;
 
--- Full‑text search: top 2 lexical matches
-LET $ft = SELECT id, search::score(1) as score FROM test
-          WHERE text @1@ 'graph' ORDER BY score DESC LIMIT 2;
+-- Full-text search: the 2 best lexical matches
+LET $ft = SELECT id, search::score(1) AS score FROM liquids
+	WHERE content @1@ 'lead' ORDER BY score DESC LIMIT 2;
 
--- Fuse with Reciprocal Rank Fusion (k defaults to 60 if omitted)
-search::rrf([$vs, $ft], 2, 60);
+-- Fuse with reciprocal rank fusion (k defaults to 60 if omitted)
+SELECT id, rrf_score FROM search::rrf([$vs, $ft], 3, 60);
 ```
 
-With this data, the vector search returns `test:1` and then `test:3`, and the full-text search returns only `test:1`, because the `simple` analyzer does not stem `graphs` to `graph`. Each list gives a record `1 / (k + rank)`, and the fused score is the sum:
+```surql title="Output"
+[
+	{ id: liquids:sea, rrf_score: 0.03278688524590164f },
+	{ id: liquids:tap, rrf_score: 0.03200204813108039f },
+	{ id: liquids:sewage, rrf_score: 0.016129032258064516f }
+]
+```
 
-<img src="~/assets/img/diagrams/light/rrf-fusion-light.webp" darkSrc="~/assets/img/diagrams/rrf-fusion.webp" alt="Two ranked lists fused by search::rrf with k = 60. The vector search ranks test:1 first, worth 1 / 61, and test:3 second, worth 1 / 62. The full-text search for 'graph' ranks only test:1, worth 1 / 61. The fused list ranks test:1 first with 0.0328, the sum of both shares, and test:3 second with 0.0161 from the vector list alone." />
+The vector search returns sea water, sewage and then tap water. The full-text search returns sea water and then tap water, because both mention the word. Each list gives a record `1 / (k + rank)`, and the fused score is the sum, so sea water comes first with a share from both lists. Tap water comes second: it is last in the vector list, but its share from the full-text list is enough to pass sewage, which only one list contains.
+
+<img src="~/assets/img/diagrams/light/rrf-fusion-light.webp" darkSrc="~/assets/img/diagrams/rrf-fusion.webp" alt="Two ranked lists fused by search::rrf with k = 60. The vector search ranks liquids:sea first, worth 1 / 61, liquids:sewage second, worth 1 / 62, and liquids:tap third, worth 1 / 63. The full-text search for 'lead' ranks liquids:sea first, worth 1 / 61, and liquids:tap second, worth 1 / 62. The fused list ranks liquids:sea first with 0.0328 and liquids:tap second with 0.0320, each the sum of its shares from both lists, and liquids:sewage third with 0.0161 from the vector list alone." />
+
+Reciprocal rank fusion uses only the position of a record in each list, and rewards a record that several lists agree on. Where one list is more reliable, [`search::linear()`](/docs/reference/query-language/functions/database-functions/search#searchlinear) combines the scores instead, with a weight for each list. A weight of `2` for the vector list and `1` for the full-text list moves the sewage sample above the tap water sample, which only matched a word:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+[
+	{ id: liquids:sea, linear_score: 3f },
+	{ id: liquids:sewage, linear_score: 0.5f },
+	{ id: liquids:tap, linear_score: 0f }
+]'''
+
+*/
+-- Setup from the examples above
+INSERT INTO liquids [
+	{ id: liquids:sea, content: 'The sea water contains some amount of lead', embedding: [0.9, 0.1, 0.3] },
+	{ id: liquids:tap, content: 'The team lead by Dr. Rose found out that the tap water was potable', embedding: [0.1, 0.9, 0.4] },
+	{ id: liquids:sewage, content: 'High amounts of heavy metals were found in the sewage water', embedding: [0.8, 0.1, 0.4] }
+] RETURN NONE;
+DEFINE ANALYZER liquid_analyzer TOKENIZERS blank, class, camel, punct FILTERS snowball(english);
+DEFINE INDEX liquid_content ON liquids FIELDS content FULLTEXT ANALYZER liquid_analyzer BM25;
+DEFINE INDEX liquid_embedding ON liquids FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
+LET $qvec = [0.85, 0.05, 0.35];
+LET $vs = SELECT id FROM liquids WHERE embedding <|3,100|> $qvec;
+LET $ft = SELECT id, search::score(1) AS score FROM liquids
+	WHERE content @1@ 'lead' ORDER BY score DESC LIMIT 2;
+
+-- Weight the vector list twice as much as the full-text list
+SELECT id, linear_score FROM search::linear([$vs, $ft], [2, 1], 3, 'minmax');
+```
+
+```surql title="Output"
+[
+	{ id: liquids:sea, linear_score: 3f },
+	{ id: liquids:sewage, linear_score: 0.5f },
+	{ id: liquids:tap, linear_score: 0f }
+]
+```
+
+The vector rows carry no score field, so `search::linear` scores them by rank, and `'minmax'` scales each list to the range 0 to 1 before the weights apply. Sea water is at the top of both lists and scores `2 + 1`. Sewage is second in the vector list only, and tap water is last in the vector list and last of the two full-text matches, so both of its normalised scores are `0`.
 
 > [!NOTE]
 > Before SurrealDB 4.0, the lexical half of a hybrid query on a small dataset can contribute membership without contributing order. BM25 clamps the weight of any term appearing in half or more of the indexed documents to zero, so `search::score` returns `0` for every match and the `ORDER BY score DESC` above has nothing to sort on. Reciprocal rank fusion then folds in an arbitrary ordering of the matched records. From SurrealDB 4.0, every match scores above zero. See [how common terms are weighted](/docs/learn/data-models/full-text-search/scoring-and-ranking#how-common-terms-are-weighted).

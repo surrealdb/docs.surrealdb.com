@@ -12,117 +12,143 @@ You need the same namespace/database scope and privileges as other `DEFINE` stat
 
 ## Index types
 
-SurrealDB offers a range of indexing capabilities designed to optimise data retrieval and search efficiency.
+SurrealDB offers a range of indexing capabilities designed to optimise data retrieval and search efficiency. The examples below build the indexes for a recipe site one at a time. Each `recipe` record has a `slug` for its URL, a `title`, an `author`, a `cuisine` and a `published` flag, and each example adds the index that one feature of the site needs.
 
 ### Standard (non-unique) index
 
 An index with `FIELDS` or `COLUMNS` and no special clause (`UNIQUE`, `COUNT`, `FULLTEXT`, etc.) is a **standard B-tree index** - the default secondary index type.
 
-Let's create a non-unique index for an age field on a user table.
+The site has a page for each cuisine, which lists the recipes with a filter on `cuisine`. A standard index on that field lets the query read the matching records directly instead of scanning the table.
 
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ title: 'Mushroom risotto' }]"
 
 */
--- optimise queries looking for users of a given age
-DEFINE INDEX userAgeIndex ON TABLE user FIELDS age;
+DEFINE INDEX recipe_cuisine ON TABLE recipe FIELDS cuisine;
+
+INSERT INTO recipe [
+	{ id: recipe:risotto, title: 'Mushroom risotto', cuisine: 'Italian' },
+	{ id: recipe:dal, title: 'Tarka dal', cuisine: 'Indian' }
+] RETURN NONE;
+
+SELECT title FROM recipe WHERE cuisine = 'Italian';
+```
+
+```surql title="Output"
+[{ title: 'Mushroom risotto' }]
 ```
 
 ### Unique index
 
 A unique index ensures that each value in the index is unique. A unique index helps enforce uniqueness across records by preventing duplicate entries in fields such as user IDs, email addresses, and other unique identifiers.
 
-Let's create a unique index for the email address field on a user table.
+Two recipes cannot share a URL, so the `slug` field gets a unique index. The [`INFO` statement](/docs/reference/query-language/statements/info) shows the indexes defined on a table.
 
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
-
-*/
--- Makes sure that the email address in the user table is always unique
-DEFINE INDEX userEmailIndex ON TABLE user FIELDS email UNIQUE;
-```
-
-The created index can be viewed using the [`INFO` statement](/docs/reference/query-language/statements/info).
-
-```surql
-/**[test]
-
-[[test.results]]
-error = false
-
-*/
-INFO FOR TABLE user;
-```
-
-The `INFO` statement will help you understand what indexes are defined in your `TABLE`.
-
-```surql
-/**[test]
-
-[[test.results]]
-error = false
-
-*/
-{
-    "events": {},
-    "fields": {},
-    "indexes": {
-        "userEmailIndex": {
-            sql: "DEFINE INDEX userEmailIndex ON user FIELDS email UNIQUE"
-        }
-    },
-    "lives": {},
-    "tables": {}
-}
-```
-
-As we defined a `UNIQUE` index on the `email` field, a duplicate entry for that field will throw an error.
-
-```surql
-/**[test]
-
-[[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
 value = '''
-"Database index `userEmailIndex` already contains 'test@surrealdb.com',
-with record `user:1`"'''
+{
+	events: {},
+	fields: {},
+	indexes: {
+		recipe_slug: 'DEFINE INDEX recipe_slug ON recipe FIELDS slug UNIQUE'
+	},
+	lives: {},
+	tables: {}
+}'''
 
 */
--- Create a user record and set an email ID.
-CREATE user:1 SET email = 'test@surrealdb.com';
--- Create another user record and set the same email ID.
-CREATE user:2 SET email = 'test@surrealdb.com';
+DEFINE INDEX recipe_slug ON TABLE recipe FIELDS slug UNIQUE;
+
+INFO FOR TABLE recipe;
 ```
 
 ```surql title="Output"
-"Database index `userEmailIndex` already contains 'test@surrealdb.com',
-with record `user:1`"
+{
+	events: {},
+	fields: {},
+	indexes: {
+		recipe_slug: 'DEFINE INDEX recipe_slug ON recipe FIELDS slug UNIQUE'
+	},
+	lives: {},
+	tables: {}
+}
+```
+
+As the `slug` field has a `UNIQUE` index, a second recipe with the same slug is refused with an error.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: recipe:shakshuka, slug: 'shakshuka', title: 'Shakshuka' }]"
+
+[[test.results]]
+error = "Database index `recipe_slug` already contains 'shakshuka', with record `recipe:shakshuka`"
+
+*/
+-- Setup from the example above
+DEFINE INDEX recipe_slug ON TABLE recipe FIELDS slug UNIQUE;
+
+CREATE recipe:shakshuka SET slug = 'shakshuka', title = 'Shakshuka';
+CREATE recipe:green_shakshuka SET slug = 'shakshuka', title = 'Green shakshuka';
+```
+
+```surql title="Error output"
+"Database index `recipe_slug` already contains 'shakshuka', with record `recipe:shakshuka`"
 ```
 
 ### Composite index
 
 A composite index spans multiple fields of a table. With `UNIQUE`, it enforces uniqueness when the definition of what is unique pertains to more than one field.
 
+Many authors publish a recipe called "Hummus", but each author should publish it only once. A unique index on `author` and `title` together accepts the first two records below and refuses the third.
+
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
+
+[[test.results]]
+value = "[{ author: 'Yotam', id: recipe:hummus_y, title: 'Hummus' }]"
+
+[[test.results]]
+value = "[{ author: 'Nigella', id: recipe:hummus_n, title: 'Hummus' }]"
+
+[[test.results]]
+error = "Database index `recipe_author_title` already contains ['Yotam', 'Hummus'], with record `recipe:hummus_y`"
 
 */
--- Create an index on the account and email fields of the user table
-DEFINE INDEX test ON user FIELDS account, email UNIQUE;
+DEFINE INDEX recipe_author_title ON recipe FIELDS author, title UNIQUE;
+
+CREATE recipe:hummus_y SET author = 'Yotam', title = 'Hummus';
+CREATE recipe:hummus_n SET author = 'Nigella', title = 'Hummus';
+CREATE recipe:hummus_y2 SET author = 'Yotam', title = 'Hummus';
 ```
 
-A composite index also serves queries. The query planner uses it for a `WHERE` clause that filters on its leading fields: `account = 'a'` alone, `account = 'a' AND email = 'x'`, or an equality on `account` followed by a range on the next field. A filter that skips the first field, such as `email = 'x'` on its own, cannot use the index. Use [`EXPLAIN`](/docs/reference/query-language/statements/select#the-explain-clause) to confirm which index a query uses.
+```surql title="Error output"
+"Database index `recipe_author_title` already contains ['Yotam', 'Hummus'], with record `recipe:hummus_y`"
+```
+
+A composite index also serves queries. The query planner uses it for a `WHERE` clause that filters on its leading fields: `author = 'Yotam'` alone, `author = 'Yotam' AND title = 'Hummus'`, or an equality on `author` followed by a range on the next field. A filter that skips the first field, such as `title = 'Hummus'` on its own, cannot use the index. Use [`EXPLAIN`](/docs/reference/query-language/statements/select#the-explain-clause) to confirm which index a query uses.
 
 > [!NOTE]
 > Before SurrealDB 2.2.0, the query planner used a composite index only for conditions on its first field. Range conditions on a field after an equality prefix use the index from 3.0.0.
@@ -138,56 +164,40 @@ A count index uses the `COUNT` special clause instead of the usual `FIELDS` / `C
 
 An unconditional count index is optional for full-table counts; SurrealDB already uses a `CountScan` fast path that counts keys without deserialising records. `COUNT WHERE` is most useful for repeated filtered counts without scanning the whole table.
 
-```surql
-/**[test]
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-[[test.results]]
-error = false
-
-*/
-DEFINE INDEX idx ON indexed_reading COUNT;
-
-FOR $_ IN 0..100000 {
-    CREATE reading SET temperature = rand::int(0, 10);
-};
-
-FOR $_ IN 0..100000 {
-    CREATE indexed_reading SET temperature = rand::int(0, 10);
-};
-
--- Wait a moment before running these two
--- queries to ensure the index is built
-SELECT count() FROM reading GROUP ALL;
-SELECT count() FROM indexed_reading GROUP ALL;
-```
-
-Filtered example:
+The home page of the recipe site shows how many recipes the site holds, and how many of them are published. Each of the two counts has an index of its own:
 
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ count: 3 }]"
+
+[[test.results]]
+value = "[{ count: 2 }]"
 
 */
-DEFINE INDEX item_active_count ON item COUNT WHERE status = "active";
+DEFINE INDEX recipe_count ON recipe COUNT;
+DEFINE INDEX recipe_published_count ON recipe COUNT WHERE published = true;
 
-SELECT count() FROM item WHERE status = "active" GROUP ALL;
+INSERT INTO recipe [
+	{ id: recipe:shakshuka, title: 'Shakshuka', published: true },
+	{ id: recipe:risotto, title: 'Mushroom risotto', published: true },
+	{ id: recipe:dal, title: 'Tarka dal', published: false }
+] RETURN NONE;
+
+SELECT count() FROM recipe GROUP ALL;
+//- [{ count: 3 }]
+SELECT count() FROM recipe WHERE published = true GROUP ALL;
+//- [{ count: 2 }]
 ```
 
 A **standard index** (`DEFINE INDEX … FIELDS …` on the same field) can also accelerate filtered counts when it fully covers the `WHERE` clause; you typically choose one approach, not both. For choosing between standard and count indexes (including storage tradeoffs), see [When to use which](/docs/reference/query-language/statements/define/indexes#when-to-use-which). For counting several statuses (`IN` lists vs per-status totals), see [Multiple conditions](/docs/reference/query-language/statements/define/indexes#multiple-conditions).
@@ -198,26 +208,43 @@ Enables efficient searching through textual data, supporting advanced text-match
 
 The [Full-Text search](/docs/learn/data-models/full-text-search/overview) index helps implement comprehensive search functionalities in applications, such as searching through articles, product descriptions, and user-generated content.
 
-Let's create a full-text search index for a `name` field on a `user` table.
+The recipe site has a search box for recipe titles. A full-text index on `title` finds a word in any position of the title, and `search::highlight` marks it in the result:
 
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "[]"
 
 [[test.results]]
-error = false
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: recipe:risotto, title: 'Mushroom <b>risotto</b>' }]"
 
 */
--- Define an analyzer
-DEFINE ANALYZER example_ascii TOKENIZERS class FILTERS ascii;
-DEFINE INDEX userNameIndex ON TABLE user FIELDS name
-    FULLTEXT ANALYZER example_ascii BM25 HIGHLIGHTS;
+INSERT INTO recipe [
+	{ id: recipe:risotto, title: 'Mushroom risotto' },
+	{ id: recipe:dal, title: 'Tarka dal' }
+] RETURN NONE;
+
+DEFINE ANALYZER recipe_text TOKENIZERS class FILTERS lowercase, ascii;
+DEFINE INDEX recipe_title_search ON TABLE recipe FIELDS title
+    FULLTEXT ANALYZER recipe_text BM25 HIGHLIGHTS;
+
+SELECT id, search::highlight('<b>', '</b>', 1) AS title
+    FROM recipe WHERE title @1@ 'Risotto';
+```
+
+```surql title="Output"
+[{ id: recipe:risotto, title: 'Mushroom <b>risotto</b>' }]
 ```
 
 - `FULLTEXT`: enables full-text search on the specified field. Before SurrealDB 3.0.0 this clause was `SEARCH`, which 3.x rejects as a parse error.
-- `ANALYZER ascii`: Uses a custom [analyzer](/docs/reference/query-language/statements/define/analyzer) called `example_ascii` which uses the class tokenizer and `ascii` filter to analyse the text input.
+- `ANALYZER recipe_text`: uses a custom [analyzer](/docs/reference/query-language/statements/define/analyzer) called `recipe_text`, which splits the text with the `class` tokenizer and passes each word through the `lowercase` and `ascii` filters, so a search for `Risotto` matches `risotto`.
 - `BM25`: Ranking algorithm used for relevance scoring.
 - `HIGHLIGHTS`: Allows keyword highlighting in search results output when using the [`search::highlight`](/docs/reference/query-language/functions/database-functions/search#searchhighlight) function
 - `FIELDS`: a full-text search index can only be used on one field at a time. To use full-text search on more than one field, use a separate `DEFINE INDEX` statement for each one.
@@ -232,40 +259,59 @@ You may want to rebuild an index over time to ensure that the index is up-to-dat
 /**[test]
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 */
--- Setup from the example above
-DEFINE INDEX userEmailIndex ON TABLE user FIELDS email UNIQUE;
+-- Setup from the examples above
+DEFINE INDEX recipe_slug ON TABLE recipe FIELDS slug UNIQUE;
 
-REBUILD INDEX userEmailIndex ON user;
+REBUILD INDEX recipe_slug ON recipe;
 ```
 
 ## Using `CONCURRENTLY` clause
 
 Building indexes can be lengthy and may time out before they're completed. Without `CONCURRENTLY`, `DEFINE INDEX` blocks until the index is ready. The `CONCURRENTLY` clause can be used when the statement should return immediately while the build runs in the background, during which progress can be monitored with [INFO FOR INDEX](/docs/reference/query-language/statements/info#index-information).
 
+When the recipe site adds a page for each author, the table already holds every recipe, so the index on `author` is built in the background:
+
 ```surql
 /**[test]
 
 [[test.results]]
-error = false
+value = "[]"
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
 error = false
 
 */
--- Create an INDEX concurrently
-DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
-INFO FOR INDEX test ON user;
-INFO FOR INDEX test ON user;
+INSERT INTO recipe [
+	{ id: recipe:shakshuka, title: 'Shakshuka', author: 'Yotam' },
+	{ id: recipe:risotto, title: 'Mushroom risotto', author: 'Nigella' }
+] RETURN NONE;
+
+DEFINE INDEX recipe_author ON recipe FIELDS author CONCURRENTLY;
+INFO FOR INDEX recipe_author ON recipe;
 ```
+
+```surql title="Possible output"
+{
+	building: {
+		active: false,
+		armed_shards: 0,
+		compacting: false,
+		queued: false,
+		status: 'started'
+	}
+}
+```
+
+Run `INFO FOR INDEX` again until `status` is `ready`.
 
 ## The `DEFER` clause
 
@@ -274,12 +320,12 @@ INFO FOR INDEX test ON user;
 
 Index updates in SurrealDB occur synchronously during document operations. This ensures immediate consistency, in which all reads return the most recent write. However, this can become a bottleneck during high-volume parallel ingestion, leading to write-write conflicts and increased latency, particularly with Full-Text or Vector indexes.
 
-The `DEFER` clause can be used in this case if eventual consistency is acceptable, namely a setting in which reads may return stale data for a short period, but will eventually converge to the most recent write. An index with this clause will be enqueued in a persistent background queue so that ingestion and indexing are decoupled.
+The `DEFER` clause can be used in this case if eventual consistency is acceptable, namely a setting in which reads may return stale data for a short period, but will eventually converge to the most recent write. An index with this clause will be enqueued in a persistent background queue so that ingestion and indexing are decoupled. On a 2.x deployment of the recipe site that imports thousands of recipes at once, the title search index can be deferred:
 
 ```surql notest
-DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-DEFINE INDEX title_index ON blog FIELDS title
-    SEARCH ANALYZER simple BM25 HIGHLIGHTS DEFER;
+DEFINE ANALYZER recipe_text TOKENIZERS class FILTERS lowercase, ascii;
+DEFINE INDEX recipe_title_search ON recipe FIELDS title
+    SEARCH ANALYZER recipe_text BM25 HIGHLIGHTS DEFER;
 ```
 
 Note: As unique indexes offer a guarantee that no records that contravene the index will ever exist, the `UNIQUE` clause cannot be used together with `DEFER`.

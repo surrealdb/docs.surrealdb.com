@@ -675,6 +675,18 @@ indistinguishable in a search result, in `llms.txt`, and to an agent choosing
 which to fetch. Whichever page is not the authority on a mechanism summarises it
 in a sentence and links; the mechanism is written out once.
 
+**A guide is a short course, with examples of its own.** A guide under `learn/`
+is read from top to bottom, so it shows every clause it teaches on the page
+rather than sending the reader to the reference halfway through. It does so
+with its own examples: one scenario that runs through the whole guide, such as
+an audit log for a shop that gains a clause at each step. It never copies the
+reference page's examples. The reference keeps one isolated example per clause
+and stays the authority that search and agents are pointed to, and the guide
+answers "how do I build this" where the reference answers "what does this
+clause do". Two pages that show the same examples compete for the same search
+and leave an agent to pick one at random. In November 2026, 11 guides shared
+between 2 and 13 examples with their reference page.
+
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
