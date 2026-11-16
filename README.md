@@ -102,6 +102,7 @@ These write files that are committed, so run them and commit the result with the
 | --- | --- |
 | `bun run diagrams:render [name]` | Draw a figure from `scripts/diagrams/figures` as light and dark WebP files. |
 | `bun run diagrams:check` | List the figures whose page sections changed since they were drawn. Use `--accept <name>` when a figure still matches. |
+| `bun run diagrams:share` | Copy the figures listed in `scripts/diagrams/shared.json` to `public/diagrams`, where SurrealDB University lessons link to them. `diagrams:render` does this as well. |
 | `bun run screenshots:check` | List the Studio screenshots whose interface has changed, from a local clone of surrealdb/studio. |
 | `bun run screenshots:capture` | Take the scripted Studio screenshots again. |
 
