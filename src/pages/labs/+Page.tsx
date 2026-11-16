@@ -218,8 +218,7 @@ export default function Page() {
                         id="main-content"
                     >
                         <ActionIcon
-                            variant="subtle"
-                            color="gray"
+                            variant="default"
                             hiddenFrom="lg"
                             onClick={toggleFilters}
                             aria-label="Toggle filters"

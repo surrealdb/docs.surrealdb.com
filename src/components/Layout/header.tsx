@@ -655,6 +655,9 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         onClick={onToggle}
                         hiddenFrom="lg"
                         size="sm"
+                        // White on dark and the dark ink on light, in place of
+                        // Mantine's pure black in light mode.
+                        color="var(--mantine-color-bright)"
                         aria-label="Toggle navigation"
                     />
                 </Group>
