@@ -272,21 +272,23 @@ export default function Page() {
                                 onChange={(e) => setSearch(e.currentTarget.value)}
                             />
                             <Switch
+                                variant="surreal"
+                                color="var(--docs-accent)"
+                                classNames={{ track: classes.switchTrack }}
                                 label="Select labs"
                                 checked={selecting}
                                 onChange={(e) => setSelecting(e.currentTarget.checked)}
                             />
                             {selected.length > 0 && (
                                 <Button
-                                    variant="subtle"
-                                    color="gray"
+                                    variant="default"
                                     onClick={() => setSelected([])}
                                 >
                                     Clear selection ({selected.length})
                                 </Button>
                             )}
                             <Button
-                                variant="light"
+                                variant="default"
                                 onClick={() => clipboard.copy(window.location.href)}
                             >
                                 {clipboard.copied ? "Link copied" : "Copy share link"}
