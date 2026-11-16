@@ -629,7 +629,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     <ClientOnly
                         fallback={
                             <ActionIcon
-                                aria-label="Toggle color scheme"
+                                aria-label="Switch colour scheme"
                                 size={HEADER_CONTROL_SIZE}
                             >
                                 <Loader size="xs" />
