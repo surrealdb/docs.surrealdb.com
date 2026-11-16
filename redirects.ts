@@ -819,7 +819,29 @@ function withMarkdownTwins(rules: Redirect[]): Redirect[] {
  * so `/spectron/agent-memory/:path*` would otherwise swallow the hub page.
  */
 function agentMemoryRedirects(): Redirect[] {
+    // The guides on what Agent Memory does with memory live in their own
+    // section, so their folders keep their paths below it. Listed first so an
+    // old `/spectron` link also needs one hop.
+    const memoryAndKnowledge = [
+        "ingest",
+        "sessions",
+        "retrieve",
+        "reasoning",
+        "operations",
+        "tuning",
+    ];
+    const section = "/docs/agent-memory/memory-and-knowledge";
+    const sectionMoves = memoryAndKnowledge.flatMap((folder): [string, string][] =>
+        ["/agent-memory", "/spectron", "/spectron/agent-memory"].flatMap(
+            (root): [string, string][] => [
+                [`${root}/${folder}`, `${section}/${folder}`],
+                [`${root}/${folder}/:path*`, `${section}/${folder}/:path*`],
+            ],
+        ),
+    );
+
     const moves: [string, string][] = [
+        ...sectionMoves,
         // Page slug renamed with the product; must precede the prefix rules below.
         // `what-is-agent-memory` shipped only briefly as an interim slug.
         [
