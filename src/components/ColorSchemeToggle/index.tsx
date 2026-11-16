@@ -5,9 +5,10 @@ import { Icon, iconMoon, iconSun } from "@surrealdb/ui";
 export const HEADER_CONTROL_SIZE = 38;
 
 /**
- * One button that switches between dark and light. It shows the scheme in use
- * (the moon in dark, the sun in light), and a click sets the other. A reader
- * whose choice is still the system's starts from whatever that resolves to.
+ * One button that switches between dark and light. Like any button, its icon
+ * names what a click does: the sun in dark mode, the moon in light, matching
+ * its label. A reader whose choice is still the system's starts from whatever
+ * that resolves to.
  */
 export function ColorSchemeToggle() {
     const { setColorScheme } = useMantineColorScheme();
@@ -20,7 +21,7 @@ export function ColorSchemeToggle() {
             size={HEADER_CONTROL_SIZE}
             onClick={() => setColorScheme(next)}
         >
-            <Icon path={computedScheme === "dark" ? iconMoon : iconSun} />
+            <Icon path={next === "light" ? iconSun : iconMoon} />
         </ActionIcon>
     );
 }
