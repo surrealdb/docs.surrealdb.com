@@ -1032,6 +1032,28 @@ function legacyIntegrationApiRedirects(): Redirect[] {
     ]);
 }
 
+/**
+ * React Native and Expo share one guide, beside the other JavaScript framework
+ * guides. These rules come before `sdkReferenceRedirects`, whose
+ * `languages/javascript/frameworks` prefix would otherwise send an old Expo
+ * link through a second hop.
+ */
+function mobileFrameworkRedirects(): Redirect[] {
+    const guide = "/docs/reference/javascript/frameworks/react-native";
+    return [
+        "/frameworks/expo",
+        "/frameworks/react-native",
+        "/reference/javascript/frameworks/expo",
+        "/languages/javascript/frameworks/expo",
+    ]
+        .map((source): Redirect => ({ source, destination: guide, statusCode: 301 }))
+        .concat({
+            source: "/frameworks",
+            destination: "/docs/reference/javascript/frameworks",
+            statusCode: 301,
+        });
+}
+
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
@@ -1061,6 +1083,7 @@ const baseRedirects: Redirect[] = [
             statusCode: 301,
         }),
     ),
+    ...mobileFrameworkRedirects(),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
