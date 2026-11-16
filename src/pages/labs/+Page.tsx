@@ -285,6 +285,8 @@ export default function Page() {
                             {selected.length > 0 && (
                                 <Button
                                     variant="default"
+                                    // The height of the search input beside it (size md), so the row lines up.
+                                    h={42}
                                     onClick={() => setSelected([])}
                                 >
                                     Clear selection ({selected.length})
@@ -292,6 +294,8 @@ export default function Page() {
                             )}
                             <Button
                                 variant="default"
+                                // The height of the search input beside it (size md), so the row lines up.
+                                h={42}
                                 onClick={() => clipboard.copy(window.location.href)}
                             >
                                 {clipboard.copied ? "Link copied" : "Copy share link"}
