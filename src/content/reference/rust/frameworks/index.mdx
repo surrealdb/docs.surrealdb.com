@@ -1,13 +1,13 @@
 ---
 position: 1
-title: Crates
-description: "The following pages each contain a tutorial that walks through the setting up of a web server (for Actix, Axum, and Rocket) or a UI (for Egui) that uses SurrealDB as its storage backend."
+title: Frameworks
+description: "Tutorials for Actix, Axum, Rocket and Egui with the Rust SDK, and the database they share: starting SurrealDB, connecting as root, the person table, record access with argon2 passwords, and signing up record users."
 ---
 
 
 # Frameworks
 
-The following pages each contain a tutorial that walks through the setting up of a web server (for Actix, Axum, and Rocket) or a UI (for Egui) that uses SurrealDB as its storage backend.
+Each of the following pages contains a tutorial that sets up a web server (for Actix, Axum and Rocket) or a UI (for Egui) with SurrealDB as its storage backend.
 
 <Boxes>
     <IconBox
@@ -43,3 +43,305 @@ The following pages each contain a tutorial that walks through the setting up of
         }}
     />
 </Boxes>
+
+All four tutorials use the same database: a `person` table that any signed-in record user can add to, and a record access method that signs users up with a name and a password. This page describes that database once. Each tutorial links to the section it needs at the step where it needs it, and shows only the code that depends on its framework.
+
+## Starting SurrealDB
+
+Open a terminal window and use the following command to start an empty database. The database has a namespace and a database called `main` by default.
+
+```bash
+surreal db start --user root --pass secret
+```
+
+You can also use the [Start serving](/docs/explore/studio) button in SurrealDB Studio to do the same if you have it installed locally.
+
+The [`surreal db start`](/docs/reference/cli/db/commands/start) command stores data in memory by default, and the data disappears when the database shuts down. Press Ctrl+C and run the command again whenever you want to start again with no definitions or data. To keep data on disk after shutting down, add a [positional argument](/docs/reference/cli/db/commands/start#positional-argument) for the SurrealKV storage backend, such as `surrealkv://mydatabase` (or `surrealkv://mydatabase?versioned=true` to include SurrealKV versioning).
+
+With the database running, connect to the database `main` in the namespace `main`. You can [create a connection](/docs/explore/studio) in SurrealDB Studio, or use the following command to start an interactive shell.
+
+```bash
+surreal db sql --user root --pass secret --pretty
+```
+
+## Connecting from Rust
+
+Each app does the following when it starts:
+
+* Connects to the database running at `localhost:8000`.
+* Signs in as the root user that the `surreal db start` command created.
+* Uses (moves to) the namespace `main` and the database `main`.
+* Passes a few definitions to the `.query()` method.
+
+The Actix, Axum and Rocket tutorials hold the client in a global static called `DB`, which each tutorial explains against its framework's own way of sharing state. Actix and Axum run the connection code at the start of `main()`, and Rocket runs it in an `init()` function like the one below. The Egui tutorial creates the client inside its own database thread instead, and calls the same methods on it.
+
+```rust
+use std::sync::LazyLock;
+use surrealdb::Surreal;
+use surrealdb::engine::remote::ws::{Client, Ws};
+use surrealdb::opt::auth::Root;
+
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+async fn init() -> Result<(), surrealdb::Error> {
+    DB.connect::<Ws>("localhost:8000").await?;
+
+    DB.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    DB.use_ns("main").use_db("main").await?;
+
+    DB.query(
+        "
+    DEFINE TABLE IF NOT EXISTS person SCHEMALESS
+        PERMISSIONS FOR
+            CREATE, SELECT WHERE $auth,
+            FOR UPDATE, DELETE WHERE created_by = $auth;
+    DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+    DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
+
+    DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+    DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+        SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+        DURATION FOR TOKEN 15m, FOR SESSION 12h;",
+    )
+    .await?;
+    Ok(())
+}
+```
+
+## What the definitions do
+
+Each `DEFINE` statement has an `IF NOT EXISTS` clause, because the app runs the statements every time it starts and the database may already have them. Without the clause, SurrealDB returns an error for each definition that already exists, and the `OVERWRITE` clause is needed to redefine one. The `.query()` call still succeeds in that case, so the app keeps running, but its results hold one error per statement:
+
+```text
+IndexedResults { results: {0: (DbResultStats { execution_time: Some(44.75µs), query_type: Some(Other) }, Err(Thrown("The table 'person' already exists"))), 1: (DbResultStats { execution_time: Some(87.042µs), query_type: Some(Other) }, Err(Thrown("The field 'name' already exists"))), 2: (DbResultStats { execution_time: Some(21.125µs), query_type: Some(Other) }, Err(Thrown("The field 'created_by' already exists"))), 3: (DbResultStats { execution_time: Some(13.584µs), query_type: Some(Other) }, Err(Thrown("The index 'unique_name' already exists"))), 4: (DbResultStats { execution_time: Some(36.125µs), query_type: Some(Other) }, Err(Thrown("The access method 'account' already exists in the database 'main'")))}, live_queries: {} }
+```
+
+### The person table
+
+The first three statements define a `person` table. The table is schemaless, but has one required field `name`, which must be present and must be a string. Its permissions let a record user use `CREATE` and `SELECT` on the `person` table, but only `UPDATE` and `DELETE` the records that it created. The root user is not subject to permissions rules.
+
+These permissions use the `$auth` parameter, which has a value whenever a record user is the authenticated user for the database. The `WHERE $auth` clause means "where a value exists for the parameter `$auth`" (`WHERE $auth IS NOT NONE` also works). For `UPDATE` and `DELETE` queries, `$auth` must be present and the `created_by` field of the `person` record must also match the ID of the currently authenticated user.
+
+The `DEFINE FIELD` statement generates the `created_by` field automatically. It is given the value of `$auth`, and is `READONLY`, so it cannot be changed. When a system user (such as a root user) is signed in, its value is `NONE`. When a record user is signed in, its value is a record ID such as `user:qx2apv5oc8mh03wtah0q`.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE IF NOT EXISTS person SCHEMALESS
+    PERMISSIONS FOR
+        CREATE, SELECT WHERE $auth,
+        FOR UPDATE, DELETE WHERE created_by = $auth;
+DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+DEFINE FIELD IF NOT EXISTS created_by
+    ON TABLE person VALUE $auth READONLY;
+```
+
+### Record users and passwords
+
+An ID such as `user:qx2apv5oc8mh03wtah0q` comes from the next two definitions, which set how record users sign up and sign in. A typical [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access/record) statement creates a record on signup (in this case, a `user` record) and compares a password against it during signin. The access method has the name `account`, which the code uses to refer to it.
+
+A `DEFINE INDEX` statement with a `UNIQUE` clause makes sure that no two users have the same name.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE INDEX IF NOT EXISTS unique_name
+    ON TABLE user FIELDS name UNIQUE;
+DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+    SIGNUP ( CREATE user SET name = $name,
+        pass = crypto::argon2::generate($pass) )
+    SIGNIN ( SELECT * FROM user WHERE name = $name
+        AND crypto::argon2::compare(pass, $pass) )
+    DURATION FOR TOKEN 15m, FOR SESSION 12h;
+```
+
+A real user in production would usually need an email and some other fields. Functions such as [`string::is_email`](/docs/reference/query-language/functions/database-functions/string#stringis_email) can check that the value passed in is valid.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+DEFINE FIELD email ON TABLE user TYPE string ASSERT $value.is_email();
+```
+
+In these tutorials, each user has a unique name and a password and nothing else. The database stores the password hashed and salted, so the stored value is different every time it is generated and cannot be read back. The only way to check a password is to use a [compare function](/docs/reference/query-language/functions/database-functions/crypto#cryptoargon2compare) on the stored value and an attempted password. The following SurrealQL shows how the process works.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+LET $hash1 = crypto::argon2::generate("myPaSSWord");
+LET $hash2 = crypto::argon2::generate("myPaSSWord");
+
+RETURN [$hash1, $hash2];
+-- First returns true, second returns false
+RETURN [
+    crypto::argon2::compare($hash1, "myPaSSWord"),
+    crypto::argon2::compare($hash1, "Wrongpassword")
+];
+```
+
+## Signing up a record user from Rust
+
+To make it easy to try out signing in as a record user, each tutorial has a handler that creates a user with a random name and password. It uses the [`fake`](https://docs.rs/fake) crate to generate two first names, one for the name and one for the password, and passes a [`Record`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Record.html) struct to the `.signup()` method.
+
+```rust
+use fake::Fake;
+use fake::faker::name::en::FirstName;
+use surrealdb::opt::auth::Record;
+use surrealdb::types::SurrealValue;
+
+#[derive(SurrealValue)]
+struct Params {
+    name: String,
+    pass: String,
+}
+
+let name: String = FirstName().fake();
+let pass: String = FirstName().fake();
+let jwt = DB
+    .signup(Record {
+        access: "account".to_string(),
+        namespace: "main".to_string(),
+        database: "main".to_string(),
+        params: Params {
+            name: name.clone(),
+            pass: pass.clone(),
+        },
+    })
+    .await?
+    .access
+    .into_insecure_token();
+```
+
+Note the following:
+
+* The access name is `"account"`, which is the name given in the `DEFINE ACCESS` statement.
+* The `params` field takes anything that implements `SurrealValue`, in this case the `Params` struct. Its two fields are `name` and `pass` because the `SIGNUP` clause reads `$name` and `$pass`.
+* The `.signup()` method returns a `Token` with a field called `access`, which holds an `AccessToken`. The `.into_insecure_token()` method makes the token itself visible. These tutorials are not concerned with security. For an app closer to production, see the [security](/docs/learn/security) section and the [security best practices](/docs/learn/security/best-practices/security-best-practices) page.
+
+The `.signin()` method takes the same `Record` struct, which is how the Egui app signs in with a name and password that a user pastes in.
+
+The web servers also have a `/session` endpoint that shows the current session data. It passes `<string>$session` to the `.query()` method, which returns each statement's result in order with an index starting at 0, and then uses `.take(0)` to turn the first result into an `Option<String>`.
+
+## Comparing a root user and a record user
+
+The web servers sign in to the database as the root user, so their `/person` routes can perform any operation on the `person` records. To see the permissions at work, log in to the CLI or SurrealDB Studio as the root user, and separately as a record user with the token that the `/new_user` endpoint returns, using the command it prints.
+
+Creating a `person` record as the root user gives output like this:
+
+```bash
+main/main> CREATE person SET name = 'Aeon';
+-- Query 1
+[
+	{
+		id: person:hdl0unwts4atic65nh7l,
+		name: 'Aeon'
+	}
+]
+```
+
+As a record user, the record also has a `created_by` field, set from the value of the `$auth` parameter.
+
+```bash
+main/main> CREATE person SET name = 'Aeon';
+-- Query 1
+[
+	{
+		created_by: user:qx2apv5oc8mh03wtah0q,
+		id: person:8syfiq2ovztn2tbr8mhb,
+		name: 'Aeon'
+	}
+]
+```
+
+As a result, a `DELETE person RETURN BEFORE` statement (which deletes all `person` records and returns the records deleted) run by a record user only deletes the record that it created. The following `SELECT` statement shows that the record user cannot delete or modify the `person` record that the root user created.
+
+```bash
+main/main> DELETE person RETURN BEFORE;
+-- Query 1
+[
+	{
+		created_by: user:qx2apv5oc8mh03wtah0q,
+		id: person:8y06y06jmmb7e58trckz,
+		name: 'Aeon'
+	}
+]
+
+main/main> SELECT * FROM person;
+-- Query 1
+[
+	{
+		id: person:hdl0unwts4atic65nh7l,
+		name: 'Aeon'
+	}
+]
+
+main/main> UPDATE person SET name = "Yogurt";
+-- Query 1
+[]
+```
+
+The root user can also see the `user` table and its records. A record user cannot, because a record user has no permissions except those that a `PERMISSIONS` clause gives it. When the root user views a record user created through `/new_user`, the password is hashed by the `crypto::argon2::generate` function, so nobody else can use it.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+[
+	{
+		id: user:qx2apv5oc8mh03wtah0q,
+		name: 'Gerard',
+		pass:
+			'$argon2id$v=19$m=19456,t=2,p=1$j0ktTqUxRjOWYnwS5LoMFQ$2NcGkf5+IuLml6NorPy/Le6T8RppYXTXakwY5cDiZPY'
+	}
+]
+```
+
+## Further steps
+
+With a running app, the following features are useful to explore next:
+
+* The [`AUTHENTICATE`](/docs/reference/query-language/statements/define/access/record#example-failing-authentication) clause of the `DEFINE ACCESS` statement. It runs once, when a user signs in, while a permissions check runs for each query, so moving checks into it can improve performance.
+* [Changefeeds](/docs/reference/query-language/statements/define/table#example-usage) and [events](/docs/reference/query-language/statements/define/event), which add behaviour to the database itself.
