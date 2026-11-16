@@ -17,6 +17,12 @@ This page covers manual transactions, which group statements that must succeed o
 Implicit transactions commit on normal completion, including an early `RETURN`. An early return is control flow rather than a failure, so the work already done is kept:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 {
     CREATE shipment:shp_5501 SET order = order:ord_8412, carrier = 'DHL';
 	-- the caller only wants the id
@@ -29,6 +35,12 @@ Implicit transactions commit on normal completion, including an early `RETURN`. 
 Implicit transactions also roll back on errors, whether that is a [`THROW`](/docs/reference/query-language/statements/throw) or a statement that simply fails, such as a schema violation. Nothing inside survives:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = true
+
+*/
 {
     -- rolled back
     CREATE order:ord_8412 SET item = product:keyboard, quantity = 2;
@@ -72,18 +84,42 @@ So wrapping statements in braces is enough to make them atomic.
 A block does not, however, give a failure somewhere to be contained. There is one transaction per query rather than a stack of them, so a block inside a manual transaction is part of that transaction rather than a nested one. A `THROW` inside the block aborts the whole thing, including the statements that ran before it:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "An error occurred: Courier rejected the transfer"
+
+[[test.results]]
+error = "The query was not executed due to a cancelled transaction"
+
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
+*/
 -- Setup from the example below
-CREATE account:one SET balance = 135605.16;
-CREATE account:two SET balance = 91031.31;
+CREATE warehouse:london SET keyboards = 40;
+CREATE warehouse:leeds SET keyboards = 12;
 
 BEGIN;
-UPDATE account:one SET balance -= 100;    -- rolled back as well
+UPDATE warehouse:london SET keyboards -= 10;   -- rolled back as well
 {
-    CREATE ledger_entry:le_9001 SET amount = 100, account = account:one;
-    THROW "Ledger rejected the entry";
+    CREATE transfer:tr_301 SET from = warehouse:london, quantity = 10;
+    THROW "Courier rejected the transfer";
 };
-UPDATE account:two SET balance += 100;    -- never runs
-COMMIT;                                   -- fails: the transaction was already aborted
+UPDATE warehouse:leeds SET keyboards += 10;    -- never runs
+COMMIT;                                        -- fails: already aborted
 ```
 
 ## Manual transactions
@@ -98,24 +134,63 @@ CANCEL [ TRANSACTION ];
 
 [`BEGIN`](/docs/reference/query-language/statements/begin) opens the transaction. [`COMMIT`](/docs/reference/query-language/statements/commit) makes every change inside it a permanent part of the database. [`CANCEL`](/docs/reference/query-language/statements/cancel) rolls those changes back instead. If any statement inside the transaction fails, the whole transaction is rolled back and no change survives.
 
-```surql title="A transfer between two accounts"
--- Create two accounts for bank customers
-CREATE account:one SET balance = 135605.16;
-CREATE account:two SET balance = 91031.31;
+```surql title="Moving stock between two warehouses"
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: warehouse:leeds, keyboards: 27 }, { id: warehouse:london, keyboards: 25 }]"
+
+*/
+-- Stock levels for the shop's two warehouses
+CREATE warehouse:london SET keyboards = 40;
+CREATE warehouse:leeds SET keyboards = 12;
 
 -- Start a manual database transaction
 BEGIN TRANSACTION;
 
--- Update the balances of each customer involved in the wire transfer
-UPDATE account:one SET balance += 300.00;
-UPDATE account:two SET balance -= 300.00;
+-- Move 15 keyboards from London to Leeds
+UPDATE warehouse:london SET keyboards -= 15;
+UPDATE warehouse:leeds SET keyboards += 15;
 
 -- Apply both updates together. Had either statement failed, the database
 -- would remain in its initial state.
 COMMIT TRANSACTION;
+
+SELECT * FROM warehouse;
 ```
 
-Replacing `COMMIT TRANSACTION` with `CANCEL TRANSACTION` in the example above leaves both balances untouched.
+```surql title="Output"
+[
+	{
+		id: warehouse:leeds,
+		keyboards: 27
+	},
+	{
+		id: warehouse:london,
+		keyboards: 25
+	}
+]
+```
+
+Replacing `COMMIT TRANSACTION` with `CANCEL TRANSACTION` in the example above leaves both stock levels untouched.
 
 Client SDKs expose the same model through transaction handles. See the transactions guide for your language under [SDKs](/docs/languages/javascript).
 
@@ -127,10 +202,10 @@ A transaction rolls back on its own when a statement errors. [`THROW`](/docs/ref
 /**[test]
 
 [[test.results]]
-value = "[{ dollars: 100, id: account:one }]"
+value = "[{ id: warehouse:london, keyboards: 40 }]"
 
 [[test.results]]
-value = "[{ dollars: 100, id: account:two }]"
+value = "[{ id: warehouse:leeds, keyboards: 12 }]"
 
 [[test.results]]
 value = "NONE"
@@ -145,45 +220,45 @@ error = "The query was not executed due to a failed transaction"
 error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
-error = "An error occurred: Insufficient funds, would have $-50 after transfer"
+error = "An error occurred: Insufficient stock: London would have -10 keyboards"
 
 [[test.results]]
 error = "Cannot COMMIT: the transaction was aborted due to a prior error"
 
 [[test.results]]
-value = "[{ dollars: 100, id: account:one }, { dollars: 100, id: account:two }]"
+value = "[{ id: warehouse:leeds, keyboards: 12 }, { id: warehouse:london, keyboards: 40 }]"
 
 */
+CREATE warehouse:london SET keyboards = 40;
+CREATE warehouse:leeds SET keyboards = 12;
 
-CREATE account:one SET dollars =  100;
-CREATE account:two SET dollars =  100;
-
-LET $transfer_amount = 150;
+LET $quantity = 50;
 
 BEGIN TRANSACTION;
 
-UPDATE account:one SET dollars -= $transfer_amount;
-UPDATE account:two SET dollars += $transfer_amount;
-IF account:one.dollars < 0 {
-    THROW "Insufficient funds, would have $" + <string>account:one.dollars + " after transfer"
+UPDATE warehouse:london SET keyboards -= $quantity;
+UPDATE warehouse:leeds SET keyboards += $quantity;
+IF warehouse:london.keyboards < 0 {
+    THROW "Insufficient stock: London would have "
+        + <string>warehouse:london.keyboards + " keyboards";
 };
 COMMIT TRANSACTION;
-SELECT * FROM account;
+SELECT * FROM warehouse;
 ```
 
-```surql title="Output when $transfer_amount set to 150"
-'An error occurred: Insufficient funds, would have $-50 after transfer'
+```surql title="Output when $quantity set to 50"
+'An error occurred: Insufficient stock: London would have -10 keyboards'
 ```
 
-```surql title="Output when $transfer_amount set to 50"
+```surql title="Output when $quantity set to 10"
 [
 	{
-		dollars: 50,
-		id: account:one
+		id: warehouse:leeds,
+		keyboards: 22
 	},
 	{
-		dollars: 150,
-		id: account:two
+		id: warehouse:london,
+		keyboards: 30
 	}
 ]
 ```
@@ -197,6 +272,24 @@ SELECT * FROM account;
 An early `RETURN` works as a guard clause. In the following example, a vote is recorded every time, but the item's score total only changes when the vote's score changes. The block returns a value that says which happened:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 DEFINE TABLE vote;
 CREATE item:lamp SET score_total = 0;
 
@@ -230,6 +323,27 @@ On the second run the vote's `voted_at` is still updated and committed, while `i
 `CONTINUE` moves to the next item of a `FOR` loop, and `BREAK` ends the loop. In the following example, order lines with no quantity are skipped, and shipping stops at the first line the stock cannot cover:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[order:a, order:c]"
+
+*/
 CREATE product:keyboard SET stock = 5;
 LET $lines = [
     { order: order:a, quantity: 2 },
@@ -346,6 +460,21 @@ Database index `unique_key` already contains 'invoice-2041-sent', with record `n
 An existence check written into the query gives no such guarantee. Without a unique index, both of the following transactions see no matching task in their snapshots, so both create one and both commit:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 DEFINE TABLE task;
 
 BEGIN;
@@ -380,6 +509,27 @@ Where the rule depends on a query rather than on named records, such as "no othe
 The [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-update-clause) clause on `SELECT` enrols a record that the transaction only reads into the same commit-time conflict check that already covers writes. The transaction commits only if no other transaction wrote that record after the snapshot was taken. Otherwise `COMMIT` fails with a transaction conflict error and the transaction can be retried.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 -- Setup
 CREATE doctor:ana SET on_call = true;
 CREATE doctor:ben SET on_call = true;

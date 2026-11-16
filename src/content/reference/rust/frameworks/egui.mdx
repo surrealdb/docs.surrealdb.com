@@ -11,21 +11,11 @@ The following tutorial will set up a small app with Egui that uses SurrealDB as 
 
 ## Getting started
 
-First, open up a terminal window and use the following command to start an empty database. This will also define a namespace and database by the name of "main" by default.
-
-```bash
-surreal db start --user root --pass secret
-```
-
-You can also use the [Start serving](/docs/explore/studio) button on [SurrealDB Studio](/docs/explore/studio) to do the same if you have it installed locally.
-
-The database initiated by the [surreal db start](/docs/reference/cli/db/commands/start) command stores data in memory by default, which then disappears every time the database is shut down. As such, you can simply use Ctrl+C every time you want to start the database anew with no existing definitions or data. To save data to disk which will persist after shutting down, add a [positional argument](/docs/reference/cli/db/commands/start#positional-argument) for the SurrealKV storage backend such as `surrealkv://mydatabase` (or `surrealkv://mydatabase?versioned=true` to include SurrealKV versioning).
-
-With the database running, it's time to start setting up the Rust code.
+Start SurrealDB as described in [Starting SurrealDB](/docs/reference/rust/frameworks#starting-surrealdb). The tutorials for every framework use this database, so that page describes it once.
 
 ## Starting the Rust code
 
-First create a new Rust project with the command `cargo new your_project_name`, go into the newly created directory, and use `cargo add` to add each of the following dependencies:
+Create a new Rust project with the command `cargo new your_project_name`, go into the newly created directory, and use `cargo add` to add each of the following dependencies:
 
 * `anyhow`, to allow us to not worry about how to handle different error types,
 * `fake`, to create random user names that can be used to sign in to the database as a record user,
@@ -47,115 +37,9 @@ surrealdb = "4.0.0"
 tokio = { version = "1.49.0", features = ["rt"] }
 ```
 
-Before we get around to the Egui frontend, let's set up the database.
-
 SurrealDB's Rust crate uses async code, and while usually you will see an `async fn main()` with a `#[tokio::main]` attribute on top in SurrealDB examples, Egui does not use async. To isolate one from the other, we can create the tokio runtime manually and call `.block_on()` to isolate the database in its own space. Later on, we will create two [channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html) to communicate between the database and the Egui app.
 
-Inside `main()`, we will do the following:
-
-* Connect to the database running at `localhost:8000`
-* Sign in as the root user that was created through the `surreal db start` command
-* Use (move to) the namespace "main" and database "main"
-* Use the `.query()` method to pass in a few definitions for the database.
-
-```rust
-fn main() -> Result<(), Error> {
-    let rt = tokio::runtime::Runtime::new()?;
-
-    let _: Result<(), Error> = rt.block_on(async {
-
-            let db = Surreal::new::<Ws>("localhost:8000").await?;
-
-            db.signin(Root {
-                username: "root".to_string(),
-                password: "secret".to_string(),
-            })
-            .await?;
-
-            db.use_ns("main").use_db("main").await?;
-
-            db.query(
-                "    DEFINE TABLE person SCHEMALESS
-                PERMISSIONS FOR
-                    CREATE, SELECT WHERE $auth,
-                    FOR UPDATE, DELETE WHERE created_by = $auth;
-            DEFINE FIELD name ON TABLE person TYPE string;
-            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
-
-            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
-            DEFINE ACCESS account ON DATABASE TYPE RECORD
-            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
-            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
-            DURATION FOR TOKEN 15m, FOR SESSION 12h
-        ;",
-            )
-            .await?;
-        Ok(())
-        });
-    Ok(())
-}
-```
-
-## What the database definitions do
-
-The first item that stands out with the definitions above is that they all contain an `IF NOT EXISTS` clause. As the `DEFINE` statements will be executed every time the app starts, it is possible that they might be executed on a database that already has the definitions in place. SurrealDB returns an error if a definition already exists, requiring the `OVERWRITE` clause if a definition needs to be redone.
-
-Note that this would not affect our app, as this would still be a successful usage of the `.query()` method. Instead, its output would contain a number of error results that could be handled individually:
-
-```text
-IndexedResults { results: {0: (DbResultStats { execution_time: Some(44.75µs), query_type: Some(Other) }, Err(Thrown("The table 'person' already exists"))), 1: (DbResultStats { execution_time: Some(87.042µs), query_type: Some(Other) }, Err(Thrown("The field 'name' already exists"))), 2: (DbResultStats { execution_time: Some(21.125µs), query_type: Some(Other) }, Err(Thrown("The field 'created_by' already exists"))), 3: (DbResultStats { execution_time: Some(13.584µs), query_type: Some(Other) }, Err(Thrown("The index 'unique_name' already exists"))), 4: (DbResultStats { execution_time: Some(36.125µs), query_type: Some(Other) }, Err(Thrown("The access method 'account' already exists in the database 'main'")))}, live_queries: {} }
-```
-
-However, adding `IF NOT EXISTS` is a nice way to change the results from errors into successful results, and to avoid the rare case in which they end up applied to some other version 1.x database that would rewrite its definitions if `IF NOT EXISTS` is present. So while not necessary in our case, it is a good practice to follow and makes for cleaner output.
-
-Now let's go over each of the definitions to see what they do.
-
-The first three statements define a `person` table. This table is schemaless, but has one required field `name`, which must be present and must be a string. This table has defined permissions by which a record user is able to use `CREATE` and `SELECT` on the `person` table, but can only `UPDATE` and `DELETE` records that it has created. The root user, however, is not subject to permissions rules.
-
-The way these permissions are set is by using the `$auth` parameter. This parameter has a value whenever a record user is set as the authorised user for the database. The `WHERE $auth` clause simply means "where a value exists for the parameter `$auth`" (`WHERE $auth IS NOT NONE` would also work in this case). But for `UPDATE` and `DELETE` queries, it is not enough for `$auth` to just be present, the `created_by` field of a `person` record must also match the ID of the currently authenticated user.
-
-This `created_by` field is automatically generated from its definition in the `DEFINE FIELD` statement. It is given the value of `$auth`, and is `READONLY` and thus cannot be changed. When logged in as a system user (like a root user), its value will be `NONE`. But when logged in as a record user, its value will be something like `user:qx2apv5oc8mh03wtah0q`.
-
-```surql
-DEFINE TABLE IF NOT EXISTS person SCHEMALESS
-    PERMISSIONS FOR 
-        CREATE, SELECT WHERE $auth,
-        FOR UPDATE, DELETE WHERE created_by = $auth;
-DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
-DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
-```
-
-So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks to the following definitions that set the signup and signin behaviour of the record users. A typical [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access/record) statement will create some sort of record on signup (in this case, a `user` record) and will compare it against a password during signin. Note that the access has a name that we gave it (`account`), so that it can be referenced elsewhere.
-
-In addition, a `DEFINE INDEX` statement with a `UNIQUE` clause is used to ensure that no two users can have the same name.
-
-```surql
-    DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
-    DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
-	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
-	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
-	DURATION FOR TOKEN 15m, FOR SESSION 12h
-```
-
-For an actual user in production, you would probably want to require an email and some other fields. Functions like [`string::is_email`](/docs/reference/query-language/functions/database-functions/string#stringis_email) can be used to ensure that the value passed in is valid.
-
-```surql
-DEFINE FIELD email ON TABLE user TYPE string ASSERT $value.is_email();
-```
-
-However, for this simple example, each user will simply have a unique name and a password. The password will be stored in hashed and salted form on the database, making it unique and unreadable every time it is generated. The only way to check if it is correct is by using a [compare function](/docs/reference/query-language/functions/database-functions/crypto#cryptoargon2compare) of the output with an attempted password. Here is a short SurrealQL sample to show how the process works.
-
-```surql
-LET $hash1 = crypto::argon2::generate("myPaSSWord");
-LET $hash2 = crypto::argon2::generate("myPaSSWord");
-
-RETURN [$hash1, $hash2];
--- First returns true, second returns false
-RETURN [
-    crypto::argon2::compare($hash1, "myPaSSWord"),
-    crypto::argon2::compare($hash1, "Wrongpassword")
-];
-```
+The database thread connects to the database, signs in as the root user and defines the `person` table and the `account` access method. The code is the same as in the other framework tutorials, and [Connecting from Rust](/docs/reference/rust/frameworks#connecting-from-rust) shows it and explains each definition. The web servers keep the client in a static, while this app creates it with `Surreal::new::<Ws>()` inside the database thread, as the `main()` function below shows.
 
 ## The Egui code
 
@@ -236,19 +120,19 @@ fn main() -> Result<(), Error> {
             db.use_ns("main").use_db("main").await?;
 
             db.query(
-                "    DEFINE TABLE person SCHEMALESS
+                "
+            DEFINE TABLE IF NOT EXISTS person SCHEMALESS
                 PERMISSIONS FOR
                     CREATE, SELECT WHERE $auth,
                     FOR UPDATE, DELETE WHERE created_by = $auth;
-            DEFINE FIELD name ON TABLE person TYPE string;
-            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+            DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+            DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
 
-            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
-            DEFINE ACCESS account ON DATABASE TYPE RECORD
-            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
-            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
-            DURATION FOR TOKEN 15m, FOR SESSION 12h
-        ;",
+            DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+                SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+                SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+                DURATION FOR TOKEN 15m, FOR SESSION 12h;",
             )
             .await?;
 
@@ -376,7 +260,7 @@ Command::Session => Ok(self
 
 The `Command::SignUp` and `Command::SignIn` variants are a bit more interesting.
 
-A user is allowed to choose a name and a password when signing up as a record user, but to make the process as quick as possible we will use the `faker_rand` crate to generate two names: one for the username and one for the password.
+A user is allowed to choose a name and a password when signing up as a record user, but to make the process as quick as possible we will use the `fake` crate to generate two names: one for the username and one for the password.
 
 The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) method actually returns a struct that holds an access token which can be displayed using the `.into_insecure_token()` method. However, tokens are mostly useful when signing in via the [surreal db sql](/docs/reference/cli/db/commands/sql) command or through SurrealDB Studio. In our case, we can simply use the `.signin()` method along with a name and password and so we don't need to display the token.
 
@@ -784,19 +668,19 @@ fn main() -> Result<(), Error> {
             db.use_ns("main").use_db("main").await?;
 
             db.query(
-                "    DEFINE TABLE person SCHEMALESS
+                "
+            DEFINE TABLE IF NOT EXISTS person SCHEMALESS
                 PERMISSIONS FOR
                     CREATE, SELECT WHERE $auth,
                     FOR UPDATE, DELETE WHERE created_by = $auth;
-            DEFINE FIELD name ON TABLE person TYPE string;
-            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+            DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+            DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
 
-            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
-            DEFINE ACCESS account ON DATABASE TYPE RECORD
-            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
-            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
-            DURATION FOR TOKEN 15m, FOR SESSION 12h
-        ;",
+            DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+                SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+                SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+                DURATION FOR TOKEN 15m, FOR SESSION 12h;",
             )
             .await?;
 
