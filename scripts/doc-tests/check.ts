@@ -39,7 +39,9 @@ const GENERATED_KEY = /:[a-z0-9]{20}\b/;
 const OUTSIDE_DATABASE =
     /\b(?:USE\s+(?:NS|NAMESPACE|DB|DATABASE)|(?:DEFINE|REMOVE|ALTER)\s+(?:NAMESPACE|DATABASE)|ON\s+ROOT|DEFINE\s+CONFIG\s+DEFAULT|ALTER\s+SYSTEM|ASYNC)\b/i;
 /** A block's own config: a doc comment at its very start. */
-const CONFIG = /^\s*\/\*\*([\s\S]*?)\*+\/\n?/;
+// The comment ends at the first `*/`, as the runner reads it, so a stray `*`
+// before it is part of the config and fails to parse here as it does there.
+const CONFIG = /^\s*\/\*\*([\s\S]*?)\*\/\n?/;
 
 interface Fence {
     info: string;
