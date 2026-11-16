@@ -404,7 +404,9 @@ for await (const path of pages(CONTENT)) {
         const page = stated(code, below);
         if (!page || page === "parse") continue;
         const expected = configResults(own[1] ?? "");
-        if (!expected) {
+        // Bun's TOML parser accepts a stray `*` from a comment closed as `**/`,
+        // but the runner's does not, and leaves the page unloaded.
+        if (!expected || /\*\s*$/.test(own[1] ?? "")) {
             problems.push(`${where(fence.line)}: the test config is not valid TOML`);
             continue;
         }
