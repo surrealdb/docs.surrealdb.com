@@ -3061,7 +3061,7 @@ FROM room
 ORDER BY created_at DESC;
 
 -- ===== test explore/tutorials/tutorials/build-a-real-time-presence-app/step-3-signal-user-presence-1.surql
--- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:228
+-- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:230
 /**
 [env]
 clean = true
@@ -3076,7 +3076,7 @@ DEFINE EVENT signal_presence
 );
 
 -- ===== test explore/tutorials/tutorials/build-a-real-time-presence-app/step-4-display-real-time-presence-status-1.surql
--- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:241
+-- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:243
 /**
 [env]
 clean = true
@@ -3098,7 +3098,7 @@ DEFINE TABLE last_presence AS
 	GROUP BY user;
 
 -- ===== test explore/tutorials/tutorials/build-a-real-time-presence-app/step-4-display-real-time-presence-status-2.surql
--- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:319
+-- source: src/content/explore/tutorials/tutorials/build-a-real-time-presence-app.mdx:321
 /**
 [env]
 clean = true
@@ -42308,7 +42308,7 @@ DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN 
 SELECT id FROM pts WHERE point <|10,40|> [2,3,4,5];
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-1.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:1960
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:1964
 /**
 [env]
 clean = true
@@ -42336,7 +42336,7 @@ value = "13"
 13
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-2.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:1985
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:1989
 /**
 [env]
 clean = true
@@ -42364,7 +42364,7 @@ value = "24"
 24
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-3.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:2010
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:2014
 /**
 [env]
 clean = true
@@ -42387,7 +42387,7 @@ value = "'-4'"
 "-4"
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-4.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:2030
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:2034
 /**
 [env]
 clean = true
@@ -42415,7 +42415,7 @@ value = "387420489"
 387420489
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-5.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:2055
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:2059
 /**
 [env]
 clean = true
@@ -42443,7 +42443,7 @@ value = "true"
 true
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-6.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:2080
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:2084
 /**
 [env]
 clean = true
@@ -42471,7 +42471,7 @@ false OR true;
 true
 
 -- ===== test reference/query-language/language-primitives/operators/examples-of-binding-power-7.surql
--- source: src/content/reference/query-language/language-primitives/operators.mdx:2105
+-- source: src/content/reference/query-language/language-primitives/operators.mdx:2109
 /**
 [env]
 clean = true
@@ -61340,7 +61340,7 @@ SELECT *, (SELECT * FROM events
 SELECT address.{city, country} FROM person;
 
 -- ===== test reference/query-language/statements/select/fields-that-share-an-output-name-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:255
+-- source: src/content/reference/query-language/statements/select.mdx:259
 /**
 [env]
 clean = true
@@ -61355,7 +61355,7 @@ CREATE p:1 SET a = 1, b = 2;
 SELECT a AS x, b AS x FROM p:1;
 
 -- ===== test reference/query-language/statements/select/fields-that-share-an-output-name-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:266
+-- source: src/content/reference/query-language/statements/select.mdx:270
 /**
 [env]
 clean = true
@@ -61378,7 +61378,7 @@ RELATE user:tobie->write->article:surreal;
 SELECT *, <-write<-user.*, <-write.* FROM article:surreal;
 
 -- ===== test reference/query-language/statements/select/fields-that-share-an-output-name-3.surql
--- source: src/content/reference/query-language/statements/select.mdx:277
+-- source: src/content/reference/query-language/statements/select.mdx:281
 /**
 [env]
 clean = true
@@ -61402,7 +61402,7 @@ RELATE user:tobie->write->article:surreal;
 SELECT *, <-write.* AS writes, <-write<-user.* AS authors FROM article:surreal;
 
 -- ===== test reference/query-language/statements/select/fields-that-share-an-output-name-4.surql
--- source: src/content/reference/query-language/statements/select.mdx:299
+-- source: src/content/reference/query-language/statements/select.mdx:303
 /**
 [env]
 clean = true
@@ -61424,7 +61424,7 @@ CREATE town:one SET places = [place:west, place:wall];
 SELECT *, places.city FROM town:one;
 
 -- ===== test reference/query-language/statements/select/fields-that-share-an-output-name-5.surql
--- source: src/content/reference/query-language/statements/select.mdx:321
+-- source: src/content/reference/query-language/statements/select.mdx:325
 /**
 [env]
 clean = true
@@ -61453,7 +61453,7 @@ SELECT id, places.{ id, city } AS places FROM town:one;
 //- [{ id: town:one, places: [{ city: 'frankfurt', id: place:west }, { city: 'berlin', id: place:wall }] }]
 
 -- ===== test reference/query-language/statements/select/filter-queries-using-the-where-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:338
+-- source: src/content/reference/query-language/statements/select.mdx:342
 /**
 [env]
 clean = true
@@ -61524,7 +61524,7 @@ SELECT address[WHERE active = true] FROM person;
 SELECT name FROM person WHERE name;
 
 -- ===== test reference/query-language/statements/select/numeric-ranges-in-a-where-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:377
+-- source: src/content/reference/query-language/statements/select.mdx:381
 /**
 [env]
 clean = true
@@ -61544,7 +61544,7 @@ LET $_ = SELECT * FROM person WHERE age > 18 AND age < 65;
 LET $_ = SELECT * FROM person WHERE age in 18..=65;
 
 -- ===== test reference/query-language/statements/select/numeric-ranges-in-a-where-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:387
+-- source: src/content/reference/query-language/statements/select.mdx:391
 /**
 [env]
 clean = true
@@ -61562,7 +61562,7 @@ EXPLAIN SELECT * FROM person WHERE age >= 18 AND age <= 65;
 EXPLAIN SELECT * FROM person WHERE age IN 18..=65;
 
 -- ===== test reference/query-language/statements/select/using-parameters-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:399
+-- source: src/content/reference/query-language/statements/select.mdx:403
 /**
 [env]
 clean = true
@@ -61603,7 +61603,7 @@ SELECT *, (SELECT * FROM events
   WHERE host == $parent.id) AS hosted_events FROM user;
 
 -- ===== test reference/query-language/statements/select/skip-certain-fields-using-the-omit-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:424
+-- source: src/content/reference/query-language/statements/select.mdx:428
 /**
 [env]
 clean = true
@@ -61645,7 +61645,7 @@ SELECT * OMIT password, opts.security FROM person;
 SELECT * OMIT password, opts.{ security, enabled } FROM person;
 
 -- ===== test reference/query-language/statements/select/sort-records-using-the-order-by-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:469
+-- source: src/content/reference/query-language/statements/select.mdx:473
 /**
 [env]
 clean = true
@@ -61666,7 +61666,7 @@ CREATE audit_log:2 SET event = 'logout', subject = 'tobie', at = d'2026-01-01T17
 SELECT event, subject FROM audit_log ORDER BY at DESC;
 
 -- ===== test reference/query-language/statements/select/sort-records-using-the-order-by-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:478
+-- source: src/content/reference/query-language/statements/select.mdx:482
 /**
 [env]
 clean = true
@@ -61719,7 +61719,7 @@ SELECT * FROM article ORDER BY title COLLATE ASC;
 SELECT * FROM article ORDER BY title NUMERIC ASC;
 
 -- ===== test reference/query-language/statements/select/ranking-records-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:511
+-- source: src/content/reference/query-language/statements/select.mdx:517
 /**
 [env]
 clean = true
@@ -61746,7 +61746,7 @@ SELECT name, score,
 FROM player ORDER BY score DESC;
 
 -- ===== test reference/query-language/statements/select/ranking-records-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:533
+-- source: src/content/reference/query-language/statements/select.mdx:539
 /**
 [env]
 clean = true
@@ -61775,7 +61775,7 @@ SELECT name, score,
 FROM player ORDER BY score DESC;
 
 -- ===== test reference/query-language/statements/select/the-limit-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:561
+-- source: src/content/reference/query-language/statements/select.mdx:567
 /**
 [env]
 clean = true
@@ -61796,7 +61796,7 @@ CREATE person:tobie SET
 SELECT * FROM person LIMIT 50;
 
 -- ===== test reference/query-language/statements/select/the-limit-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:574
+-- source: src/content/reference/query-language/statements/select.mdx:580
 /**
 [env]
 clean = true
@@ -61814,7 +61814,7 @@ CREATE user:tobie SET name = 'tobie';
 SELECT * FROM user LIMIT 50 START 50;
 
 -- ===== test reference/query-language/statements/select/the-limit-clause-3.surql
--- source: src/content/reference/query-language/statements/select.mdx:584
+-- source: src/content/reference/query-language/statements/select.mdx:590
 /**
 [env]
 clean = true
@@ -61846,7 +61846,7 @@ SELECT * FROM ONLY person WHERE name = "Jaime";
 SELECT * FROM ONLY person WHERE name = "Jaime" LIMIT 1;
 
 -- ===== test reference/query-language/statements/select/the-limit-clause-4.surql
--- source: src/content/reference/query-language/statements/select.mdx:602
+-- source: src/content/reference/query-language/statements/select.mdx:608
 /**
 [env]
 clean = true
@@ -61861,7 +61861,7 @@ value = "[5, 6, 7, 8, 9]"
 SELECT * FROM [1,2,3,4,5,6,7,8,9,10] LIMIT 5 START 4;
 
 -- ===== test reference/query-language/statements/select/the-only-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:628
+-- source: src/content/reference/query-language/statements/select.mdx:634
 /**
 [env]
 clean = true
@@ -61878,7 +61878,7 @@ CREATE person:john SET name = 'John';
 SELECT * FROM ONLY person:john;
 
 -- ===== test reference/query-language/statements/select/the-only-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:637
+-- source: src/content/reference/query-language/statements/select.mdx:643
 /**
 [env]
 clean = true
@@ -61895,7 +61895,7 @@ SELECT * FROM ONLY table_name;
 SELECT * FROM ONLY table_name LIMIT 1;
 
 -- ===== test reference/query-language/statements/select/more-on-using-the-from-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:648
+-- source: src/content/reference/query-language/statements/select.mdx:654
 /**
 [env]
 clean = true
@@ -61977,7 +61977,7 @@ SELECT * FROM { person: person:lrym5gur8hzws72ux5fa, embedded: true };
 SELECT * FROM (SELECT age >= 18 AS adult FROM user) WHERE adult = true;
 
 -- ===== test reference/query-language/statements/select/more-on-using-the-from-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:694
+-- source: src/content/reference/query-language/statements/select.mdx:700
 /**
 [env]
 clean = true
@@ -61996,7 +61996,7 @@ CREATE item:2 SET name = 'desk';
 SELECT * FROM [item:1, item:404, 3, 'item:2', { a: 1 }];
 
 -- ===== test reference/query-language/statements/select/more-on-using-the-from-clause-3.surql
--- source: src/content/reference/query-language/statements/select.mdx:712
+-- source: src/content/reference/query-language/statements/select.mdx:718
 /**
 [env]
 clean = true
@@ -62021,7 +62021,7 @@ SELECT VALUE id FROM $ids;
 //- [item:1]
 
 -- ===== test reference/query-language/statements/select/more-on-using-the-from-clause-4.surql
--- source: src/content/reference/query-language/statements/select.mdx:728
+-- source: src/content/reference/query-language/statements/select.mdx:734
 /**
 [env]
 clean = true
@@ -62049,7 +62049,7 @@ array::union((SELECT VALUE name FROM user), (SELECT VALUE name FROM admin));
 //- ['Tobie', 'Jaime']
 
 -- ===== test reference/query-language/statements/select/more-on-using-the-from-clause-5.surql
--- source: src/content/reference/query-language/statements/select.mdx:742
+-- source: src/content/reference/query-language/statements/select.mdx:748
 /**
 [env]
 clean = true
@@ -62070,7 +62070,7 @@ CREATE product:lamp SET price = 40;
 	.flatten();
 
 -- ===== test reference/query-language/statements/select/record-ranges-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:762
+-- source: src/content/reference/query-language/statements/select.mdx:768
 /**
 [env]
 clean = true
@@ -62113,7 +62113,7 @@ SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..;
 SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..['London', '2022-08-29T08:09:31'];
 
 -- ===== test reference/query-language/statements/select/record-ranges-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:783
+-- source: src/content/reference/query-language/statements/select.mdx:789
 /**
 [env]
 clean = true
@@ -62152,7 +62152,7 @@ LET $time2 = time::now() - $now;
 RETURN [$time1, $time2];
 
 -- ===== test reference/query-language/statements/select/the-group-by-and-group-all-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:804
+-- source: src/content/reference/query-language/statements/select.mdx:810
 /**
 [env]
 clean = true
@@ -62203,7 +62203,7 @@ SELECT gender, country, city FROM person GROUP BY gender, country, city;
 SELECT array::group(tags) AS tags FROM article GROUP ALL;
 
 -- ===== test reference/query-language/statements/select/the-group-by-and-group-all-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:829
+-- source: src/content/reference/query-language/statements/select.mdx:835
 /**
 [env]
 clean = true
@@ -62242,7 +62242,7 @@ GROUP BY gender, country;
 SELECT count() AS number_of_records FROM person GROUP ALL;
 
 -- ===== test reference/query-language/statements/select/group-and-split-incompatibility-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:933
+-- source: src/content/reference/query-language/statements/select.mdx:939
 /**
 [env]
 clean = true
@@ -62285,7 +62285,7 @@ FROM (
 SPLIT emails;
 
 -- ===== test reference/query-language/statements/select/using-a-count-index-to-speed-up-count-in-group-all-queries-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:966
+-- source: src/content/reference/query-language/statements/select.mdx:972
 /**
 [env]
 clean = true
@@ -62300,7 +62300,7 @@ DEFINE INDEX person_count ON person COUNT;
 SELECT count() AS number_of_records FROM person GROUP ALL;
 
 -- ===== test reference/query-language/statements/select/mathstddev-and-mathvariance-in-table-views-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:977
+-- source: src/content/reference/query-language/statements/select.mdx:983
 /**
 [env]
 clean = true
@@ -62337,7 +62337,7 @@ INSERT INTO person [
 SELECT * FROM person_stats WHERE age >= 24;
 
 -- ===== test reference/query-language/statements/select/mathstddev-and-mathvariance-in-table-views-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:1002
+-- source: src/content/reference/query-language/statements/select.mdx:1008
 /**
 [env]
 clean = true
@@ -62368,7 +62368,7 @@ error = false
 ]
 
 -- ===== test reference/query-language/statements/select/the-split-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1029
+-- source: src/content/reference/query-language/statements/select.mdx:1035
 /**
 [env]
 clean = true
@@ -62392,7 +62392,7 @@ CREATE user SET
 SELECT * FROM user SPLIT emails;
 
 -- ===== test reference/query-language/statements/select/the-split-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:1067
+-- source: src/content/reference/query-language/statements/select.mdx:1073
 /**
 [env]
 clean = true
@@ -62419,7 +62419,7 @@ SELECT * FROM (SELECT * FROM person SPLIT loggedin)
   WHERE loggedin > '2023-05-01';
 
 -- ===== test reference/query-language/statements/select/connect-targets-using-the-fetch-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1088
+-- source: src/content/reference/query-language/statements/select.mdx:1094
 /**
 [env]
 clean = true
@@ -62453,7 +62453,7 @@ SELECT *, artist.email FROM review FETCH artist;
 SELECT * FROM article WHERE author.age < 30 FETCH author;
 
 -- ===== test reference/query-language/statements/select/selecting-inside-graph-queries-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1108
+-- source: src/content/reference/query-language/statements/select.mdx:1114
 /**
 [env]
 clean = true
@@ -62516,7 +62516,7 @@ SELECT ->(likes LIMIT 1) AS likes FROM person;
 SELECT ->(likes START 1) AS likes FROM person;
 
 -- ===== test reference/query-language/statements/select/the-with-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1146
+-- source: src/content/reference/query-language/statements/select.mdx:1152
 /**
 [env]
 clean = true
@@ -62550,7 +62550,7 @@ SELECT name FROM person WITH NOINDEX WHERE job = 'engineer'
   AND gender = 'm';
 
 -- ===== test reference/query-language/statements/select/the-explain-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1168
+-- source: src/content/reference/query-language/statements/select.mdx:1174
 /**
 [env]
 clean = true
@@ -62569,7 +62569,7 @@ CREATE person:tobie SET email = "tobie@surrealdb.com";
 SELECT * FROM person WHERE email = 'tobie@surrealdb.com' EXPLAIN;
 
 -- ===== test reference/query-language/statements/select/the-timeout-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1203
+-- source: src/content/reference/query-language/statements/select.mdx:1209
 /**
 [env]
 clean = true
@@ -62593,7 +62593,7 @@ SELECT * FROM person
   WHERE influencer = true) TIMEOUT 5s;
 
 -- ===== test reference/query-language/statements/select/the-tempfiles-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1223
+-- source: src/content/reference/query-language/statements/select.mdx:1229
 /**
 [env]
 clean = true
@@ -62614,7 +62614,7 @@ CREATE person:tobie SET
 SELECT * FROM person ORDER BY name TEMPFILES;
 
 -- ===== test reference/query-language/statements/select/the-version-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1258
+-- source: src/content/reference/query-language/statements/select.mdx:1264
 /**
 [env]
 clean = true
@@ -62641,7 +62641,7 @@ SLEEP 5s;
 SELECT * FROM user:john VERSION time::now() - 3s;
 
 -- ===== test reference/query-language/statements/select/the-version-clause-2.surql
--- source: src/content/reference/query-language/statements/select.mdx:1273
+-- source: src/content/reference/query-language/statements/select.mdx:1279
 /**
 [env]
 clean = true
@@ -62661,7 +62661,7 @@ CREATE user:john SET name = 'John';
 SELECT * FROM user VERSION fn::yesterday();
 
 -- ===== test reference/query-language/statements/select/the-for-update-clause-1.surql
--- source: src/content/reference/query-language/statements/select.mdx:1289
+-- source: src/content/reference/query-language/statements/select.mdx:1295
 /**
 [env]
 clean = true
