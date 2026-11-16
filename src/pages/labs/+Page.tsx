@@ -274,7 +274,10 @@ export default function Page() {
                             <Switch
                                 variant="surreal"
                                 color="var(--docs-accent)"
-                                classNames={{ track: classes.switchTrack }}
+                                classNames={{
+                                    track: classes.switchTrack,
+                                    thumb: classes.switchThumb,
+                                }}
                                 label="Select labs"
                                 checked={selecting}
                                 onChange={(e) => setSelecting(e.currentTarget.checked)}
