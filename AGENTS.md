@@ -1229,6 +1229,18 @@ Every figure file exports `verified`, which says what its figures were checked a
 
 Run the check before finishing any task that changed content, as the commands at the top of this file say. Also run it after a release, alongside reading the `verified` records: a change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it, and the `verified` record says which release or source to check again.
 
+### Figures in SurrealDB University
+
+A University lesson on www.surrealdb.com can show a docs figure without a copy of its code or its images. List the figure in `scripts/diagrams/shared.json` with the www files that show it, and run `bun run diagrams:share`, which `diagrams:render` also runs. That copies the pair to `public/diagrams/`, where it has a fixed address the lesson uses:
+
+```mdx
+<img src="/docs/diagrams/NAME-light.webp" darkSrc="/docs/diagrams/NAME.webp" alt="..." />
+```
+
+The images under `src/assets` get a hashed name in every build, so they cannot be linked from another site. www accepts a `/docs/diagrams/` address in `src/content/course-*` only, and its `validate-images.ts` fails the build on one anywhere else. Docs figures skip the website's design review, so they stay out of the rest of the website.
+
+A shared figure changes in the lessons as soon as the docs deploy, so a change to one is a change to those lessons too. `bun run diagrams:check` reports a public copy that differs from the rendered image, and, when a clone of www.surrealdb.com is at `~/www.surrealdb.com` or `WWW_REPO`, a listed lesson that does not show the figure and a lesson that shows one without being listed. Before changing a shared figure, read the lessons `shared.json` names for it. A new shared figure must be deployed in the docs before a www preview or deploy can show it, so merge the docs change first.
+
 ## Screenshots
 
 A screenshot goes out of date when the interface it shows changes, and that interface lives in another repository. `scripts/screenshots/manifest.json` maps each screenshot, as a path under `src/assets/img`, to the Studio source files that render the screen, and records the Studio commit the screenshot matches. `bun run screenshots:check` lists every screenshot whose source files have changed on Studio's main branch since that commit, with the commits that changed them.

@@ -11,11 +11,17 @@
 // The check cannot tell whether the figure is now wrong, only that the words
 // it was drawn to match are different. After looking, either fix and re-render
 // the figure, or accept it as still accurate.
+//
+// It also checks the figures in shared.json: that each public copy matches the
+// rendered image and, when a clone of www.surrealdb.com is at
+// ~/www.surrealdb.com or WWW_REPO, that the lessons listed for a figure show
+// it and that no other lesson does.
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadFigures } from "./figures-index";
 import { type Placement, placements, readManifest, today, writeManifest } from "./provenance";
+import { sharedIssues } from "./shared";
 
 const args = process.argv.slice(2);
 const strict = args.includes("--strict");
@@ -66,6 +72,9 @@ for (const image of readdirSync(join(import.meta.dir, "../../src/assets/img/diag
     if (image.endsWith(".webp") && !named.has(name))
         notes.push(`${name}\n  - image has no figure in scripts/diagrams/figures`);
 }
+
+// Figures shared with SurrealDB University lessons, and the lessons that show them
+notes.push(...sharedIssues(named));
 
 if (accept !== undefined) {
     writeManifest(manifest);
