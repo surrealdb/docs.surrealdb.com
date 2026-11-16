@@ -934,7 +934,18 @@ SURREAL_KVEXPORT_DESTINATION="s3:/my-bucket?region=eu-west-1&prefix=exports" \
   surreal db start --allow-experimental kvexport surrealkv:mydatabase.db
 ```
 
-Credentials come from the server's environment, such as the standard cloud provider variables, or from the address itself. A `file://` folder must be inside `SURREAL_BUCKET_FOLDER_ALLOWLIST`. A destination in memory, or in the shared `global://` bucket, is refused, as is an address its backend cannot write to, such as an S3 address with no bucket. The server logs a warning at startup when the destination is one it will refuse.
+Credentials come from the server's environment, such as the standard cloud provider variables, or from the address itself. A credential in the address replaces every credential its backend would otherwise take from the environment, so an S3 address with a key pair is never signed with `AWS_SESSION_TOKEN` as well.
+
+The server checks the destination before it opens it, and refuses:
+
+- A destination in memory, or in the shared `global://` bucket.
+- A path after the S3 bucket or the Azure container, or any path in a GCS address. A key prefix goes in `?prefix=` instead.
+- `?prefix=` on a `file://` destination, which names its folder in its path. The folder must also be inside `SURREAL_BUCKET_FOLDER_ALLOWLIST`.
+- A setting written in uppercase, such as `?Region=`, a setting given twice, or a shown setting that the backend does not read. A folder reads `lowercase_paths`, S3 reads `prefix`, `region` and `anonymous`, GCS reads `prefix` and `anonymous`, and Azure reads `prefix`, `anonymous` and `use_emulator`.
+- A bucket, container or account name that its service does not accept, which includes credentials written after a single slash, as in `s3:/KEY:SECRET@host`.
+- Credentials the backend refuses, such as half of a key pair, or a key together with `anonymous`.
+
+The server logs a warning at startup when the destination is one it will refuse, without the destination itself, and every start then answers `500 Internal Server Error`.
 
 ### Starting an export
 
@@ -985,13 +996,17 @@ A new export answers `202 Accepted` with a `Location` header and its status. The
 }
 ```
 
-The `state` is `running`, `finished`, `failed` or `cancelled`. The `destination` shows the scheme, host, path and the `region`, `prefix`, `anonymous`, `use_emulator` and `lowercase_paths` settings, and replaces any credential in the address with `[REDACTED]`. The server holds jobs in memory, so it remembers an ended export for 24 hours, and an id it does not hold, including every id after a restart, answers `404 Not Found`.
+The `state` is `running`, `finished`, `failed` or `cancelled`. The `destination` shows the scheme, host, path and the `region`, `prefix`, `anonymous`, `use_emulator` and `lowercase_paths` settings. It shows `[REDACTED]` in place of the user information before the host and in place of every other setting, its name as well as its value, because a credential can be written as either. The server holds jobs in memory, so it remembers an ended export for 24 hours, and an id it does not hold, including every id after a restart, answers `404 Not Found`.
 
-`DELETE /kvexport/exports/:id` cancels a running export. It waits up to a minute for the export to stop and remove what it has written, then answers `200 OK` with the final status, or `202 Accepted` if the export is still stopping. An export that runs longer than `SURREAL_KVEXPORT_MAX_DURATION`, 6 hours by default, ends as `failed` and is removed in the same way.
+`DELETE /kvexport/exports/:id` cancels a running export. It waits up to a minute for the export to stop and remove what it has written, then answers `200 OK` with the final status, or `202 Accepted` if the export is still stopping. An export that runs longer than `SURREAL_KVEXPORT_MAX_DURATION`, 6 hours by default, ends as `failed` and is removed in the same way, as is an export running when the server stops.
+
+A stopped export starts no new request to the destination. The chunk it is uploading is abandoned, and a multipart upload is aborted, so no partial upload is left. A request already sent whole, such as a small chunk or the manifest, runs to its answer, and the export waits for it before it removes anything. A stopped export therefore ends `cancelled`, or `failed` when its maximum duration stopped it, even when its last write completed the manifest. The export waits for a request in flight for at most half a minute. A request still in flight after that may complete after the export has ended and leave an object behind, so set a lifecycle rule on the destination that removes old objects.
 
 ### What an export writes
 
 Under the destination, an export with the id `X` writes numbered chunk objects, `X/chunks/00000000`, `X/chunks/00000001` and so on, and then `X/manifest.json`. The manifest is written last, so an export with a manifest is complete, and a folder with chunks and no manifest is not a usable export. If the destination already holds a manifest for the id, the new export ends as `failed` without writing or removing anything, so a finished export is never overwritten.
+
+While an export runs, it also holds `X/lock`, which reserves the id at the destination. The server keeps its list of exports in memory, so the lock is what stops two servers that write to one destination, such as the nodes of a cluster or an old and a new server during a replacement, from running an export under the same id. An export that finds the lock held by another ends as `failed` with the message "another export is writing this export id to the destination; start a new export under a new id", and writes and removes nothing. A finished export removes its lock once the manifest is written, so it leaves only its chunks and its manifest. An export that ends in any other way removes the lock last, once everything else it wrote is gone. If that removal does not complete, the lock stays and the id cannot be used again at that destination.
 
 Each chunk holds whole key and value records in key order, followed by a check value over them. The manifest lists every chunk with its first and last key, record count, size and check value, along with the totals, the keyspace version and an overall check value. The overall check value is the same as the digest that ends a [`POST /kvexport`](#kvexport) stream of the same snapshot, so the two can be compared.
 
