@@ -15,6 +15,9 @@ import {
     MARKDOWN_CONTENT_TYPE,
 } from "~/utils/agent-markdown";
 import {
+    type CorpusPage,
+    composeBundleMarkdown,
+    composeCorpusPages,
     composeFullCorpusMarkdown,
     composeLabsMarkdown,
     composeRawMarkdown,
@@ -22,6 +25,7 @@ import {
     suffixDocsLinks,
     withIndexPointer,
 } from "~/utils/collections";
+import { bundleBySlug } from "~/utils/llms-bundles";
 import { withRelated } from "~/utils/related";
 import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
@@ -65,35 +69,74 @@ app.use("*", async (c, next) => {
 });
 
 /**
- * The full documentation corpus as one markdown document, following the
- * llms-full.txt convention. The hand-maintained index at `/docs/llms.txt`
- * links pages individually; this endpoint serves every page in one response
- * for agents that prefer a single fetch over walking the index.
- *
- * Composed once per server instance: the content is fixed at build time, and
- * SDK versions come from the same file-backed cache the page render uses. A
- * failed compose is not memoised, so the next request retries.
+ * Every page composed for the corpus files, once per server instance: the
+ * content is fixed at build time, and SDK versions come from the same
+ * file-backed cache the page render uses. A failed compose is not memoised,
+ * so the next request retries.
  */
-let fullCorpus: Promise<string> | undefined;
+let corpusPages: Promise<CorpusPage[]> | undefined;
 
-app.get(`${BASE}/llms-full.txt`, async (c) => {
-    if (!fullCorpus) {
-        fullCorpus = fetchAllSdkVersions().then(composeFullCorpusMarkdown);
-        fullCorpus.catch(() => {
-            fullCorpus = undefined;
+function getCorpusPages(): Promise<CorpusPage[]> {
+    if (!corpusPages) {
+        corpusPages = fetchAllSdkVersions().then(composeCorpusPages);
+        corpusPages.catch(() => {
+            corpusPages = undefined;
         });
     }
 
-    const markdown = await fullCorpus;
+    return corpusPages;
+}
 
-    return c.body(markdown, 200, {
-        "Content-Type": MARKDOWN_CONTENT_TYPE,
-        "Cache-Control": MARKDOWN_CACHE_CONTROL,
-        "X-Markdown-Tokens": String(estimateTokens(markdown)),
-        // One giant concatenation of pages that are all indexed at their own
-        // URLs; keep it out of search results as a duplicate.
-        "X-Robots-Tag": "noindex",
+/** A corpus file's response. Each one repeats pages indexed at their own URLs. */
+function corpusResponse(markdown: string): Response {
+    return new Response(markdown, {
+        status: 200,
+        headers: {
+            "Content-Type": MARKDOWN_CONTENT_TYPE,
+            "Cache-Control": MARKDOWN_CACHE_CONTROL,
+            "X-Markdown-Tokens": String(estimateTokens(markdown)),
+            // Pages that are all indexed at their own URLs; keep the
+            // concatenation out of search results as a duplicate.
+            "X-Robots-Tag": "noindex",
+        },
     });
+}
+
+const corpusFiles = new Map<string, string>();
+
+/**
+ * The full documentation corpus as one markdown document, following the
+ * llms-full.txt convention. The index at `/docs/llms.txt` links pages
+ * individually and lists the bundles below; this endpoint serves every page in
+ * one response for agents that prefer a single fetch over walking the index.
+ */
+app.get(`${BASE}/llms-full.txt`, async () => {
+    const markdown = corpusFiles.get("") ?? composeFullCorpusMarkdown(await getCorpusPages());
+
+    corpusFiles.set("", markdown);
+
+    return corpusResponse(markdown);
+});
+
+/**
+ * The corpus split into bundles, one per section or SDK, at
+ * `/docs/llms-full/<slug>.txt`. The full corpus is more than any agent's
+ * context, so `llms.txt` lists these with their sizes. The slugs are in
+ * `~/utils/llms-bundles`; an unknown one is a 404.
+ */
+app.get(`${BASE}/llms-full/:file`, async (c) => {
+    const slug = c.req.param("file").replace(/\.txt$/, "");
+    const bundle = c.req.param("file").endsWith(".txt") ? bundleBySlug(slug) : undefined;
+
+    if (!bundle) {
+        return c.text("Not Found", 404);
+    }
+
+    const markdown = corpusFiles.get(slug) ?? composeBundleMarkdown(bundle, await getCorpusPages());
+
+    corpusFiles.set(slug, markdown);
+
+    return corpusResponse(markdown);
 });
 
 /**

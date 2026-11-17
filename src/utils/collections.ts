@@ -5,6 +5,7 @@ import labsBlog from "~/data/labs-blog.json";
 import type { SdkVersionMap } from "~/lib/versions";
 import { LLMS_TXT_URL } from "./agent-markdown";
 import { labStages } from "./labs";
+import { bundleFor, LLMS_BUNDLES, type LlmsBundle } from "./llms-bundles";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
 import { flattenMdxComponents } from "./mdx-to-markdown";
 import type { LabSchema } from "./schema";
@@ -224,10 +225,23 @@ export function composeLabsMarkdown(): string {
 
 const DOCS_ORIGIN = "https://surrealdb.com";
 
+/** One page of the corpus, composed for `llms-full.txt` and its bundles. */
+export interface CorpusPage {
+    /** The page's path without `/docs`, the docs root being `/`. */
+    path: string;
+    /** The page as markdown, opening with its `Source:` line. */
+    markdown: string;
+}
+
 /**
- * Build the full documentation corpus served at `/docs/llms-full.txt`: every
- * page of every collection as one markdown document, in the llms-full.txt
- * convention. Each page opens with a `Source:` line naming its canonical URL,
+ * How to read the code examples in a corpus, said once at the top of each
+ * corpus file rather than on every page.
+ */
+const CORPUS_CONVENTIONS = `Each page starts with a "Source:" line naming its canonical URL, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`;
+
+/**
+ * Every page of every collection, composed once, in the order `llms-full.txt`
+ * lists them. Each page opens with a `Source:` line naming its canonical URL,
  * so an agent can cite or re-fetch the page it is quoting.
  *
  * Pages are composed with the same `composeRawMarkdown` pipeline as the
@@ -235,11 +249,8 @@ const DOCS_ORIGIN = "https://surrealdb.com";
  * and `.md`-suffixed internal links all match what a single-page fetch returns.
  * `__category` entries are folder metadata, not pages, and are skipped.
  */
-export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
-    const sections: string[] = [
-        "# SurrealDB documentation - full corpus",
-        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
-    ];
+export function composeCorpusPages(sdkVersions?: SdkVersionMap): CorpusPage[] {
+    const pages: CorpusPage[] = [];
 
     for (const { prefix, id } of COLLECTION_ROUTES) {
         const entries = [...getCollection(id as keyof CollectionMap)]
@@ -251,11 +262,53 @@ export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
             const url = path ? `${DOCS_ORIGIN}/docs/${path}` : `${DOCS_ORIGIN}/docs`;
             const page = composeRawMarkdown(entry, sdkVersions).trimEnd();
 
-            sections.push(`---\n\nSource: ${url}\n\n${page}`);
+            pages.push({ path: `/${path}`, markdown: `Source: ${url}\n\n${page}` });
         }
     }
 
-    sections.push(`---\n\nSource: ${DOCS_ORIGIN}/docs/labs\n\n${composeLabsMarkdown().trimEnd()}`);
+    pages.push({
+        path: "/labs",
+        markdown: `Source: ${DOCS_ORIGIN}/docs/labs\n\n${composeLabsMarkdown().trimEnd()}`,
+    });
+
+    return pages;
+}
+
+function joinCorpus(header: string[], pages: CorpusPage[]): string {
+    const sections = [...header, ...pages.map((page) => `---\n\n${page.markdown}`)];
 
     return `${sections.join("\n\n")}\n`;
+}
+
+/** The address a bundle is served at. */
+export function bundleUrl(bundle: LlmsBundle): string {
+    return `${DOCS_ORIGIN}/docs/llms-full/${bundle.slug}.txt`;
+}
+
+/**
+ * The full documentation corpus served at `/docs/llms-full.txt`: every page
+ * as one markdown document, in the llms-full.txt convention.
+ */
+export function composeFullCorpusMarkdown(pages: CorpusPage[]): string {
+    return joinCorpus(
+        [
+            "# SurrealDB documentation - full corpus",
+            `> The complete SurrealDB documentation as a single markdown document. The page index is at ${LLMS_TXT_URL}, which also lists the same pages split into ${LLMS_BUNDLES.length} smaller bundles, one per section or SDK, such as ${bundleUrl(LLMS_BUNDLES[0] as LlmsBundle)}. ${CORPUS_CONVENTIONS}`,
+        ],
+        pages,
+    );
+}
+
+/**
+ * One bundle of the corpus, served at `/docs/llms-full/<slug>.txt`: the pages
+ * `bundleFor` assigns to it, in the order `llms-full.txt` lists them.
+ */
+export function composeBundleMarkdown(bundle: LlmsBundle, pages: CorpusPage[]): string {
+    return joinCorpus(
+        [
+            `# SurrealDB documentation - ${bundle.title}`,
+            `> ${bundle.description} This is one of the bundles the SurrealDB documentation is split into. The page index at ${LLMS_TXT_URL} lists every bundle, and ${DOCS_ORIGIN}/docs/llms-full.txt holds every page. ${CORPUS_CONVENTIONS}`,
+        ],
+        pages.filter((page) => bundleFor(page.path).slug === bundle.slug),
+    );
 }
