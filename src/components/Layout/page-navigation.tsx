@@ -2,7 +2,7 @@ import { Anchor, Box, Flex, Text } from "@mantine/core";
 import { Icon, iconChevronLeft, iconChevronRight } from "@surrealdb/ui";
 import { useMemo } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { findLinkIndex, flattenNavigation, type NavSection } from "~/utils/navigation";
+import { docsHref, findLinkIndex, flattenNavigation, type NavSection } from "~/utils/navigation";
 import classes from "./style.module.scss";
 
 export interface PageNavigationProps {
@@ -33,7 +33,7 @@ export function PageNavigation({ navigation }: PageNavigationProps) {
             {prev ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={`/docs${prev.path}`}
+                    href={docsHref(prev.path)}
                     underline="never"
                 >
                     <Flex
@@ -69,7 +69,7 @@ export function PageNavigation({ navigation }: PageNavigationProps) {
             {next ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={`/docs${next.path}`}
+                    href={docsHref(next.path)}
                     underline="never"
                     ta="right"
                 >

@@ -205,6 +205,14 @@ export function findLinkIndex(pages: NavLink[], pathname: string): number {
     return pages.findIndex((page) => page.path === normalized);
 }
 
+/**
+ * The address of a navigation path under the docs base. The docs root is
+ * `/docs`, not `/docs/`, which redirects to it.
+ */
+export function docsHref(path: string): string {
+    return path === "/" ? "/docs" : `/docs${path}`;
+}
+
 function normalize(href: string) {
     return href.replace(/\/$/, "");
 }

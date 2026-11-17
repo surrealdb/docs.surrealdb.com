@@ -1,6 +1,6 @@
 import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
 import { usePageContext } from "vike-react/usePageContext";
-import type { NavLink as NavLinkItem, NavSection } from "~/utils/navigation";
+import { docsHref, type NavLink as NavLinkItem, type NavSection } from "~/utils/navigation";
 import { ProductSwitcherSegmented } from "./product-switcher";
 import { getProductFromPath } from "./products";
 import classes from "./style.module.scss";
@@ -109,7 +109,7 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
             <NavLink
                 className={classes.sidebarNavLink}
                 label={link.title}
-                href={`/docs${link.path}`}
+                href={docsHref(link.path)}
                 childrenOffset={16}
                 opened={expanded}
                 aria-expanded={expanded}
@@ -131,7 +131,7 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
         <NavLink
             className={classes.sidebarNavLink}
             label={link.title}
-            href={`/docs${link.path}`}
+            href={docsHref(link.path)}
             aria-current={active ? "page" : undefined}
             active={active}
             py="xs"

@@ -25,7 +25,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
         label: "Database",
         shortLabel: "Database",
         description: "Database, query language, SDKs, and tooling.",
-        homeHref: "/docs/",
+        homeHref: "/docs",
         pathPrefix: "/",
     },
     "agent-memory": {
