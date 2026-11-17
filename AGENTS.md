@@ -898,9 +898,9 @@ its id is that directory's path relative to `src/content`. So
 has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
-section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
-`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
-`labs-items`.
+section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*`
+and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
+Labs entries are not a collection: see [Labs](#labs).
 
 Every doc collection's `+Content.ts` is the same boilerplate:
 
@@ -914,8 +914,6 @@ export const Content = defineCollection({
 });
 ```
 
-`labs-items` is the exception: `labSchema` and `type: "content"`.
-
 > [!IMPORTANT]
 > `+Content.ts` belongs at the collection root only. Discovery recurses
 > unconditionally, so a nested `+Content.ts` registers a second collection over
@@ -927,9 +925,11 @@ export const Content = defineCollection({
 - **`pageSchema`** - `title`, `description`, `position`, `icon`, `hidden`, all
   optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
   error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
-- **`labSchema`** - `title`, `date`, `stage` (journey: Explore to Operate),
-  `format` (what kind of thing it is) and `author` required; `description`,
-  `url`, `topics` and `languages` optional. The values live in `src/utils/labs.ts`.
+- **`labSchema`** - one Labs entry, checked by `bun run generate:labs` and
+  `bun run generate:labs-blog` rather than by a collection. `title`, `date`,
+  `stage` (journey: Explore to Operate), `format` (what kind of thing it is) and
+  `author` required; `description`, `url`, `topics` and `languages` optional.
+  The values live in `src/utils/labs.ts`.
 
 `type: "both"` means `__category.json` files are collection entries as well, and
 they are validated by the same `pageSchema`. A folder's `__category.json` carries
@@ -1307,7 +1307,7 @@ It returns `{ content, headings, navigation, contentPath, breadcrumbs, title, de
 renders `content` through `@surrealdb/ui`'s `MarkdownViewer` with `jsxMode="render"`
 and the components from `registerMarkdownComponents`.
 
-Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges the `labs-items` collection with `src/data/labs-blog.json`, newest first.
+Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges `src/data/labs.json` with `src/data/labs-blog.json`, newest first. See [Labs](#labs).
 
 Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 `{ content, headings }`:
@@ -1400,6 +1400,14 @@ only after doing the same.
 - Lessons and posts are cached in `generated/related-sources`. Run with
   `RELATED_REFRESH=1` when regenerating for a commit, so the file reflects what
   is published.
+
+## Labs
+
+`/docs/labs` lists projects, tutorials, videos and talks, with a search and filters by stage, format, topic and language. Its entries are maintained in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository, one YAML file per entry in `entries/`, and the same files generate that repository's README, so the README and Labs list the same things. A new entry is a pull request there, not here.
+
+This repository holds a copy in `src/data/labs.json`, which `bun run generate:labs` writes from awesome-surreal's `main` branch and which is committed, so the docs never fetch it at build or request time. Run it after an entry merges there. `AWESOME_SURREAL_REF` reads another branch or a commit, and `AWESOME_SURREAL_DIR` reads a local checkout. The script checks every entry against `labSchema`, so a stage, format, topic or language that `src/utils/labs.ts` does not list fails the import: add the value to `src/utils/labs.ts` first, because the filters are built from that file. An entry marked `labs: false` is in the README only.
+
+A card shows an author photo from `src/assets/img/labs-authors/<avatar>.jpg` (or `.png`) when the entry names an `avatar` and the file exists, and a placeholder otherwise. An entry that gives the author's `github` username and no `avatar` gets the photo from that GitHub profile: `generate:labs` downloads it once, saves it under the username in lowercase, and the photo is committed with `labs.json`, so the site never loads images from GitHub and the CSP needs no change. A photo is not downloaded again, so to replace one, delete the file and run the import again. Check new photos in the diff before committing.
 
 ### Blog posts in Labs
 

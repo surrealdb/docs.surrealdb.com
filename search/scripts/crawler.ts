@@ -39,11 +39,6 @@ export const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
 // "learn/security" or "reference/query-language".
 const COLLECTION_MARKER = "+Content.ts";
 
-// Collections excluded from search indexing. "labs-items" uses a
-// different schema (labSchema) and is rendered as a listing rather
-// than as doc pages, so it has no per-entry doc URLs to index.
-const EXCLUDED_COLLECTIONS = new Set<string>(["labs-items"]);
-
 // URL prefix overrides. A page's URL is derived as
 // `/docs/<prefix>/<slug>`, where the prefix defaults to the
 // collection id - mirroring `resolveDataFromCollection` in
@@ -92,7 +87,7 @@ export async function discoverCollections(): Promise<string[]> {
 
         if (entries.some((e) => e.isFile() && e.name === COLLECTION_MARKER)) {
             const id = relative(CONTENT_DIR, dir);
-            if (!EXCLUDED_COLLECTIONS.has(id)) collections.push(id);
+            collections.push(id);
             return;
         }
 

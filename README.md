@@ -93,6 +93,7 @@ These write files that are committed, so run them and commit the result with the
 | --- | --- |
 | `bun run generate:llms` | After a page is added, moved or renamed, or its `description` changes. Writes `public/llms.txt`. |
 | `bun run generate:related` | To refresh the related University lessons and blog posts shown at the end of a page. Writes `src/data/related.json`. |
+| `bun run generate:labs` | After an entry is merged in awesome-surreal, to list it in Labs. Writes `src/data/labs.json`. |
 | `bun run generate:labs-blog` | After blog posts are published, to list them in Labs. Writes `src/data/labs-blog.json`. |
 | `bun run generate:cli-history` | After a SurrealDB release is tagged, to update the environment variable and flag history chart. |
 
@@ -169,7 +170,9 @@ Every SurrealQL example in the documentation is a test. Each one starts with a `
 
 ## Labs
 
-[Labs](https://surrealdb.com/docs/labs) lists projects, articles and videos from SurrealDB and the community. Each entry is a file in `src/content/labs-items`. `bun run make:lab` asks for the details and writes the file, or you can copy an existing entry. Blog posts in Labs come from `src/data/labs-blog.json` instead.
+[Labs](https://surrealdb.com/docs/labs) lists projects, articles and videos from SurrealDB and the community. Its entries live in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository, one YAML file per entry, and the same files generate that repository's README. To add an entry, follow its [contribution guide](https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md).
+
+This repository keeps a copy of the entries in `src/data/labs.json`, which `bun run generate:labs` writes from awesome-surreal. Run it after an entry is merged there. Blog posts in Labs come from `src/data/labs-blog.json` instead.
 
 ### Railroad diagrams
 

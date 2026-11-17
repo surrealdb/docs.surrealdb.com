@@ -16,7 +16,7 @@ import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
 import { labAgeOpacity } from "~/utils/labs";
 import classes from "./style.module.scss";
 
-const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.jpg", {
+const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.{jpg,png}", {
     eager: true,
     import: "default",
     query: "?url",
@@ -34,8 +34,8 @@ export interface LabCardItem {
         | "surrealdb"
         | {
               name: string;
-              role: string;
-              avatar: string;
+              role?: string;
+              avatar?: string;
           };
     topics: string[];
     languages?: string[];
@@ -49,14 +49,14 @@ export interface LabCardProps {
 }
 
 function getAuthorAvatarUrl(slug: string): string | undefined {
-    const key = `../../assets/img/labs-authors/${slug}.jpg`;
-    return AUTHOR_AVATARS[key];
+    const base = `../../assets/img/labs-authors/${slug}`;
+    return AUTHOR_AVATARS[`${base}.jpg`] ?? AUTHOR_AVATARS[`${base}.png`];
 }
 
 // Memoised: the labs grid re-renders on every filter change, and most cards' props are unchanged.
 export const LabCard = memo(function LabCard({ item, onSelect, selected = false }: LabCardProps) {
     let authorName: string;
-    let authorRole: string;
+    let authorRole: string | undefined;
     let avatarSrc: string | undefined;
 
     if (item.author === "surrealdb") {
@@ -65,7 +65,8 @@ export const LabCard = memo(function LabCard({ item, onSelect, selected = false 
     } else {
         authorName = item.author.name;
         authorRole = item.author.role;
-        avatarSrc = getAuthorAvatarUrl(item.author.avatar) ?? placeholderAvatar;
+        avatarSrc =
+            (item.author.avatar && getAuthorAvatarUrl(item.author.avatar)) || placeholderAvatar;
     }
 
     const href = item.url || "#";
@@ -199,14 +200,16 @@ export const LabCard = memo(function LabCard({ item, onSelect, selected = false 
                     >
                         {authorName}
                     </Text>
-                    <Text
-                        fz="xs"
-                        lh={1.3}
-                        lineClamp={1}
-                        c="slate"
-                    >
-                        {authorRole}
-                    </Text>
+                    {authorRole && (
+                        <Text
+                            fz="xs"
+                            lh={1.3}
+                            lineClamp={1}
+                            c="slate"
+                        >
+                            {authorRole}
+                        </Text>
+                    )}
                 </Box>
                 <Spacer />
                 {isExternal && (
