@@ -1,0 +1,392 @@
+---
+position: 3
+title: Schemas and data types
+description: "Schemas and data types explained for beginners: SurrealQL value types, coercion and casts, schemaless and schemafull tables, flexible objects, DEFINE TABLE and DEFINE FIELD, and how to choose between them."
+---
+
+A schema is the set of rules a database applies to the data you give it, and a data type is the kind of value a field holds, such as a number or a piece of text. A database that knows the type of each field can refuse a value of the wrong kind before it is saved, and SurrealDB lets you choose how strict each table is.
+
+## Data types
+
+Every value in a database has a type. The type of a value matters because it decides what you can and cannot do with it. For example, you can add two numbers, but you cannot add a number to a piece of text. In SurrealQL, `type::of()` returns the type of a value.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = '''
+[
+	'int',
+	'string',
+	'bool',
+	'datetime'
+]'''
+
+*/
+[
+	type::of(30),
+	type::of('thirty'),
+	type::of(true),
+	type::of(d'2026-11-17')
+];
+```
+
+```surql title="Output"
+[
+	'int',
+	'string',
+	'bool',
+	'datetime'
+]
+```
+
+The types below are the ones most records use.
+
+| Type       | Holds                                 | Example                      |
+| ---------- | ------------------------------------- | ---------------------------- |
+| `string`   | Text                                  | `'Happy Trails'`             |
+| `int`      | A whole number                        | `30`                         |
+| `float`    | A number with a decimal part          | `49.7`                       |
+| `decimal`  | An exact decimal number, such as money | `19.99dec`                  |
+| `bool`     | True or false                         | `true`                       |
+| `datetime` | A date and time                       | `d'2026-11-17T09:30:00Z'`    |
+| `duration` | A length of time                      | `1h30m`                      |
+| `array`    | A list of values, in order            | `['tea', 'coffee']`          |
+| `object`   | Named fields inside a value           | `{ name: 'Ana', born: 1990 }` |
+| `record`   | A link to another record              | `author:ursula`              |
+| `none`     | No value at all                       | `NONE`                       |
+
+The [data types reference](/docs/reference/query-language/language-primitives/data-types) lists every type, including geometries, UUIDs and ranges.
+
+A value of one type does not turn into another type by itself. Adding `1` to the string `'30'` fails, because `'30'` is text that happens to contain digits. A **cast** converts a value on purpose, written as the type name in angle brackets.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "31"
+
+*/
+<int>'30' + 1;
+```
+
+```surql title="Output"
+31
+```
+
+## Schemaless tables
+
+By default, a SurrealDB table is **schemaless**: it accepts any fields of any type. Two records in the same table can have different fields.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+CREATE pet:rex SET name = 'Rex', legs = 4;
+CREATE pet:polly SET name = 'Polly', can_talk = true;
+```
+
+A schemaless table lets you start writing data before you know its final shape, which suits a prototype or data that varies from record to record. The database does not check the data, so a typing mistake such as `nmae` instead of `name` creates a new field without an error.
+
+The same field can also hold a different type in each record. That causes problems later, when the data arrives from several places and nothing makes it consistent. Below, three records each have an `age`, but only the first one is a number:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+[
+	{
+		age: 15,
+		id: person:ana
+	},
+	{
+		age: 'twenty',
+		id: person:ben
+	}
+]'''
+
+*/
+CREATE person:ana SET age = 15;
+CREATE person:ben SET age = 'twenty';
+CREATE person:cai SET age = true;
+
+SELECT * FROM person WHERE age > 10;
+```
+
+```surql title="Output"
+[
+	{
+		age: 15,
+		id: person:ana
+	},
+	{
+		age: 'twenty',
+		id: person:ben
+	}
+]
+```
+
+The query was meant to find people older than 10, and it returns Ben, whose age is text. SurrealDB can compare values of different types, and it compares them by type first: any string counts as greater than any number, and any `bool` as less than any number. So `'twenty' > 10` is true and `true > 10` is false, whatever the values say. A function that expects numbers, such as `math::mean()`, fails on the whole table instead, because one of the values is not a number.
+
+## Schemafull tables
+
+A **schemafull** table accepts only the fields you define, with the types you define. The beginner guide on the SurrealDB blog describes this as the first step in working with a relational database:
+
+> Plan how the puzzle pieces should look so they fit together (define a schema)
+
+From [The ultimate beginners guide to databases](/blog/the-ultimate-beginners-guide-to-databases)
+
+[`DEFINE TABLE`](/docs/reference/query-language/statements/define/table) with `SCHEMAFULL` creates the table, and [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field) defines each field and its type. The database then refuses a record that breaks a rule, and returns an error that says which rule.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
+DEFINE TABLE person SCHEMAFULL;
+DEFINE FIELD name ON person TYPE string;
+DEFINE FIELD age ON person TYPE int;
+
+CREATE person:aiko SET name = 'Aiko', age = 'thirty';
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `age` of `person:aiko`: Expected `int` but found `'thirty'`"
+```
+
+To **coerce** a value means to force it into another type. The error says that the database tried to force the text `'thirty'` into an `int`, and could not.
+
+## Which values fit a type
+
+A shape sorter is a good way to picture coercion. It is a toy box with holes of different shapes in its lid, and a block goes through a hole only when the block has the right shape. A field's type is the hole, and some values of one type already have the shape of another:
+
+- `20.0` is a `float`, but its value is the whole number 20, so it fits into an `int` field and is saved as `20`.
+- `20.5` would lose its `.5` on the way through, so an `int` field refuses it.
+- Text does not go through a number hole, even text that holds digits, such as `'20'`.
+
+To get a number from text, use a **cast**, which reads the text and makes a new value of the type you name. `<int>'20'` reads the text and returns the number `20`. `<int>'twenty'` fails, because `'twenty'` is not text that represents a number.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ age: 20, id: person:aiko, name: 'Aiko' }]"
+
+[[test.results]]
+match = "$result = \"Couldn't coerce value for field `age` of `person:ben`: Expected `int` but found `20.5f`\" OR $error = \"Couldn't coerce value for field `age` of `person:ben`: Expected `int` but found `20.5f`\""
+
+[[test.results]]
+match = "$result = \"Couldn't coerce value for field `age` of `person:cai`: Expected `int` but found `'20'`\" OR $error = \"Couldn't coerce value for field `age` of `person:cai`: Expected `int` but found `'20'`\""
+
+[[test.results]]
+value = "[{ age: 20, id: person:dev, name: 'Dev' }]"
+
+[[test.results]]
+match = "$result = \"Could not cast into `int` using input `'twenty'`\" OR $error = \"Could not cast into `int` using input `'twenty'`\""
+
+*/
+DEFINE TABLE person SCHEMAFULL;
+DEFINE FIELD name ON person TYPE string;
+DEFINE FIELD age ON person TYPE int;
+
+-- 20.0 has the shape of the whole number 20
+CREATE person:aiko SET name = 'Aiko', age = 20.0;
+//- [{ age: 20, id: person:aiko, name: 'Aiko' }]
+
+-- 20.5 would lose its .5
+CREATE person:ben SET name = 'Ben', age = 20.5;
+//- "Couldn't coerce value for field `age` of `person:ben`: Expected `int` but found `20.5f`"
+
+-- Text is not forced into a number, even when it holds digits
+CREATE person:cai SET name = 'Cai', age = '20';
+//- "Couldn't coerce value for field `age` of `person:cai`: Expected `int` but found `'20'`"
+
+-- A cast reads the text and returns a number
+CREATE person:dev SET name = 'Dev', age = <int>'20';
+//- [{ age: 20, id: person:dev, name: 'Dev' }]
+
+<int>'twenty';
+//- "Could not cast into `int` using input `'twenty'`"
+```
+
+## Required and unknown fields
+
+A schemafull table also refuses a field it does not know, and a record that leaves out a required field. In the example above, `age` is required because its type is `int`. To make a field optional, give it the type `option<int>`, which also allows `NONE`.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
+DEFINE TABLE person SCHEMAFULL;
+DEFINE FIELD name ON person TYPE string;
+DEFINE FIELD age ON person TYPE int;
+
+CREATE person:aiko SET name = 'Aiko', age = 30, nickname = 'Ai';
+```
+
+```surql title="Error output"
+"Found field 'nickname', but no such field exists for table 'person'"
+```
+
+## Defining some fields only
+
+A schemaless table can still have defined fields. The database checks the fields you define and accepts any others as they are. This lets you protect the fields that matter, such as an email address, and stay flexible for the rest.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = "Couldn't coerce value for field `email` of `user:ben`: Expected `string` but found `42`"
+
+*/
+DEFINE FIELD email ON user TYPE string;
+
+CREATE user:ana SET email = 'ana@example.com', likes = ['tea'];
+CREATE user:ben SET email = 42;
+```
+
+The first `CREATE` succeeds, with the undefined `likes` field included. The second fails, because `email` must be a string.
+
+## Schemafull tables with flexible objects
+
+A schemafull table refuses any field it does not know, and that includes the fields inside an object. Some data has a known outer shape but varies inside, such as the settings that each user of an app chooses. `FLEXIBLE` on an `object` field accepts any fields inside that object, while the rest of the table stays schemafull.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+[
+	{
+		id: user:ana,
+		name: 'Ana',
+		settings: {
+			language: 'en',
+			theme: 'dark'
+		}
+	},
+	{
+		id: user:ben,
+		name: 'Ben',
+		settings: {
+			font_size: 14
+		}
+	}
+]'''
+
+*/
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD settings ON user TYPE object FLEXIBLE;
+
+CREATE user:ana SET name = 'Ana', settings = { theme: 'dark', language: 'en' };
+CREATE user:ben SET name = 'Ben', settings = { font_size: 14 };
+SELECT * FROM user;
+```
+
+```surql title="Output"
+[
+	{
+		id: user:ana,
+		name: 'Ana',
+		settings: {
+			language: 'en',
+			theme: 'dark'
+		}
+	},
+	{
+		id: user:ben,
+		name: 'Ben',
+		settings: {
+			font_size: 14
+		}
+	}
+]
+```
+
+Without `FLEXIBLE`, the first `CREATE` fails with `Found field 'settings.theme', but no such field exists for table 'user'`, and each field inside `settings` needs a `DEFINE FIELD` of its own.
+
+## Choosing a schema mode
+
+| Mode                          | Use when                                                         |
+| ----------------------------- | ---------------------------------------------------------------- |
+| Schemaless                    | The shape of the data is not known yet, or varies by record      |
+| Schemaless with some fields defined | A few fields must be correct, and the rest can vary         |
+| Schemafull                    | Every field is known, and wrong data must never be saved         |
+| Schemafull with flexible objects | Every field is known, but some objects hold data whose shape varies |
+
+Many projects start schemaless and add definitions as the data settles. A field definition applies to records written after it, so defining a field does not check the records the table already holds.
+
+## Next steps
+
+- The [schema management](/docs/learn/schema-management) section explains defining tables and fields in detail, including default values, assertions and computed fields.
+- [Schema modes](/docs/learn/data-models/document/schema-modes) shows schemaless documents with nested objects and arrays.

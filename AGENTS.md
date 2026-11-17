@@ -1064,6 +1064,7 @@ every component in that file.
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
 | `<DemoEmbed pages={[…]} />`      | A page from `public/` in a frame, such as a showcase demo.    |
+| `<Details summary="…">`         | A block, such as a long example, closed under a summary line. |
 
 `<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
 it around an output pair while parsing, and no page writes it by hand.

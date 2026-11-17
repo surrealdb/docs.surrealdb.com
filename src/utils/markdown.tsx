@@ -13,6 +13,7 @@ import { Boxes } from "~/components/Boxes";
 import { CodeSetup } from "~/components/CodeSetup";
 import { CodeWithOutput } from "~/components/CodeWithOutput";
 import { DemoEmbed } from "~/components/DemoEmbed";
+import { Details } from "~/components/Details";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
@@ -346,6 +347,8 @@ export function registerMarkdownComponents(): MarkdownComponents {
         // A showcase demo: its own finished page, framed on the card surface
         // with tabs between its pages. A raw <iframe> would be stripped.
         DemoEmbed: { component: DemoEmbed, block: true },
+        // A block that stays closed under a summary line, such as a long example
+        Details: { component: Details, block: true },
         ShowcaseCard: { component: ShowcaseCard, block: true },
         Synopsis: { component: Synopsis, block: true },
         // Overrides the kit's Tabs so that groups sharing a syncKey switch

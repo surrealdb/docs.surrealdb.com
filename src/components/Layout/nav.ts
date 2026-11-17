@@ -104,6 +104,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         href: "/docs/learn/security",
                         description: "Configure authentication, scopes, and access.",
                     },
+                    {
+                        label: "Database basics",
+                        href: "/docs/learn/database-basics",
+                        description: "What databases do, for readers new to them.",
+                    },
                 ],
             },
             {

@@ -321,6 +321,13 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
 
     // Structural wrappers.
     out = flattenTabs(out);
+    // A closed block's summary becomes a bold label above its content, which the
+    // raw markdown always shows.
+    out = out.replace(tag("Details"), (_match, raw: string) => {
+        const summary = parseAttrs(raw).summary;
+        return summary ? `\n\n**${summary}**\n\n` : "";
+    });
+    out = out.replace(/<\/Details>/g, "");
     out = out.replace(wrapper("Boxes"), "");
 
     // Components that emit links or code, applied last so the markdown they
