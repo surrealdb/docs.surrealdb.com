@@ -156,3 +156,57 @@ export function buildBreadcrumbJsonLd(trail: BreadcrumbItem[]): Record<string, u
         })),
     };
 }
+
+/** The organisation the website's own JSON-LD declares, referenced by its `@id`. */
+const PUBLISHER = {
+    "@type": "Organization",
+    "@id": "https://surrealdb.com/#organization",
+    name: SITE_NAME,
+    url: "https://surrealdb.com",
+};
+
+/** The documentation as a site of its own within surrealdb.com. */
+const DOCS_WEBSITE = {
+    "@type": "WebSite",
+    "@id": `${BASE_URL}#website`,
+    name: DOCS_TITLE_SUFFIX,
+    url: BASE_URL,
+    inLanguage: DOCS_LANGUAGE,
+    publisher: { "@id": PUBLISHER["@id"] },
+};
+
+export interface TechArticleInput {
+    /** The page title, as its heading shows it. */
+    headline: string;
+    description?: string;
+    /** The page's canonical URL. */
+    url: string;
+    /** When the page last changed, as an ISO 8601 date. Left out when unknown. */
+    dateModified?: string;
+}
+
+/**
+ * Builds the `TechArticle` JSON-LD that describes a documentation page: what
+ * it is called, when it last changed, who publishes it and which site it is
+ * part of. The publisher points at the organisation the website declares,
+ * by its `@id`, rather than describing it a second time.
+ */
+export function buildTechArticleJsonLd({
+    headline,
+    description,
+    url,
+    dateModified,
+}: TechArticleInput): Record<string, unknown> {
+    return {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        headline,
+        ...(description ? { description } : {}),
+        url,
+        mainEntityOfPage: { "@type": "WebPage", "@id": url },
+        ...(dateModified ? { dateModified } : {}),
+        inLanguage: DOCS_LANGUAGE,
+        publisher: PUBLISHER,
+        isPartOf: DOCS_WEBSITE,
+    };
+}

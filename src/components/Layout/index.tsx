@@ -16,7 +16,6 @@ import classes from "./style.module.scss";
 export interface DefaultLayoutProps {
     data: PageData;
     children: React.ReactNode;
-    lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
 }
@@ -145,7 +144,10 @@ export function DefaultLayout({
                             </Box>
                             <RelatedContent items={data.related ?? []} />
                             <Divider my="3xl" />
-                            <PageContentActions contentPath={data.contentPath} />
+                            <PageContentActions
+                                contentPath={data.contentPath}
+                                lastModified={data.lastModified}
+                            />
                             <PageNavigation navigation={data.navigation} />
                         </Box>
                         {showToc && <PageAside headings={data.headings} />}

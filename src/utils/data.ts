@@ -2,6 +2,7 @@ import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
+import { lastModifiedFor } from "./last-modified";
 import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, metaDescription } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
@@ -18,6 +19,8 @@ export interface PageData {
     breadcrumbItems: BreadcrumbItem[];
     title: string;
     description: string;
+    /** When the page's source last changed, as an ISO 8601 date, if known. */
+    lastModified?: string;
     /** University lessons and blog posts on the same subject, if any. */
     related: RelatedItem[];
 }
@@ -128,6 +131,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         breadcrumbItems,
         title: entry.metadata.title ?? "",
         description: description ?? "",
+        lastModified: lastModifiedFor(context.urlPathname),
         related: getRelated(
             [DOCS_BASE, ...prefixSegments, ...path.split("/")].filter(Boolean).join("/"),
         ),

@@ -885,7 +885,8 @@ Content lives in `src/content`. Frontmatter schemas live in
 ### Plugin configuration (`vite.config.ts`)
 
 - `contentDir`: `"src/content"`
-- `lastModified`: `true`
+- `lastModified`: `false` - page dates come from `generated/last-modified.json`
+  instead (see [Page dates](#page-dates))
 - `drafts.field`: `"draft"`, `includeDrafts`: `false`
 - `ssr.external`: includes `"vike-content-collection"`
 
@@ -1343,6 +1344,23 @@ request is served by the SSR function and the `+onBeforePrerenderStart.ts` files
 are inert. Sitemap URLs come from `+sitemapUrls.ts` instead
 (`collectionSitemapUrls` in `src/utils/sitemap.ts`, which filters `__category`
 entries) - add one for every new page group.
+
+### Page dates
+
+Each page's date is the committer date of the newest commit that added or
+changed its source file. `scripts/generate-last-modified.mjs` reads them from
+git during `prebuild` into `generated/last-modified.json`, because a server has
+no git history to ask at request time. They appear as the sitemap's
+`<lastmod>`, the "Last updated" line beside "Edit page", `dateModified` in the
+page's `TechArticle` JSON-LD and `article:modified_time`. A page without a known date
+leaves it out of all of these rather than showing a wrong one.
+
+Vercel clones with `--depth=10` and CI checks out one commit. In a shallow
+history the oldest commit appears to add every file, so the script first
+fetches the rest of the history, commits and trees only, which takes about a
+second. If that fails, a file whose newest commit is the shallow boundary gets
+no date, and every other file keeps its real one. `bun run dev` does not run
+`prebuild`, so run `bun run generate:last-modified` to see dates locally.
 
 ## Markdown for agents
 

@@ -115,6 +115,7 @@ These write files that are committed, so run them and commit the result with the
 | `bun run search:index` | Index the content into the search database. Needs the search database credentials. |
 | `bun run build:cloudflare` | Build the Cloudflare Worker. Vercel serves production, and the Worker serves previews. |
 | `bun run test:routes` | Check the route table compiled from `vercel.ts` and `redirects.ts`. |
+| `bun run generate:last-modified` | Write `generated/last-modified.json`, the date each page last changed, from the git history. `prebuild` runs it, so run it by hand only to see the dates in `bun run dev`. |
 
 `bun run build` ends with `postbuild`, which indexes the content for search. It skips itself on Vercel previews and in CI. On your own machine, without the search database credentials, it reports an error after the build has finished, and the build output is still complete.
 
