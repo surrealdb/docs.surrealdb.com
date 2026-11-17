@@ -118,9 +118,15 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     const sections: Positioned<NavSection>[] = [];
 
     if (root.entry) {
+        // The sidebar's heading already names the part, so a landing page with
+        // the same name is listed as its overview rather than a second time.
+        const title = root.entry.metadata.title ?? "";
+        const sameAsHeading =
+            title.trim().toLowerCase() === rootCategory?.metadata.title?.trim().toLowerCase();
+
         rootLinks.push({
             value: {
-                title: root.entry.metadata.title ?? "",
+                title: sameAsHeading ? "Overview" : title,
                 path: join(base),
             },
             position: root.entry.metadata.position ?? 0,

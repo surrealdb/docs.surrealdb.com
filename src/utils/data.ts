@@ -7,6 +7,7 @@ import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
 import { getProductFromPath } from "./product";
 import { getRelated, type RelatedItem } from "./related";
+import { sectionHubNavigation, withoutSectionHubs } from "./section-hubs";
 
 export interface PageData {
     content: string;
@@ -211,7 +212,15 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         description,
     });
 
-    const navigation = buildNavigation(id, prefix);
+    // The hubs that sit in a product's root collection show the parts of their
+    // section, and the Get started sidebar leaves out the hubs the top bar
+    // already lists. A hub that is a collection's own landing page keeps that
+    // collection's sidebar.
+    const isRootCollection = id === "index" || id === "agent-memory/index";
+    const navigation = isRootCollection
+        ? (sectionHubNavigation(context.urlPathname) ??
+          withoutSectionHubs(buildNavigation(id, prefix)))
+        : buildNavigation(id, prefix);
     const { content, headings } = resolveMarkdown(entry.content);
     const contentPath = entry.filePath.replace(/.*\/content\//, "");
 

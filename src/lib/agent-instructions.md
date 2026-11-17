@@ -272,9 +272,9 @@ Every stdio call runs with owner-level access, because there is no network hands
 ## Where to read more
 
 - [Agent setup](/docs/agents) - this document as a page, with per-agent steps
-- [SurrealDB MCP Server](/docs/build/ai-agents/mcp) - the hosted server in full
-- [Embedded MCP](/docs/build/ai-agents/mcp/embedded) - the server inside SurrealDB
-- [Agent Skills](/docs/build/ai-agents/agent-skills) - what each skill covers
-- [AI agents](/docs/build/ai-agents) - frameworks, memory, and what the database gives an agent
+- [SurrealDB MCP Server](/docs/integrate/ai-agents/mcp) - the hosted server in full
+- [Embedded MCP](/docs/integrate/ai-agents/mcp/embedded) - the server inside SurrealDB
+- [Agent Skills](/docs/integrate/ai-agents/agent-skills) - what each skill covers
+- [AI agents](/docs/integrate/ai-agents) - frameworks, memory, and what the database gives an agent
 - [SurrealDB Agent Memory](/docs/agent-memory) - memory that persists across sessions
 - [SurrealDB documentation](https://surrealdb.com/docs/llms.txt) - the full documentation index, as markdown
