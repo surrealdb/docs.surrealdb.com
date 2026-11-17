@@ -13,10 +13,10 @@ bun run qc              # check code quality
 bun run diagrams:check  # list diagrams whose page sections have changed
 bun run screenshots:check # list screenshots whose UI has changed in Studio
 bun run check:links     # check every internal link and anchor in src/content
-bun run generate:doc-tests # write every SurrealQL example to tests/doc-examples.surql
+bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run generate:doc-tests` and commit `tests/doc-examples.surql` with the change: CI regenerates it and fails when the committed copy differs. See [Tested examples](#tested-examples).
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
 
 The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
 
@@ -675,6 +675,18 @@ indistinguishable in a search result, in `llms.txt`, and to an agent choosing
 which to fetch. Whichever page is not the authority on a mechanism summarises it
 in a sentence and links; the mechanism is written out once.
 
+**A guide is a short course, with examples of its own.** A guide under `learn/`
+is read from top to bottom, so it shows every clause it teaches on the page
+rather than sending the reader to the reference halfway through. It does so
+with its own examples: one scenario that runs through the whole guide, such as
+an audit log for a shop that gains a clause at each step. It never copies the
+reference page's examples. The reference keeps one isolated example per clause
+and stays the authority that search and agents are pointed to, and the guide
+answers "how do I build this" where the reference answers "what does this
+clause do". Two pages that show the same examples compete for the same search
+and leave an agent to pick one at random. In November 2026, 11 guides shared
+between 2 and 13 examples with their reference page.
+
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
@@ -886,9 +898,9 @@ its id is that directory's path relative to `src/content`. So
 has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
-section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
-`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
-`labs-items`.
+section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*`
+and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
+Labs entries are not a collection: see [Labs](#labs).
 
 Every doc collection's `+Content.ts` is the same boilerplate:
 
@@ -902,8 +914,6 @@ export const Content = defineCollection({
 });
 ```
 
-`labs-items` is the exception: `labSchema` and `type: "content"`.
-
 > [!IMPORTANT]
 > `+Content.ts` belongs at the collection root only. Discovery recurses
 > unconditionally, so a nested `+Content.ts` registers a second collection over
@@ -915,9 +925,11 @@ export const Content = defineCollection({
 - **`pageSchema`** - `title`, `description`, `position`, `icon`, `hidden`, all
   optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
   error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
-- **`labSchema`** - `title`, `date`, `stage` (journey: Explore to Operate),
-  `format` (what kind of thing it is) and `author` required; `description`,
-  `url`, `topics` and `languages` optional. The values live in `src/utils/labs.ts`.
+- **`labSchema`** - one Labs entry, checked by `bun run generate:labs` and
+  `bun run generate:labs-blog` rather than by a collection. `title`, `date`,
+  `stage` (journey: Explore to Operate), `format` (what kind of thing it is) and
+  `author` required; `description`, `url`, `topics` and `languages` optional.
+  The values live in `src/utils/labs.ts`.
 
 `type: "both"` means `__category.json` files are collection entries as well, and
 they are validated by the same `pageSchema`. A folder's `__category.json` carries
@@ -1157,16 +1169,29 @@ SDK parameter types. Backtick spans inside `description` render as inline code.
 
 ## Tested examples
 
-Every runnable SurrealQL example is a test. `bun run generate:doc-tests` reads `src/content` and writes them all to one file, `tests/doc-examples.surql`, which the language-test runner in the SurrealDB repository splits and runs against the engine. The file is committed so that it shows what is tested, and its git history shows when an example changed.
+Every runnable SurrealQL example is a test. Each one starts with a `/**[test] ... */` config comment, and the language-test runner in the SurrealDB repository, built with its `docs` feature, reads the pages and runs every `surql` block that has one. The site strips the comment, so a reader never sees it, and the raw `.md` endpoints strip it too.
 
-Each test starts with a marker line naming the file it splits into, then a `-- source:` line with the page and line it came from, then an ordinary test file: a `/** ... */` config and the example's statements. The runner sees only that format. The docs' own conventions are resolved by the generator:
+A block is a test when its language is `surql`, it is not marked `notest`, and its title does not mark it as output. A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
 
-- A fence is a test when its language is `surql`, it is not marked `notest`, and its title does not mark it as output. A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
-- A block that starts with its own `/** [test] */` config keeps that config.
-- Otherwise each statement is expected to return a value rather than an error. An adjacent `Output` or `Expected output` fence gives the value of the last statement, `Error output` says that it fails (or fails to parse, when the output starts with `Parse error`), and a `//-` line gives the value of the statement above it. A qualified title such as `Example output` or `Possible output` is not compared.
-- Every test runs on a datastore of its own, as `[env] clean = true` makes it, and a test whose code calls `eval::` is allowed to.
+The config states the result of every statement, as `[[test.results]]` entries in the order the statements run. The page states results in the ways described under **Showing output**: an adjacent `Output` or `Expected output` fence gives the value of the last statement, `Error output` says that it fails (or fails to parse, when the output starts with `Parse error`), and a `//-` line gives the value of the statement above it. A qualified title such as `Example output` or `Possible output` is not compared. A statement the page says nothing about is expected to succeed, as `error = false`.
 
-A test is named after its page, the heading it sits under and its position under that heading, such as `reference/query-language/statements/select/basic-usage-2.surql`, so editing one example changes one entry in the file.
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: person:tobie, name: 'Tobie' }]"
+
+*/
+CREATE person:tobie SET name = 'Tobie';
+SELECT * FROM person;
+```
+
+The result is written twice, once for the reader and once for the runner, and `bun run check:doc-tests` keeps the two in step. It fails when a test block has no config, and when a config expects a different value from the one its page shows. It compares values without regard to layout, so a value laid out over several lines in an `Output` fence matches the same value on one line in the config, and a generated record key matches any other. A config can also check a result in a way the page cannot show, such as `match = "$result.len() = 3"` for a result whose order varies, and the script leaves those alone.
+
+For a new example, write the example and its `Output` fence or `//-` lines, then run `bun run check:doc-tests --fix`, which writes a config from them. When an example changes, change its result in both places. When the script reports a disagreement on an example you did not touch, run the example: either the page or the config is out of date, and only running it tells you which. A block whose code calls `eval::` needs `[env.capabilities]` with `allow-eval-query = true`, which `--fix` adds.
 
 ### `<DemoEmbed>`
 
@@ -1229,6 +1254,18 @@ Every figure file exports `verified`, which says what its figures were checked a
 
 Run the check before finishing any task that changed content, as the commands at the top of this file say. Also run it after a release, alongside reading the `verified` records: a change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it, and the `verified` record says which release or source to check again.
 
+### Figures in SurrealDB University
+
+A University lesson on www.surrealdb.com can show a docs figure without a copy of its code or its images. List the figure in `scripts/diagrams/shared.json` with the www files that show it, and run `bun run diagrams:share`, which `diagrams:render` also runs. That copies the pair to `public/diagrams/`, where it has a fixed address the lesson uses:
+
+```mdx
+<img src="/docs/diagrams/NAME-light.webp" darkSrc="/docs/diagrams/NAME.webp" alt="..." />
+```
+
+The images under `src/assets` get a hashed name in every build, so they cannot be linked from another site. www accepts a `/docs/diagrams/` address in `src/content/course-*` only, and its `validate-images.ts` fails the build on one anywhere else. Docs figures skip the website's design review, so they stay out of the rest of the website.
+
+A shared figure changes in the lessons as soon as the docs deploy, so a change to one is a change to those lessons too. `bun run diagrams:check` reports a public copy that differs from the rendered image, and, when a clone of www.surrealdb.com is at `~/www.surrealdb.com` or `WWW_REPO`, a listed lesson that does not show the figure and a lesson that shows one without being listed. Before changing a shared figure, read the lessons `shared.json` names for it. A new shared figure must be deployed in the docs before a www preview or deploy can show it, so merge the docs change first.
+
 ## Screenshots
 
 A screenshot goes out of date when the interface it shows changes, and that interface lives in another repository. `scripts/screenshots/manifest.json` maps each screenshot, as a path under `src/assets/img`, to the Studio source files that render the screen, and records the Studio commit the screenshot matches. `bun run screenshots:check` lists every screenshot whose source files have changed on Studio's main branch since that commit, with the commits that changed them.
@@ -1270,7 +1307,7 @@ It returns `{ content, headings, navigation, contentPath, breadcrumbs, title, de
 renders `content` through `@surrealdb/ui`'s `MarkdownViewer` with `jsxMode="render"`
 and the components from `registerMarkdownComponents`.
 
-Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges the `labs-items` collection with `src/data/labs-blog.json`, newest first.
+Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges `src/data/labs.json` with `src/data/labs-blog.json`, newest first. See [Labs](#labs).
 
 Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 `{ content, headings }`:
@@ -1363,6 +1400,14 @@ only after doing the same.
 - Lessons and posts are cached in `generated/related-sources`. Run with
   `RELATED_REFRESH=1` when regenerating for a commit, so the file reflects what
   is published.
+
+## Labs
+
+`/docs/labs` lists projects, tutorials, videos and talks, with a search and filters by stage, format, topic and language. Its entries are maintained in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository, one YAML file per entry in `entries/`, and the same files generate that repository's README, so the README and Labs list the same things. A new entry is a pull request there, not here.
+
+This repository holds a copy in `src/data/labs.json`, which `bun run generate:labs` writes from awesome-surreal's `main` branch and which is committed, so the docs never fetch it at build or request time. Run it after an entry merges there. `AWESOME_SURREAL_REF` reads another branch or a commit, and `AWESOME_SURREAL_DIR` reads a local checkout. The script checks every entry against `labSchema`, so a stage, format, topic or language that `src/utils/labs.ts` does not list fails the import: add the value to `src/utils/labs.ts` first, because the filters are built from that file. An entry marked `labs: false` is in the README only.
+
+A card shows an author photo from `src/assets/img/labs-authors/<avatar>.jpg` (or `.png`) when the entry names an `avatar` and the file exists, and a placeholder otherwise. An entry that gives the author's `github` username and no `avatar` gets the photo from that GitHub profile: `generate:labs` downloads it once, saves it under the username in lowercase, and the photo is committed with `labs.json`, so the site never loads images from GitHub and the CSP needs no change. A photo is not downloaded again, so to replace one, delete the file and run the import again. Check new photos in the diff before committing.
 
 ### Blog posts in Labs
 

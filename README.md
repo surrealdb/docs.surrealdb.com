@@ -81,6 +81,7 @@ The style guide, the conventions for SurrealQL examples, and how the site is put
 | `bun run qc` | Check formatting and lint without changing anything. |
 | `bun run qts` | Type-check with TypeScript. |
 | `bun run check:links` | Check every internal link, anchor and short URL in `src/content`. |
+| `bun run check:doc-tests` | Check that every SurrealQL example carries a test config that agrees with the result its page shows. `--fix` adds a config to each example without one. |
 | `bun run build` | Build the site. |
 | `bun run preview` | Build the site and serve the build. |
 
@@ -90,9 +91,9 @@ These write files that are committed, so run them and commit the result with the
 
 | Command | When to run it |
 | --- | --- |
-| `bun run generate:doc-tests` | After any change to a SurrealQL example. Writes `tests/doc-examples.surql`. |
 | `bun run generate:llms` | After a page is added, moved or renamed, or its `description` changes. Writes `public/llms.txt`. |
 | `bun run generate:related` | To refresh the related University lessons and blog posts shown at the end of a page. Writes `src/data/related.json`. |
+| `bun run generate:labs` | After an entry is merged in awesome-surreal, to list it in Labs. Writes `src/data/labs.json`. |
 | `bun run generate:labs-blog` | After blog posts are published, to list them in Labs. Writes `src/data/labs-blog.json`. |
 | `bun run generate:cli-history` | After a SurrealDB release is tagged, to update the environment variable and flag history chart. |
 
@@ -102,6 +103,7 @@ These write files that are committed, so run them and commit the result with the
 | --- | --- |
 | `bun run diagrams:render [name]` | Draw a figure from `scripts/diagrams/figures` as light and dark WebP files. |
 | `bun run diagrams:check` | List the figures whose page sections changed since they were drawn. Use `--accept <name>` when a figure still matches. |
+| `bun run diagrams:share` | Copy the figures listed in `scripts/diagrams/shared.json` to `public/diagrams`, where SurrealDB University lessons link to them. `diagrams:render` does this as well. |
 | `bun run screenshots:check` | List the Studio screenshots whose interface has changed, from a local clone of surrealdb/studio. |
 | `bun run screenshots:capture` | Take the scripted Studio screenshots again. |
 
@@ -124,11 +126,11 @@ Run these, and fix what they report:
 bun run qa
 bun run qc
 bun run check:links
-bun run generate:doc-tests
+bun run check:doc-tests
 bun run diagrams:check
 ```
 
-Commit `tests/doc-examples.surql` if it changed. For every figure that `diagrams:check` lists, either update the figure or accept it, as [Keeping figures accurate](AGENTS.md#keeping-figures-accurate) describes.
+When `check:doc-tests` reports an example with no config, run `bun run check:doc-tests --fix` to add one. For every figure that `diagrams:check` lists, either update the figure or accept it, as [Keeping figures accurate](AGENTS.md#keeping-figures-accurate) describes.
 
 ## What CI checks
 
@@ -140,7 +142,7 @@ The CI workflow runs on every push, including pushes to a pull request's branch.
 | Build docs | `bun run build` | A page does not build: for example a frontmatter key that `src/utils/schema.ts` does not allow, an `icon` that does not exist, or a component used wrongly. | Run `bun run build` and read the first error. |
 | Route table | `bun run test:routes` | A rule in `redirects.ts` or `vercel.ts` compiles to a route that the Worker would serve differently from Vercel. | Run `bun run test:routes`. |
 | Internal links | `bun run check:links` | A link points at a page that does not exist, an anchor names no heading on its page, or a short URL is broken or missing. | Fix the link. A renamed heading changes its anchor, so update every link to it. |
-| Internal links | `bun run generate:doc-tests --check` | `tests/doc-examples.surql` does not match the examples in `src/content`. | Run `bun run generate:doc-tests` and commit the file. |
+| Internal links | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
 
 A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
 
@@ -157,10 +159,10 @@ Adding a collection, the redirect rules, the components and the writing conventi
 
 ## Tested examples
 
-Every SurrealQL example in the documentation is a test. `bun run generate:doc-tests` writes them to `tests/doc-examples.surql`, and the language-test runner in the SurrealDB repository runs them against the engine.
+Every SurrealQL example in the documentation is a test. Each one starts with a `/**[test] ... */` config, which the site does not show, and the language-test runner in the SurrealDB repository reads the pages and runs every example that has one against the engine.
 
 - An example has to run as written on an empty database. Put any setup it needs at the top of the block, under a `-- Setup` line, followed by a blank line.
-- A result goes in a fence titled `Output` directly below the example, or on a `//-` line below the statement that returns it.
+- A result goes in a fence titled `Output` directly below the example, or on a `//-` line below the statement that returns it. The config states the same result, and `bun run check:doc-tests --fix` writes it from the page for a new example.
 - Mark a block `notest` (```` ```surql notest ````) only when it cannot run on its own, such as a template whose values an application supplies.
 - A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
 
@@ -168,7 +170,9 @@ Every SurrealQL example in the documentation is a test. `bun run generate:doc-te
 
 ## Labs
 
-[Labs](https://surrealdb.com/docs/labs) lists projects, articles and videos from SurrealDB and the community. Each entry is a file in `src/content/labs-items`. `bun run make:lab` asks for the details and writes the file, or you can copy an existing entry. Blog posts in Labs come from `src/data/labs-blog.json` instead.
+[Labs](https://surrealdb.com/docs/labs) lists projects, articles and videos from SurrealDB and the community. Its entries live in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository, one YAML file per entry, and the same files generate that repository's README. To add an entry, follow its [contribution guide](https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md).
+
+This repository keeps a copy of the entries in `src/data/labs.json`, which `bun run generate:labs` writes from awesome-surreal. Run it after an entry is merged there. Blog posts in Labs come from `src/data/labs-blog.json` instead.
 
 ### Railroad diagrams
 
