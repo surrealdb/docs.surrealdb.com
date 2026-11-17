@@ -30,6 +30,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "explore/studio", id: "explore/studio" },
     { prefix: "explore/tutorials", id: "explore/tutorials" },
     { prefix: "learn/data-models", id: "learn/data-models" },
+    { prefix: "learn/database-basics", id: "learn/database-basics" },
     { prefix: "learn/extensions", id: "learn/extensions" },
     { prefix: "learn/querying", id: "learn/querying" },
     { prefix: "learn/schema-management", id: "learn/schema-management" },

@@ -856,6 +856,15 @@ function agentMemoryRedirects(): Redirect[] {
             "/agent-memory/welcome/what-is-agent-memory",
             "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
         ],
+        // Folded into From context to memory, which covers the same ground
+        [
+            "/agent-memory/welcome/why-agentic-memory",
+            "/docs/agent-memory/welcome/from-context-to-memory",
+        ],
+        [
+            "/spectron/welcome/why-agentic-memory",
+            "/docs/agent-memory/welcome/from-context-to-memory",
+        ],
         // Removed in October 2026: these described the management API and the
         // internal schema, which customers on SurrealDB Cloud do not use. Listed
         // before the `/spectron` prefix rules so the old paths need one hop.
