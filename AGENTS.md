@@ -1353,7 +1353,8 @@ changed its source file. `scripts/generate-last-modified.mjs` reads them from
 git during `prebuild` into `generated/last-modified.json`, because a server has
 no git history to ask at request time. They appear as the sitemap's
 `<lastmod>`, the "Last updated" line beside "Edit page", `dateModified` in the
-page's `TechArticle` JSON-LD and `article:modified_time`. A page without a known date
+page's `TechArticle` JSON-LD, `article:modified_time`, and `last_modified` in
+the frontmatter of the page's markdown rendering. A page without a known date
 leaves it out of all of these rather than showing a wrong one.
 
 Vercel clones with `--depth=10` and CI checks out one commit. In a shallow
@@ -1376,7 +1377,16 @@ a time:
 | The index itself                                          | `public/llms.txt`                                       |
 
 The first three exist because the fourth is useless to an agent that never
-learns it is there. Content negotiation, `.md` URLs, `x-markdown-tokens` and
+learns it is there.
+
+A page's markdown rendering opens with YAML frontmatter, before the index
+pointer: `title`, `description`, `canonical_url`, the `sdk` an SDK reference
+page documents (with `sdk_version` when its registry reports a release for that
+tree) or the `section` any other page sits in, `surrealdb_version` (the major
+version the docs describe) and `last_modified`. It is added in
+`composePageMarkdown` in `src/pages/+server.ts` with `withFrontmatter`, so the
+`.md` URLs, content negotiation and the agent guides all carry it, and the
+corpus files, which repeat every page, do not. Content negotiation, `.md` URLs, `x-markdown-tokens` and
 `llms-full.txt` were all shipped and none of them was announced, so a trace of
 Claude Code looking for our authentication docs read rendering-heavy HTML for
 602k tokens and 25 steps (September 2026).

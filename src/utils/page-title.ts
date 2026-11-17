@@ -282,3 +282,19 @@ export function documentTitle(id: string, prefix: string, path: string): string 
 
     return detailed;
 }
+
+/**
+ * The SDK an SDK reference page documents, or the section or product any
+ * other page sits in, as its document title names it.
+ */
+export function documentQualifier(
+    id: string,
+    prefix: string,
+    path: string,
+): { sdk?: string; section?: string } {
+    const parts = titleParts(id, prefix, path);
+
+    if (!parts?.qualifier) return {};
+
+    return parts.required ? { sdk: parts.qualifier } : { section: parts.qualifier };
+}

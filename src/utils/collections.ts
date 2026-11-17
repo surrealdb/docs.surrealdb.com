@@ -65,15 +65,27 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
 
 type CollectionEntry = NonNullable<ReturnType<typeof getCollectionEntry>>;
 
+/** A content entry, with the collection and URL prefix that serve it. */
+export interface CollectionMatch {
+    entry: CollectionEntry;
+    /** The collection id, such as `reference/javascript`. */
+    id: string;
+    /** The URL prefix the collection is served under, without `/docs`. */
+    prefix: string;
+    /** The entry's slug inside its collection. */
+    slug: string;
+}
+
 /**
- * Resolve a URL pathname to its content collection entry, using the same
- * prefix-to-collection mapping the page routes use.
+ * Resolve a URL pathname to its content collection entry and the collection
+ * that serves it, using the same prefix-to-collection mapping the page routes
+ * use.
  *
  * @param pathname - Docs pathname without the `/docs` base (leading/trailing
  *   slashes are tolerated), e.g. `reference/query-language/statements/select`.
- * @returns The matching entry, or `undefined` if none resolves.
+ * @returns The match, or `undefined` if none resolves.
  */
-export function resolveCollectionEntry(pathname: string): CollectionEntry | undefined {
+export function resolveCollectionMatch(pathname: string): CollectionMatch | undefined {
     const path = pathname.replace(/^\/+/, "").replace(/\/+$/, "");
 
     for (const { prefix, id } of COLLECTION_ROUTES) {
@@ -85,11 +97,16 @@ export function resolveCollectionEntry(pathname: string): CollectionEntry | unde
         const entry = getCollectionEntry(id, slug);
 
         if (entry) {
-            return entry;
+            return { entry, id, prefix, slug };
         }
     }
 
     return undefined;
+}
+
+/** Resolve a URL pathname to its content collection entry; see `resolveCollectionMatch`. */
+export function resolveCollectionEntry(pathname: string): CollectionEntry | undefined {
+    return resolveCollectionMatch(pathname)?.entry;
 }
 
 /**
@@ -167,6 +184,42 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
  */
 export function withIndexPointer(markdown: string): string {
     return `> Full SurrealDB documentation index: ${LLMS_TXT_URL}\n\n${markdown}`;
+}
+
+/** The fields a page's markdown rendering opens with, in YAML frontmatter. */
+export interface MarkdownFrontmatter {
+    title: string;
+    description?: string;
+    canonical_url: string;
+    /** The SDK an SDK reference page documents, such as "JavaScript SDK". */
+    sdk?: string;
+    /** The released SDK version that page describes, when it is known. */
+    sdk_version?: string;
+    /** The section or product any other page sits in. */
+    section?: string;
+    /** The SurrealDB major version the documentation describes, such as "4.x". */
+    surrealdb_version: string;
+    /** When the page's source last changed, as an ISO 8601 date. */
+    last_modified?: string;
+}
+
+/**
+ * Prepend YAML frontmatter to a page's markdown rendering, so an agent that
+ * fetched one page knows what it is, where it lives, which SDK or section and
+ * version it describes, and how recent it is, without parsing the prose.
+ *
+ * Applied at the response, like `withIndexPointer`, and outside it, because
+ * frontmatter has to be the first thing in the document. Every value is
+ * written as a JSON string, which is also a valid YAML scalar, so a colon or
+ * a quote in a title cannot break the block. Fields without a value are left
+ * out.
+ */
+export function withFrontmatter(fields: MarkdownFrontmatter, markdown: string): string {
+    const lines = Object.entries(fields)
+        .filter(([, value]) => value)
+        .map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+
+    return `---\n${lines.join("\n")}\n---\n\n${markdown}`;
 }
 
 /**
