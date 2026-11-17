@@ -284,79 +284,109 @@ const eventTiming: Figure = {
     },
 };
 
-// The MAXDEPTH example on define/event: each event creates 9 records of the other table
-const maxDepth: Figure = {
-    name: "event-maxdepth",
-    width: 2200,
-    height: 900,
-    draw(t: Theme) {
-        const s: string[] = [];
-        const levels = [1, 9, 81, 729, 6561];
-        const L = 420;
-        const R = 1880;
-        const X = (n: number) => L + (Math.log10(n) / Math.log10(10000)) * (R - L);
-        s.push(
-            text(80, 70, "Records created at each depth of the cat and person events", {
-                size: 30,
-                fill: t.text,
-                weight: 700,
-                anchor: "start",
-            }),
-        );
-        levels.forEach((n, depth) => {
-            const y = 160 + depth * 120;
-            const inDefault = depth <= 3;
+// Records created at each depth of a MAXDEPTH 4 example in which each event
+// creates 9 records. `start` labels the first record and `at` the records at
+// each later depth.
+function maxDepthFigure(
+    name: string,
+    title: string,
+    start: string,
+    at: (depth: number) => string,
+    verified?: Verified,
+): Figure {
+    const figure: Figure = {
+        name,
+        width: 2200,
+        height: 900,
+        ...(verified ? { verified } : {}),
+        draw(t: Theme) {
+            const s: string[] = [];
+            const levels = [1, 9, 81, 729, 6561];
+            const L = 420;
+            const R = 1880;
+            const X = (n: number) => L + (Math.log10(n) / Math.log10(10000)) * (R - L);
             s.push(
-                text(L - 40, y + 10, depth === 0 ? "CREATE start" : `depth ${depth}`, {
-                    size: 26,
+                text(80, 70, title, {
+                    size: 30,
+                    fill: t.text,
+                    weight: 700,
+                    anchor: "start",
+                }),
+            );
+            levels.forEach((n, depth) => {
+                const y = 160 + depth * 120;
+                const inDefault = depth <= 3;
+                s.push(
+                    text(L - 40, y + 10, depth === 0 ? start : `depth ${depth}`, {
+                        size: 26,
+                        fill: t.text,
+                        weight: 600,
+                        anchor: "end",
+                    }),
+                );
+                s.push(
+                    rect(L, y - 32, Math.max(X(n) - L, 14), 64, {
+                        fill: inDefault ? t.accentBg : t.redBg,
+                        stroke: inDefault ? t.accent : t.red,
+                        r: 10,
+                    }),
+                );
+                s.push(
+                    text(
+                        Math.max(X(n), L + 14) + 20,
+                        y + 10,
+                        `${n.toLocaleString("en-GB")} ${at(depth)}`,
+                        { size: 26, fill: t.text, weight: 600, anchor: "start" },
+                    ),
+                );
+            });
+            s.push(line(L, 160 + 3.5 * 120, R, 160 + 3.5 * 120, t.text, 3, "10 8"));
+            s.push(
+                text(R, 160 + 3.5 * 120 - 14, "default MAXDEPTH 3 stops here", {
+                    size: 24,
                     fill: t.text,
                     weight: 600,
                     anchor: "end",
                 }),
             );
             s.push(
-                rect(L, y - 32, Math.max(X(n) - L, 14), 64, {
-                    fill: inDefault ? t.accentBg : t.redBg,
-                    stroke: inDefault ? t.accent : t.red,
-                    r: 10,
-                }),
-            );
-            s.push(
                 text(
-                    Math.max(X(n), L + 14) + 20,
-                    y + 10,
-                    `${n.toLocaleString("en-GB")} ${depth === 0 ? "cat" : depth % 2 ? "people" : "cats"}`,
-                    { size: 26, fill: t.text, weight: 600, anchor: "start" },
+                    80,
+                    790,
+                    "Total with the default: 1 + 9 + 81 + 729 = 820 records. With MAXDEPTH 4: 820 + 6,561 = 7,381.",
+                    { size: 28, fill: t.text, anchor: "start" },
                 ),
             );
-        });
-        s.push(line(L, 160 + 3.5 * 120, R, 160 + 3.5 * 120, t.text, 3, "10 8"));
-        s.push(
-            text(R, 160 + 3.5 * 120 - 14, "default MAXDEPTH 3 stops here", {
-                size: 24,
-                fill: t.text,
-                weight: 600,
-                anchor: "end",
-            }),
-        );
-        s.push(
-            text(
-                80,
-                790,
-                "Total with the default: 1 + 9 + 81 + 729 = 820 records. With MAXDEPTH 4: 820 + 6,561 = 7,381.",
-                { size: 28, fill: t.text, anchor: "start" },
-            ),
-        );
-        s.push(
-            text(80, 836, "Bar lengths are on a logarithmic scale.", {
-                size: 24,
-                fill: t.muted,
-                anchor: "start",
-            }),
-        );
-        return svg(maxDepth, t, s.join(""));
-    },
-};
+            s.push(
+                text(80, 836, "Bar lengths are on a logarithmic scale.", {
+                    size: 24,
+                    fill: t.muted,
+                    anchor: "start",
+                }),
+            );
+            return svg(figure, t, s.join(""));
+        },
+    };
+    return figure;
+}
+
+// The MAXDEPTH example on define/event: each event creates 9 records of the other table
+const maxDepth = maxDepthFigure(
+    "event-maxdepth",
+    "Records created at each depth of the cat and person events",
+    "CREATE start",
+    (depth) => (depth === 0 ? "cat" : depth % 2 ? "people" : "cats"),
+);
+
+// The MAXDEPTH example on learn/schema-management/events-and-triggers/defining-events:
+// each referral event creates 9 more referrals
+const maxDepthReferral = maxDepthFigure(
+    "event-maxdepth-referral",
+    "Referral records created at each depth of the spread event",
+    "CREATE referral",
+    (depth) => (depth === 0 ? "referral" : "referrals"),
+    { against: "SurrealDB 4.0.1 and main (4.1), running the page's example", on: "2026-11-16" },
+);
 
 // What updates a pre-computed table view, from the avg_product_review example
 const tableView: Figure = {
@@ -694,6 +724,7 @@ export default [
     timeRounding,
     eventTiming,
     maxDepth,
+    maxDepthReferral,
     tableView,
     liveRelation,
     changefeed,

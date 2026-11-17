@@ -25,7 +25,7 @@ interface FilterSectionProps {
 function FilterSection({ title, value, onChange, options }: FilterSectionProps) {
     return (
         <Box component="section">
-            <SidebarSectionHeading>{title}</SidebarSectionHeading>
+            <SidebarSectionHeading eyebrow>{title}</SidebarSectionHeading>
             <Checkbox.Group
                 value={value}
                 onChange={onChange}

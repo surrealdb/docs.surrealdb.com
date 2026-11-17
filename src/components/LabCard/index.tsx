@@ -5,27 +5,15 @@ import {
     Box,
     CheckboxIndicator,
     Group,
-    Image,
     Paper,
     Text,
     Title,
     UnstyledButton,
 } from "@mantine/core";
-import {
-    Icon,
-    iconOpen,
-    iconSurreal,
-    pictoCurlyBracesSolid,
-    pictoFileSolid,
-    pictoInboxSolid,
-    pictoPlaySolid,
-    pictoPresentationSolid,
-    pictoSurrealDBSolid,
-    Spacer,
-} from "@surrealdb/ui";
+import { Icon, iconArrowUpRight, iconSurreal, Spacer } from "@surrealdb/ui";
 import { memo } from "react";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
-import { labAgeOpacity, type labFormats } from "~/utils/labs";
+import { labAgeOpacity } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.{jpg,png}", {
@@ -60,15 +48,6 @@ export interface LabCardProps {
     selected?: boolean;
 }
 
-const FORMAT_IMAGES: Record<(typeof labFormats)[number], string> = {
-    "Source code": pictoCurlyBracesSolid,
-    Video: pictoPlaySolid,
-    Article: pictoInboxSolid,
-    Documentation: pictoFileSolid,
-    "Interactive demo": pictoSurrealDBSolid,
-    Presentation: pictoPresentationSolid,
-};
-
 function getAuthorAvatarUrl(slug: string): string | undefined {
     const base = `../../assets/img/labs-authors/${slug}`;
     return AUTHOR_AVATARS[`${base}.jpg`] ?? AUTHOR_AVATARS[`${base}.png`];
@@ -76,8 +55,6 @@ function getAuthorAvatarUrl(slug: string): string | undefined {
 
 // Memoised: the labs grid re-renders on every filter change, and most cards' props are unchanged.
 export const LabCard = memo(function LabCard({ item, onSelect, selected = false }: LabCardProps) {
-    const formatImage = FORMAT_IMAGES[item.format as keyof typeof FORMAT_IMAGES];
-
     let authorName: string;
     let authorRole: string | undefined;
     let avatarSrc: string | undefined;
@@ -109,28 +86,34 @@ export const LabCard = memo(function LabCard({ item, onSelect, selected = false 
                 wrap="nowrap"
                 align="flex-start"
             >
-                {onSelect && (
-                    <CheckboxIndicator
-                        checked={selected}
-                        color="var(--docs-accent)"
-                    />
-                )}
-                {formatImage && (
-                    <Image
-                        src={formatImage}
-                        alt=""
-                        w={18}
-                    />
-                )}
-                {/* Same kicker treatment as the nav dropdowns' section
+                {/* The tick box and the format label share one
+                    centre line, whatever their heights; the topics beside
+                    them can wrap, so the outer row stays top-aligned. */}
+                <Group
+                    gap="sm"
+                    wrap="nowrap"
+                    align="center"
+                    miw={0}
+                    mih={22}
+                >
+                    {onSelect && (
+                        <CheckboxIndicator
+                            variant="surreal"
+                            className={classes.tick}
+                            checked={selected}
+                            color="var(--docs-accent)"
+                        />
+                    )}
+                    {/* Same kicker treatment as the nav dropdowns' section
                         labels, so the format reads as an eyebrow rather
                         than competing with the title. */}
-                <Text
-                    className={classes.category}
-                    lineClamp={1}
-                >
-                    {item.format}
-                </Text>
+                    <Text
+                        className={classes.category}
+                        lineClamp={1}
+                    >
+                        {item.format}
+                    </Text>
+                </Group>
                 <Spacer />
                 {item.topics.length > 0 && (
                     // Topics wrap onto further lines rather than
@@ -142,15 +125,14 @@ export const LabCard = memo(function LabCard({ item, onSelect, selected = false 
                         {item.topics.map((topic) => (
                             <Badge
                                 key={topic}
-                                variant="transparent"
-                                // The product accent, not Mantine violet: brand
-                                // pink on the Database docs in both themes.
-                                color="var(--docs-accent-text)"
-                                size="sm"
-                                // Transparent badges carry no fill, so the
-                                // built-in inset only breaks alignment with
-                                // the card's right padding edge.
-                                px={0}
+                                variant="filled"
+                                // A solid tag in the product accent, not Mantine
+                                // violet: Lilac on the Database docs, with white
+                                // text as on every accent fill.
+                                color="var(--docs-accent)"
+                                c="var(--docs-accent-contrast)"
+                                size="md"
+                                radius={0}
                             >
                                 {topic}
                             </Badge>
@@ -232,7 +214,7 @@ export const LabCard = memo(function LabCard({ item, onSelect, selected = false 
                 <Spacer />
                 {isExternal && (
                     <Icon
-                        path={iconOpen}
+                        path={iconArrowUpRight}
                         size="sm"
                         className={classes.open}
                         aria-hidden

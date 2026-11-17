@@ -218,8 +218,7 @@ export default function Page() {
                         id="main-content"
                     >
                         <ActionIcon
-                            variant="subtle"
-                            color="gray"
+                            variant="default"
                             hiddenFrom="lg"
                             onClick={toggleFilters}
                             aria-label="Toggle filters"
@@ -272,21 +271,30 @@ export default function Page() {
                                 onChange={(e) => setSearch(e.currentTarget.value)}
                             />
                             <Switch
+                                variant="surreal"
+                                color="var(--docs-accent)"
+                                classNames={{
+                                    track: classes.switchTrack,
+                                    thumb: classes.switchThumb,
+                                }}
                                 label="Select labs"
                                 checked={selecting}
                                 onChange={(e) => setSelecting(e.currentTarget.checked)}
                             />
                             {selected.length > 0 && (
                                 <Button
-                                    variant="subtle"
-                                    color="gray"
+                                    variant="default"
+                                    // The height of the search input beside it (size md), so the row lines up.
+                                    h={42}
                                     onClick={() => setSelected([])}
                                 >
                                     Clear selection ({selected.length})
                                 </Button>
                             )}
                             <Button
-                                variant="light"
+                                variant="default"
+                                // The height of the search input beside it (size md), so the row lines up.
+                                h={42}
                                 onClick={() => clipboard.copy(window.location.href)}
                             >
                                 {clipboard.copied ? "Link copied" : "Copy share link"}

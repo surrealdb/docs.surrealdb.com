@@ -239,7 +239,11 @@ const analyzer: Figure = {
 const rrf: Figure = {
     name: "rrf-fusion",
     width: 2200,
-    height: 820,
+    height: 800,
+    verified: {
+        against: "SurrealDB 4.0.1 and main (4.1), running the page's example",
+        on: "2026-11-16",
+    },
     draw(t: Theme) {
         const s: string[] = [markers([t.line])];
         const col = (x: number, title: string, sub: string, rows: [string, string][]) => {
@@ -275,27 +279,17 @@ const rrf: Figure = {
                 );
             });
         };
-        col(80, "Vector search", "embedding <|2,100|> $qvec", [
-            ["test:1", "1 / (60 + 1) = 0.0164"],
-            ["test:3", "1 / (60 + 2) = 0.0161"],
+        col(80, "Vector search", "embedding <|3,100|> $qvec", [
+            ["liquids:sea", "1 / (60 + 1) = 0.0164"],
+            ["liquids:sewage", "1 / (60 + 2) = 0.0161"],
+            ["liquids:tap", "1 / (60 + 3) = 0.0159"],
         ]);
-        col(820, "Full-text search", "text @1@ 'graph'", [["test:1", "1 / (60 + 1) = 0.0164"]]);
+        col(820, "Full-text search", "content @1@ 'lead'", [
+            ["liquids:sea", "1 / (60 + 1) = 0.0164"],
+            ["liquids:tap", "1 / (60 + 2) = 0.0161"],
+        ]);
         s.push(
-            text(820, 520, "'graphs' in test:3 is not 'graph',", {
-                size: 26,
-                fill: t.muted,
-                anchor: "start",
-            }),
-        );
-        s.push(
-            text(820, 556, "because this analyzer does not stem", {
-                size: 26,
-                fill: t.muted,
-                anchor: "start",
-            }),
-        );
-        s.push(
-            text(1560, 90, "search::rrf([$vs, $ft], 2, 60)", {
+            text(1560, 90, "search::rrf([$vs, $ft], 3, 60)", {
                 size: 30,
                 fill: t.accent,
                 weight: 600,
@@ -311,8 +305,9 @@ const rrf: Figure = {
             }),
         );
         const fused: [string, string][] = [
-            ["test:1", "0.0164 + 0.0164 = 0.0328"],
-            ["test:3", "0.0161"],
+            ["liquids:sea", "0.0164 + 0.0164 = 0.0328"],
+            ["liquids:tap", "0.0159 + 0.0161 = 0.0320"],
+            ["liquids:sewage", "0.0161"],
         ];
         fused.forEach(([id, note], i) => {
             const y = 180 + i * 150;
@@ -338,21 +333,26 @@ const rrf: Figure = {
                 text(1640, y + 92, note, { size: 26, fill: t.muted, anchor: "start", font: MONO }),
             );
         });
-        s.push(text(1450, 260, "→", { size: 60, fill: t.line, weight: 300 }));
+        s.push(text(1450, 330, "→", { size: 60, fill: t.line, weight: 300 }));
         s.push(
             text(
                 80,
-                700,
-                "A record found by both searches collects a share from each list, so test:1 ranks first.",
+                690,
+                "A record found by both searches collects a share from each list, so tap water passes sewage.",
                 { size: 30, fill: t.text, anchor: "start" },
             ),
         );
         s.push(
-            text(80, 746, "test:3 is still returned, from the vector list alone.", {
-                size: 30,
-                fill: t.text,
-                anchor: "start",
-            }),
+            text(
+                80,
+                736,
+                "Sewage is second in the vector list, but it is in only one of the two lists.",
+                {
+                    size: 30,
+                    fill: t.text,
+                    anchor: "start",
+                },
+            ),
         );
         return svg(rrf, t, s.join(""));
     },

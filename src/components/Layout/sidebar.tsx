@@ -42,13 +42,19 @@ export function SidebarPane({ children, ...props }: SidebarPaneProps) {
 
 export interface SidebarSectionHeadingProps {
     children: React.ReactNode;
+    /**
+     * Sets the heading as a small uppercase eyebrow, the treatment of the nav
+     * dropdowns' section labels, rather than a 16px title. The labs filter
+     * rail uses it.
+     */
+    eyebrow?: boolean;
 }
 
 /**
  * Heading row for a sidebar section, shared with the labs filter rail. Text
  * only: the section headings carry no icons.
  */
-export function SidebarSectionHeading({ children }: SidebarSectionHeadingProps) {
+export function SidebarSectionHeading({ children, eyebrow = false }: SidebarSectionHeadingProps) {
     return (
         <Group
             align="center"
@@ -57,13 +63,22 @@ export function SidebarSectionHeading({ children }: SidebarSectionHeadingProps) 
             mb="sm"
             px="sm"
         >
-            <Text
-                component="h3"
-                fz={16}
-                fw={600}
-            >
-                {children}
-            </Text>
+            {eyebrow ? (
+                <Text
+                    component="h3"
+                    className={classes.navSectionLabel}
+                >
+                    {children}
+                </Text>
+            ) : (
+                <Text
+                    component="h3"
+                    fz={16}
+                    fw={600}
+                >
+                    {children}
+                </Text>
+            )}
         </Group>
     );
 }

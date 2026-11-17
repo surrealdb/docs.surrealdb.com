@@ -56,6 +56,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "agent-memory/cookbooks", id: "agent-memory/cookbooks" },
     { prefix: "agent-memory/integrations", id: "agent-memory/integrations" },
     { prefix: "agent-memory/reference", id: "agent-memory/reference" },
+    { prefix: "agent-memory/memory-and-knowledge", id: "agent-memory/memory-and-knowledge" },
     { prefix: "agent-memory", id: "agent-memory/index" },
     { prefix: "", id: "index" },
 ];

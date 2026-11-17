@@ -8,7 +8,8 @@
 // docs images use. Each render also records the figure in manifest.json, with
 // a fingerprint of every page section that shows it, and embeds the same
 // provenance in the WebP files as XMP. See check.ts for how the fingerprints
-// are used.
+// are used. Figures listed in shared.json are also copied to public/diagrams;
+// see shared.ts.
 //
 // Needs Google Chrome (set CHROME to override the path), and cwebp and
 // webpmux (`brew install webp`).
@@ -20,6 +21,7 @@ import { join } from "node:path";
 import { loadFigures } from "./figures-index";
 import { THEMES } from "./lib";
 import { placements, readManifest, today, writeManifest } from "./provenance";
+import { publishShared } from "./shared";
 
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const OUT = join(import.meta.dir, "../../src/assets/img/diagrams");
@@ -86,3 +88,4 @@ for (const { figure: fig, file, verified } of await loadFigures()) {
 }
 
 writeManifest(manifest);
+for (const line of publishShared()) console.log(line);

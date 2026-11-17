@@ -10,9 +10,11 @@ Custom APIs let you expose a small, deliberate set of routes on top of SurrealDB
 
 That pattern pairs well with tightening access such as varying querying timeouts for free or entry-level users on an app. To accomplish this, you can combine [`DEFINE API`](/docs/reference/query-language/statements/define/api) with [capabilities](/docs/learn/security/authorization/capabilities) or server [environment variables](/docs/reference/cli/db/environment-variables) so certain users only see the APIs you designed.
 
+This page and the [middleware](/docs/learn/querying/custom-apis/middleware) page build the API of a small guesthouse. Guests make bookings, look up rooms and fetch room photos, and each section adds a route to the same API.
+
 ## Where endpoints live
 
-Each definition maps to a path under `/api/:namespace/:database/...`, followed by the path you gave in the statement. As such, an endpoint path like `get_users` in namespace `my_namespace` and database `my_database` becomes something like `/api/my_namespace/my_database/get_users` over HTTP.
+Each definition maps to a path under `/api/:namespace/:database/...`, followed by the path you gave in the statement. As such, an endpoint path like `bookings` in namespace `guesthouse` and database `main` becomes `/api/guesthouse/main/bookings` over HTTP.
 
 ## Reading the incoming request
 
@@ -20,85 +22,159 @@ Inside the handler you can use the built-in [`$request`](/docs/reference/query-l
 
 ## A minimal endpoint
 
-Here is a small endpoint that echoes part of the body and sets a couple of headers. The precise clauses and permissions are spelled out in the [`DEFINE API`](/docs/reference/query-language/statements/define/api) reference page.
+The first route is `/bookings`. Each method gets its own `FOR` clause and its own handler: `get` lists the bookings, and `post` creates a booking from `$request.body` and answers with status `201` and a header. The `get` handler also lists the built-in `api::timeout` middleware, which stops a slow listing after one second.
+
+The handler returns an object with any of the fields `status`, `body` and `headers`. You can test the endpoint from SurrealQL without needing to deploy by calling the [`api::invoke`](/docs/reference/query-language/functions/database-functions/api) function. It takes the path, and optionally an object with the request's `method`, `body`, `headers` and `query`. The method is `get` when the object leaves it out.
 
 ```surql title="Defining an API endpoint"
-DEFINE API "/test"
-    FOR get, post
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "201"
+
+[[test.results]]
+value = "201"
+
+[[test.results]]
+value = "[{ guest: 'Ana', nights: 3, room: room:garden }, { guest: 'Ben', nights: 1, room: room:attic }]"
+
+[[test.results]]
+value = "404"
+
+[[test.results]]
+value = "404"
+
+*/
+DEFINE API "/bookings"
+    FOR get
         MIDDLEWARE
             api::timeout(1s)
         THEN {
             {
                 status: 200,
-                body: {
-                    request: $request.body,
-                    response: "The server works"
-                },
-                headers: {
-                    'last-modified': <string>time::now(),
-                    'expires': <string>(time::now() + 4d)
-                }
+                body: SELECT guest, room, nights FROM booking ORDER BY guest
+            };
+        }
+    FOR post
+        THEN {
+            LET $booking = CREATE ONLY booking CONTENT $request.body;
+            {
+                status: 201,
+                body: $booking.{ guest, room, nights },
+                headers: { 'cache-control': 'no-store' }
             };
         };
+
+api::invoke("/bookings", {
+    method: "post",
+    body: { guest: "Ana", room: room:garden, nights: 3 }
+}).status;
+//- 201
+
+api::invoke("/bookings", {
+    method: "post",
+    body: { guest: "Ben", room: room:attic, nights: 1 }
+}).status;
+//- 201
+
+api::invoke("/bookings").body;
+//- [{ guest: 'Ana', nights: 3, room: room:garden }, { guest: 'Ben', nights: 1, room: room:attic }]
+
+-- No definition for this path
+api::invoke("/booking").status;
+//- 404
+
+-- The path has no handler for this method
+api::invoke("/bookings", { method: "delete" }).status;
+//- 404
 ```
 
-You can test the endpoint from SurrealQL without needing to deploy by calling the [`api::invoke`](/docs/reference/query-language/functions/database-functions/api) function. This function takes either the path alone or the path plus a body object.
-
-```surql
-api::invoke("/test");
-
-api::invoke("/test", {
-    body: {
-        hi: "please",
-        give: "me",
-        the: "information"
-    }
-});
-```
+Without `.status` or `.body`, `api::invoke` returns the whole response: the `status`, `body` and `headers` from the handler, and a `request_id` that SurrealDB also adds to the headers as `x-surreal-request-id`.
 
 ## Path patterns: one segment or the rest of the URL
 
-The path string in `DEFINE API` can be static, or it can capture pieces of the URL.
+The path string in `DEFINE API` can be static, like `/bookings`, or it can capture pieces of the URL.
 
-A segment like `"/users/:id"` binds one path component - anything in that slot shows up on `$request.params`. A trailing pattern with `*` instead of `:` matches everything from that point - handy for nested paths or file-like routes.
+A segment like `"/rooms/:name"` binds one path component, and the value in that slot shows up on `$request.params`. The handler below uses it to look up a room. A room that does not exist gets a `404` from the handler itself, with a message, while a path with an extra segment matches no route at all:
 
 ```surql
-DEFINE API OVERWRITE "/test/:anything_goes" FOR get THEN {
-    RETURN {
-        body: {
-            some: "data"
-        }
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ beds: 2, price: 120 }"
+
+[[test.results]]
+value = "'No room called cellar'"
+
+[[test.results]]
+value = "'Not found'"
+
+*/
+CREATE room:garden SET beds = 2, price = 120;
+CREATE room:attic SET beds = 1, price = 80;
+
+DEFINE API "/rooms/:name" FOR get THEN {
+    LET $room = type::record("room", $request.params.name);
+    IF $room.exists() {
+        { status: 200, body: $room.{ beds, price } }
+    } ELSE {
+        { status: 404, body: "No room called " + $request.params.name }
     }
 };
 
-api::invoke("/test/this_matches");
-api::invoke("/test/same_here");
-api::invoke("/test/but/this/wont/match");
+api::invoke("/rooms/garden").body;
+//- { beds: 2, price: 120 }
+
+api::invoke("/rooms/cellar").body;
+//- 'No room called cellar'
+
+api::invoke("/rooms/garden/photos").body;
+//- 'Not found'
 ```
 
-Here the first two calls hit the handler; the third does not, because `:anything_goes` only covers a single segment - extra slashes mean “no matching route”, which surfaces as a 404-style result from `api::invoke`.
+The last call does not reach the handler, because `:name` only covers a single segment. Extra slashes mean that no route matches, which `api::invoke` reports as status `404` with the body `'Not found'`.
 
-To accept multiple trailing segments, switch the capture to the `*` form:
+To accept any number of trailing segments, use `*` instead of `:`. The capture then holds the rest of the path as an array of segments, so a photo route can serve both a flat file name and a nested path:
 
 ```surql
-DEFINE API OVERWRITE "/test/*anything_goes" FOR get THEN {
-    RETURN {
-        body: {
-            some: "data"
-        }
-    }
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ file: ['garden.jpg'] }"
+
+[[test.results]]
+value = "{ file: ['garden', '2026', 'window.jpg'] }"
+
+*/
+DEFINE API "/photos/*path" FOR get THEN {
+    { status: 200, body: { file: $request.params.path } }
 };
 
-api::invoke("/test/this_matches");
-api::invoke("/test/same_here");
-api::invoke("/test/works/with/multiple/paths/now");
-```
+api::invoke("/photos/garden.jpg").body;
+//- { file: ['garden.jpg'] }
 
-All three calls succeed because the remainder of the path is treated as one captured piece.
+api::invoke("/photos/garden/2026/window.jpg").body;
+//- { file: ['garden', '2026', 'window.jpg'] }
+```
 
 ## Middleware
 
-Built-in helpers such as `api::timeout` sit in the `MIDDLEWARE` list before your `THEN` block. For more details on how to use middleware, see the [next page](/docs/learn/querying/custom-apis/middleware).
+Built-in helpers such as `api::timeout` sit in the `MIDDLEWARE` list before your `THEN` block. The [next page](/docs/learn/querying/custom-apis/middleware) adds middleware of its own to the guesthouse API.
 
 ## Where to read more
 
