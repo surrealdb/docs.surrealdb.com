@@ -56,8 +56,7 @@ const GENERIC_SECTION_TITLES = new Set([
  * as they are typed, so title-casing them would be wrong.
  */
 const LITERAL_SECTION_NAMES = new Map([
-    ["surrealctl", "surrealctl"],
-    ["surrealdb-cli", "surreal"],
+    ["cli", "surreal CLI"],
     ["surqlfmt", "surqlfmt"],
 ]);
 

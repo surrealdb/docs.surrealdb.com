@@ -1,0 +1,119 @@
+---
+position: 18
+title: Surqlize performance
+description: What building, rendering and parsing a Surqlize query costs, how to reuse prebuilt queries and a single SurrealDB connection, how to reduce round trips and result size, and how to run the benchmarks.
+---
+
+# Surqlize performance
+
+Surqlize builds queries from immutable builders, and building and rendering one takes microseconds. That is far below the time of a network round trip to the database. Surqlize does not cache rendered queries. A table's field types and result schema are built once, on first use.
+
+The benchmarks in the repository measure a simple `select` at about two microseconds, and a `select` with `where`, `orderBy`, `fetch` and `return` at about ten microseconds. Parsing the result of a select of 1,000 records takes a few hundred microseconds. These figures come from one local run of the benchmarks. The numbers depend on the hardware and the shape of the schema.
+
+The examples below use this setup.
+
+```ts title="Setup for the examples"
+import { Surreal } from "surrealdb";
+import { orm, table, t } from "surqlize";
+
+const user = table("user", {
+    name: t.string(),
+    email: t.string(),
+    age: t.number(),
+});
+
+const post = table("post", {
+    title: t.string(),
+    content: t.string(),
+});
+
+const surreal = new Surreal();
+await surreal.connect("ws://localhost:8000", {
+    namespace: "app",
+    database: "app",
+    authentication: { username: "root", password: "secret" },
+});
+
+const db = orm(surreal, user, post);
+
+// Reading a table that does not exist fails, so the examples create one record in each table first.
+await db.create("user").content({ name: "Ada", email: "ada@example.com", age: 36 });
+await db.create("post").content({ title: "Hello", content: "First post" });
+```
+
+## Reuse a built query
+
+Builders are immutable, so a query that you build once is safe to share and to run many times. Build queries that do not change at module level, and run them where you need them. Reusing a query saves the cost of building it. Each run still renders the query and sends it.
+
+```ts title="Build once, run many times"
+const adults = db
+    .select("user")
+    .where((user) => user.age.gte(18))
+    .orderBy("name", "ASC");
+
+export const listAdults = () => adults.execute();
+```
+
+A built query also works as a base for others. Each chained method returns a new query, so the shared base is never changed.
+
+```ts title="Extend a shared base"
+const adultsBase = db.select("user").where((user) => user.age.gte(18));
+
+const byName = adultsBase.orderBy("name", "ASC").limit(10);
+const byAge = adultsBase.orderBy("age", "DESC").limit(10);
+```
+
+## Reduce round trips
+
+The SDK serves concurrent requests on one connection, so independent queries can run at the same time with `Promise.all()`. Queries that must succeed or fail together can go in one [batch](/docs/libraries/surqlize-typescript/transactions). The SDK sends a batch as one transaction.
+
+```ts title="Run independent queries concurrently"
+const [users, posts] = await Promise.all([
+    db.select("user").limit(50),
+    db.select("post").limit(50),
+]);
+```
+
+Keep one `Surreal` connection for the process and share it between ORM instances. A pool is not needed. See [connections](/docs/libraries/surqlize-typescript/connections).
+
+## Reduce the size of results
+
+- **Project the fields you need** with `.return()`. The result is smaller, and its type shows exactly what you receive.
+- **Paginate** with `.limit()` and `.start()` instead of selecting a whole table.
+- **Skip the result** of a write that you do not read with `.return("none")`. The query resolves to an empty array, and there is nothing to parse.
+- **Fetch only the links you use.** `.fetch()` returns whole linked records, so name only the links you need.
+
+## Hand a query to the SDK
+
+`.prepare()` returns the SurrealQL and its bindings as an SDK `BoundQuery`, without sending it or parsing the result. Use it when you want the typed builders of Surqlize to produce a query and the SDK to run it, for example inside a transaction that you manage with the SDK.
+
+```ts title="Hand a query to the SDK"
+const prepared = db
+    .select("user")
+    .return((user) => ({ name: user.name, email: user.email }))
+    .prepare();
+
+const [users] = await surreal.query(prepared).collect();
+// users: { name: string; email: string }[]
+```
+
+The caller decodes the result, and the options of [cancellation, timeouts, and retries](/docs/libraries/surqlize-typescript/request-options) are set on the SDK query instead. See [querying](/docs/libraries/surqlize-typescript/querying).
+
+## Run the benchmarks
+
+The benchmarks in the `benchmarks/` directory of the [repository](https://github.com/surrealdb/surqlize) need no database. From a clone of the repository, run them with `bun run bench`. An optional name filter selects scenarios, for example `bun run bench select`, and `--json file` saves the results.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Connections"
+        description="Share one connection and use sessions."
+        href="/docs/libraries/surqlize-typescript/connections"
+    />
+    <IconBox
+        title="Querying"
+        description="Projections, pagination, and fetching."
+        href="/docs/libraries/surqlize-typescript/querying"
+    />
+</Boxes>

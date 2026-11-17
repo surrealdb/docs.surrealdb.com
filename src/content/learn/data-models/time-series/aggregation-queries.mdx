@@ -22,6 +22,40 @@ For doing metrics in SurrealDB you can choose one or combine:
 Our [pre-computed table views](/docs/reference/query-language/statements/define/table#pre-computed-table-views) are most similar to event-based, incrementally updating, materialised views. Practically, this means our downsampled metrics will always be up to date as it incrementally updates in near real-time when we add more records to the sensor_readings table.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+[
+	{
+		avg_humidity_percent: 55f,
+		avg_temperature_celsius: 28.4f,
+		day: 13,
+		id: daily_measurements_by_location:[
+			location:Longleat_House,
+			13
+		],
+		location: location:Longleat_House
+	}
+]'''
+
+*/
+-- Setup: a reading as in IoT and telemetry patterns
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+	d'2025-04-13T08:00:00Z'
+] CONTENT {
+	temperature_celsius: 28.4,
+	humidity: 55
+};
+
 -- Define a table view which aggregates data from the sensor_readings table
 DEFINE TABLE daily_measurements_by_location AS
 	SELECT
@@ -30,7 +64,7 @@ DEFINE TABLE daily_measurements_by_location AS
 		math::mean(temperature_celsius) AS avg_temperature_celsius,
 		math::mean(humidity) AS avg_humidity_percent
 	FROM sensor_readings
-	GROUP BY id[0];
+	GROUP BY location, day;
 
 SELECT * FROM daily_measurements_by_location;
 ```
@@ -38,11 +72,12 @@ SELECT * FROM daily_measurements_by_location;
 ```surql title="Output"
 [
 	{
-		avg_humidity_percent: 55dec,
-		avg_temperature_celsius: 28.4dec,
+		avg_humidity_percent: 55f,
+		avg_temperature_celsius: 28.4f,
 		day: 13,
 		id: daily_measurements_by_location:[
-			location:Longleat_House
+			location:Longleat_House,
+			13
 		],
 		location: location:Longleat_House
 	}
@@ -52,6 +87,12 @@ SELECT * FROM daily_measurements_by_location;
 For real-time visualisation of our metrics we can then use [Live Queries](/docs/reference/query-language/statements/live-select) to stream real-time updates to our client, such as a BI dashboard or embedded analytics code.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 LIVE SELECT * FROM daily_measurements_by_location;
 ```
 
@@ -60,6 +101,12 @@ LIVE SELECT * FROM daily_measurements_by_location;
 [Drop tables](/docs/reference/query-language/statements/define/table#example-usage) are tables that drop all writes once they have been written. A view can be defined on a table whether it is a `DROP` table or not, but `DROP` is recommended if you have no reason to directly query the table that provides the data for the aggregated view.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 -- Drop all writes to the sensor_readings table.
 -- We don't need every these readings and can view them
 -- via daily_measurements_by_location instead
@@ -83,14 +130,20 @@ For example, we can create a simple real-time anomaly detection and notification
 5. Send an [http::post](/docs/reference/query-language/functions/database-functions/http#httppost) request with the outlier details.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 -- Trigger the event on when a record is created
 DEFINE EVENT sensor_anomaly_notification
   ON sensor_readings WHEN $event = 'CREATE'
 THEN {
     -- Get the desired time range you want to track
     -- here we're grabing just the past hour
-    LET $location = $after[0];
-    LET $sensor = $after[1];
+    LET $location = $after.id[0];
+    LET $sensor = $after.id[1];
     LET $temp_past_hour = (
             SELECT VALUE temperature_celsius FROM sensor_readings:[
                 $location,
@@ -103,15 +156,11 @@ THEN {
             ]);
     -- Calculate both the upper and lower threshold for an outlier
     -- using the standard Q1 - 1.5 * IQR formula for the low outliers
-    LET $low_outliers = (
-        RETURN math::percentile($temp_past_hour,
-          25) - 1.5 * math::interquartile($temp_past_hour)
-    );
+    LET $low_outliers = math::percentile($temp_past_hour, 25)
+        - 1.5 * math::interquartile($temp_past_hour);
     -- Q3 + 1.5 * IQR formula for the high outliers
-    LET $high_outliers = (
-        RETURN math::percentile($temp_past_hour,
-          75) + 1.5 * math::interquartile($temp_past_hour)
-    );
+    LET $high_outliers = math::percentile($temp_past_hour, 75)
+        + 1.5 * math::interquartile($temp_past_hour);
     
     -- If a low outlier is found send a http post request
     -- with the outlier details

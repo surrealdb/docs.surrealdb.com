@@ -1,0 +1,206 @@
+---
+position: 1
+title: Authenticating surreal cloud
+description: "Choose between a login session and a personal access token with surreal cloud, create and revoke tokens, scopes, profiles, where credentials are stored, and authenticating an unattended run."
+---
+
+# Authentication
+
+`surreal cloud` accepts two kinds of credential. This page explains what each one is good for, how to create and inspect them, and how to hand one to a CI job. It is for anyone setting up their own machine, and for engineers wiring `surreal cloud` into a pipeline. To install the component first, see [Install](/docs/explore/cli/install) and [Components](/docs/explore/cli/components). For the mechanism underneath - the sign-in flows, what travels on the wire, and how the credential store behaves - see the [authentication reference](/docs/reference/cli/cloud/authentication).
+
+## Two kinds of credential
+
+The two credentials differ in what they can **write**, not in what they can reach.
+
+| Credential | How you get it | Use it for | Cloud writes |
+| --- | --- | --- | --- |
+| Login session | `surreal cloud auth login` | Everyday work at a terminal | Yes |
+| Personal access token | `surreal cloud token create`, or SurrealDB Studio | Scripts, CI jobs, shared runners | No |
+
+A login session is the credential that can do everything. A personal access token reads the control plane and cannot change it, which is what makes it safe to leave in a CI secret store.
+
+## Login sessions
+
+`surreal cloud auth login` signs in through your identity provider and stores a refresh token plus one access token per audience. There are three sign-in flows, chosen with `--flow`: `browser` opens a browser and listens on `127.0.0.1` for the redirect, `device` shows a code to type on another device, and `paste` prints a URL and takes back the address the browser was redirected to. `--no-browser` shows a code or a URL instead of opening a browser, and `--force` signs in again when the profile already has a credential.
+
+Four commands inspect and maintain the session.
+
+```bash
+surreal cloud auth status          # which credential is in use, read from disk
+surreal cloud auth status --verify # the same, plus one request to check it
+surreal cloud auth refresh         # renew now, rather than at the next request (add --all for the account-management token too)
+surreal cloud auth logout          # remove this profile's stored credentials
+```
+
+`auth status` and `auth scopes` touch no network, so they work on a plane, in a container with no egress, and in a CI job that is about to fail for another reason. `whoami` is the command that asks the API who you are.
+
+`auth status` also warns when this machine's clock is more than five minutes out of step with the API, because a wrong clock produces authentication failures that look like a rejected credential.
+
+`auth logout` revokes the refresh token at the identity provider on a best-effort basis. A failed revocation prints a warning and still removes the credential from this machine. Logging out when nothing is signed in succeeds and still prints a document, so a teardown script does not fail on its second run.
+
+> [!NOTE]
+> `auth scopes` returns an empty list for a login session. Identity scopes are not the authorisation model for a session - your role in the organisation is. Run `surreal cloud org permissions` to see what you may do.
+
+## Personal access tokens
+
+A personal access token is a long-lived string beginning `sdbp_`. Create one with a login session in place, then hand it to whatever needs it.
+
+```bash
+surreal cloud token scopes
+surreal cloud token create "ci-nightly-report" --scope read:cloud --expires-in 90 | tail -1
+```
+
+<OptionsTable
+    title="token create"
+    options={[
+        {
+            "name": "<LABEL>",
+            "required": true,
+            "description": "What this token is for. Shown in every listing. 1 to 120 characters."
+        },
+        {
+            "name": "--scope",
+            "value": "<SCOPE>",
+            "description": "A scope to grant. Repeat the flag to grant several, up to 32."
+        },
+        {
+            "name": "--expires-in",
+            "value": "<DAYS>",
+            "default": "30",
+            "description": "Days until the token expires, from 1 to 365, or `never`."
+        },
+        {
+            "name": "--reveal",
+            "description": "Print the secret even when stdout is a terminal."
+        }
+    ]}
+/>
+
+Four things to know about `token create` before you run it:
+
+- **The secret is returned once.** It is the last line on stdout, so `| tail -1` is the whole capture recipe. Nothing can recover it later.
+- **It refuses to print a secret to a terminal.** Pipe the output, or pass `--reveal` if you meant to read it. The check happens before the token is minted, so a forgotten flag never costs you a credential nobody can use.
+- **It is the one command with no `--json` form.** The secret can neither go inside the document nor share stdout with it, so `--json` is a usage error here.
+- **A token with no `--scope` is permitted nothing.** Grant what the job needs and no more.
+
+List and revoke tokens by id or label.
+
+```bash
+surreal cloud token list
+surreal cloud token delete ci-nightly-report
+```
+
+> [!WARNING]
+> Revocation is not instant. A revoked token can continue to work for several minutes while the platform's exchange cache expires. Rotate a leaked token and then confirm with `surreal cloud token list`.
+
+## What a personal access token cannot do
+
+**It cannot manage personal access tokens.** All four `token` verbs - `list`, `create`, `delete`, and `scopes` - refuse a personal access token. The refusal is local, costs no requests, and exits `4`. A leaked token must not be able to mint its own replacements, nor revoke the one you would use to clean up after it.
+
+```text
+Managing personal access tokens needs an interactive login session, so nothing was sent.
+
+Sign in with:  surreal cloud auth login
+```
+
+**It cannot write to the control plane.** The API refuses a personal access token on every mutating route, whatever scopes the token carries. `instance create`, `instance delete`, `org update`, and `team invite` all need a login session. Reads work normally.
+
+**It cannot exceed its scopes.** A missing scope produces a 403 naming the scope, and exits `4`.
+
+Everything else works: `org list`, `instance list`, `instance logs`, `auth status`, `auth scopes`, and `auth logout`.
+
+## Choosing between them
+
+- **At a terminal, sign in.** A login session covers every command and renews itself.
+- **In CI, use a token** for anything that only reads: nightly usage reports, drift checks, dashboards, alerting on instance state.
+- **For unattended writes, use a login session** on a dedicated machine account, with the credential file mounted into the job. Scope the account's role in the organisation to what the pipeline needs.
+
+## Supplying a token
+
+Two flags supply a token, each with an environment variable, and neither writes the token to disk.
+
+<OptionsTable
+    title="Credential options"
+    options={[
+        {
+            "name": "--token",
+            "value": "<TOKEN>",
+            "env": "SURREAL_CLOUD_TOKEN",
+            "description": "Personal access token to authenticate with. Conflicts with `--token-file`."
+        },
+        {
+            "name": "--token-file",
+            "value": "<PATH>",
+            "env": "SURREAL_CLOUD_TOKEN_FILE",
+            "description": "Read the personal access token from a file, or `-` for stdin."
+        }
+    ]}
+/>
+
+`SURREAL_CLOUD_TOKEN` is the usual choice in CI, because the environment is where a secret store puts things.
+
+```bash
+export SURREAL_CLOUD_TOKEN="$(cat /run/secrets/surreal-cloud)"
+surreal cloud instance list --json
+```
+
+`--token` has no short form on purpose: `-t` reads as `--type` on the instance commands, and a credential in `argv` is visible through `ps` and lands in shell history.
+
+A credential supplied this way lasts for the one invocation. The only command that stores a token is `auth login --with-token`, which reads it from stdin and remembers it for the profile.
+
+```bash
+surreal cloud auth login --with-token --label laptop < ~/token.txt
+```
+
+## Scopes
+
+The scopes include `read:cloud`, `write:cloud-instances`, `write:cloud-organization`, and `write:cloud-billing`. Run `surreal cloud token scopes` for the current list.
+
+Two commands report on them, and they answer different questions.
+
+- `surreal cloud token scopes` - the catalogue of scopes a token can be granted. This one is the menu.
+- `surreal cloud auth scopes` - what the credential in your hand carries. This one is the receipt.
+
+## Profiles
+
+A profile bundles a credential, an API base URL, and configuration under one name. Use profiles to keep a work account and a personal account apart, or production and staging.
+
+```bash
+surreal cloud context use staging          # switch the active profile
+surreal cloud --profile staging auth login # sign that profile in
+surreal cloud context list                 # every profile, and which is active
+surreal cloud context show                 # what this invocation resolved, and why
+```
+
+Each profile stores its own credential, so switching profiles switches identity. `surreal cloud org use` works *within* a profile and remembers an organisation; neither command is expressible as the other.
+
+## Where credentials are stored
+
+Credentials live in `credentials.json`, mode `0600`, beside `config.toml` in the configuration directory, `~/.surrealdb/cloud` (`%USERPROFILE%\.surrealdb\cloud` on Windows). The directory follows `SURREAL_CLI_HOME` when the launcher has another home, and `--config` or `SURREAL_CLOUD_CONFIG_DIR` puts it elsewhere. `config.toml` holds no secrets and is safe to commit; `credentials.json` is not.
+
+Two behaviours matter at a terminal. `surreal cloud` refuses to read a `credentials.json` that group or other can read, and tells you the `chmod` to run. And concurrent invocations serialise on an advisory lock, so if a run reports that another `surreal cloud` is updating credentials, retry in a moment.
+
+On first run, `surreal cloud` copies the configuration and stored login of the former `surrealctl` tool from `~/.config/surrealctl` (`%APPDATA%\surrealctl` on Windows) once, and leaves the original in place. The old `SURREALCTL_*` environment variables still work as deprecated aliases of `SURREAL_CLOUD_*`, with a warning naming each replacement.
+
+The [authentication reference](/docs/reference/cli/cloud/authentication#where-credentials-are-stored) covers the rest: the resolution order for the directory, why the store is a file rather than the OS keyring, how the lock and the atomic rename work, and how clock skew is learned.
+
+## Troubleshooting
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| Exit `3` on any command | No credential, or one that expired and could not be renewed | `surreal cloud auth login`, or `surreal cloud auth refresh` |
+| Exit `4` on a `token` command | A personal access token is in use | Sign in with a login session |
+| Exit `4` on a write | Insufficient scope, insufficient role, or a token where a session is needed | Check `surreal cloud org permissions`; use a login session for writes |
+| `auth status` warns about clock skew | This machine's clock is more than five minutes out | Fix time synchronisation on the host |
+| Exit `30` | An interactive sign-in did not complete | Run `surreal cloud auth login` again; add `--flow device` when there is no browser |
+| Exit `11` | The credential store could not be read or written | Check the permissions and free space on the configuration directory |
+| A refusal to read `credentials.json` | The file is readable by group or other | `chmod 600` on the path in the message |
+
+To see which requests are being made and which configuration layer won each value, add `--debug`. Credentials are logged as a digest, never in full.
+
+## Next steps
+
+- [Organisations](/docs/explore/cli/cloud/organisations) - choose an organisation, manage members, read usage and spend.
+- [Instances](/docs/explore/cli/cloud/instances) - everyday instance work.
+- [Scripting](/docs/explore/cli/cloud/scripting) - exit codes, `--json`, and unattended runs.
+- [Members and roles](/docs/manage/organisations/members-and-roles) - what a role permits in an organisation.

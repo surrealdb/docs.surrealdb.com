@@ -1,0 +1,65 @@
+---
+position: 5
+title: SQL drivers transactions
+description: Run several statements as one unit with atomic batches over HTTP or interactive transactions over a WebSocket in @surrealdb/pg and @surrealdb/mysql, with isolation levels, read-only mode and connection-loss behaviour.
+---
+
+# SQL drivers transactions
+
+The drivers have two ways to run several statements as a unit. A **batch** sends all statements in one request and applies them atomically. An **interactive transaction** stays open on a WebSocket session, so you can read each result before you commit.
+
+| | Batch | Interactive transaction |
+| --- | --- | --- |
+| Transport | HTTP or WebSocket | WebSocket |
+| Intermediate results | No | Yes |
+| Round trips | One | One for each statement, plus begin and commit |
+
+An HTTP request holds no transaction between calls. For that reason, a batch is the only transactional primitive over HTTP.
+
+## Batches
+
+A batch is atomic by default. Every statement takes effect, or none does.
+
+```ts
+const [created, count] = await sql.batch([
+    sql`INSERT INTO person (id, name) VALUES (${"a"}, ${"A"})`,
+    sql`SELECT count(*) FROM person`,
+]);
+```
+
+To keep going after a failure and read each outcome, turn off `atomic` and `throwOnError`.
+
+```ts
+const settled = await sql.batch(["SELECT 1", "SELECT * FROM missing"], {
+    atomic: false,
+    throwOnError: false,
+});
+```
+
+Batch options accept `isolation` and `readOnly`, as described below.
+
+## Interactive transactions
+
+`begin` opens a dedicated WebSocket session and runs your callback. It commits when the callback resolves, and rolls back when the callback throws. If the rollback also fails, the original error is the one you receive. The session closes afterwards.
+
+```ts
+await sql.begin(
+    async (tx) => {
+        await tx`UPDATE account SET balance = balance - ${10} WHERE id = ${"x"}`;
+        await tx`UPDATE account SET balance = balance + ${10} WHERE id = ${"y"}`;
+    },
+    { isolation: "serializable", readOnly: false },
+);
+```
+
+`@surrealdb/pg` sends `BEGIN`, `COMMIT` and `ROLLBACK`. `@surrealdb/mysql` sends `START TRANSACTION` (after `SET TRANSACTION ISOLATION LEVEL` when you give an isolation level), `COMMIT` and `ROLLBACK`.
+
+With `transport: "auto"`, `begin` opens a WebSocket for the length of the transaction. With `transport: "http"` pinned, it throws `UnsupportedOnTransportError`.
+
+## Connection loss
+
+If a WebSocket drops while a transaction is open, the transaction is lost. The call fails with `ConnectionLostError`, which has `inTransaction: true`. The driver does not replay statements, and it never retries writes automatically.
+
+## Transactions in compatibility layers
+
+The compatibility layers use the transaction forms of the library they imitate. For example, a client from `pool.connect()` runs `BEGIN` and `COMMIT` as statements, and `release()` rolls back an open transaction before the client is reused. See [ORM and driver compatibility](/docs/libraries/sql-drivers/orm-compatibility).

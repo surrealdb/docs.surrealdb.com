@@ -52,6 +52,7 @@ By default, SurrealDB will push the entire record over the websocket when it is 
 
 ```surql
 /**[test]
+run = false
 
 [[test.results]]
 value = "u'0f0d0e40-f371-4a68-8ee0-6d5eb3565b76'"
@@ -62,8 +63,8 @@ skip-uuid = true
 LIVE SELECT * FROM person;
 ```
 
-```surql title="Output"
-'b1f1d115-ad0f-460d-8cbf-dbc7ce48851c'
+```surql title="Example output"
+u'b1f1d115-ad0f-460d-8cbf-dbc7ce48851c'
 ```
 
 The result of the above query will be a UUID. This UUID is the Live Query Unique ID, and is used to differentiate between different Live Queries. You will want to keep track of this ID, so that you can differentiate between different notifications being received after this query. You can also use this UUID to [KILL](/docs/reference/query-language/statements/kill) (stop) the Live Query. The protocol will then send messages that are of a Notification format.
@@ -76,6 +77,7 @@ When using the `DIFF` mode, updates will be sent in the form of an array with [J
 
 ```surql
 /**[test]
+run = false
 
 [[test.results]]
 value = "u'0f0d0e40-f371-4a68-8ee0-6d5eb3565b76'"
@@ -86,8 +88,8 @@ skip-uuid = true
 LIVE SELECT DIFF FROM person;
 ```
 
-```surql title="Output"
-'b87cbb0d-ca15-4f0a-8f86-caa680672aa5'
+```surql title="Example output"
+u\'b87cbb0d-ca15-4f0a-8f86-caa680672aa5\'
 ```
 
 ### Filter the live query
@@ -96,6 +98,7 @@ You can optionally apply filters with the `WHERE` clause.
 
 ```surql
 /**[test]
+run = false
 
 [[test.results]]
 value = "u'0f0d0e40-f371-4a68-8ee0-6d5eb3565b76'"
@@ -106,13 +109,125 @@ skip-uuid = true
 LIVE SELECT * FROM person WHERE age > 18;
 ```
 
+A live query filter is evaluated against the record after the change, so a record that stops matching the filter produces no notification. The `$before` and `$after` parameters hold the record as it was before and after the change, and can be used in the `WHERE` clause to compare the two. The following live query also notifies when a task stops being open, because `$before` still matches:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE task;
+LIVE SELECT * FROM task WHERE status = 'open' OR $before.status = 'open';
+```
+
+With this live query, `CREATE task:1 SET status = 'open'` and then `UPDATE task:1 SET status = 'done'` each send a notification, the second one carrying the record with `status: 'done'`. A further update from `'done'` to `'archived'` sends nothing, because neither the old nor the new value is `'open'`.
+
+### Filter by event
+
+The `$event` parameter holds the kind of change that triggered the notification: `'CREATE'`, `'UPDATE'` or `'DELETE'`. Use it in the `WHERE` clause to receive only some kinds of change.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+LIVE SELECT * FROM person WHERE $event = 'CREATE';
+```
+
+To receive several kinds, compare against an array.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+LIVE SELECT * FROM person WHERE $event IN ['UPDATE', 'DELETE'];
+```
+
+Over a WebSocket connection, the first query above delivers a notification for each created record and none for updates or deletes. The second delivers notifications for updates and deletes only.
+
+### Relation tables
+
+A live query on a [relation table](/docs/reference/query-language/statements/define/table) sends a notification each time an edge is created, updated or deleted, so a client can watch for new relationships.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE wrote TYPE RELATION;
+LIVE SELECT * FROM wrote;
+
+RELATE person:a->wrote->person:b SET at = 1;
+```
+
+```json title="Sample notification"
+{
+	"action": "CREATE",
+	"id": "8fcb4c22-b4f6-4f6d-9eca-80f872146ad9",
+	"record": "wrote:7exf5ouot5pw40ekjnfi",
+	"result": {
+		"at": 1,
+		"id": "wrote:7exf5ouot5pw40ekjnfi",
+		"in": "person:a",
+		"out": "person:b"
+	}
+}
+```
+
+A live query takes a table, so graph traversal such as `LIVE SELECT ->wrote FROM person:a` is not supported and returns `Cannot execute LIVE statement using value: person:a`. To follow the edges of one record, filter the relation table on its `in` or `out` field instead:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+LIVE SELECT * FROM wrote WHERE in = person:a;
+```
+
+A live query on a node table such as `person` sends a notification only when a `person` record changes. `RELATE` writes to the edge table, and so does deleting an edge, so neither sends a notification to that live query. A projection such as `<-wrote<-person` shows the edges as they were when the `person` record last changed, and a `WHERE` clause that depends on edges is not checked again on `RELATE`. To follow relationships as they are added and removed, run the live query on the edge table: `LIVE SELECT in, out FROM wrote` sends `CREATE` for each `RELATE`, and `DELETE` when an edge is removed, including when deleting a node removes its edges.
+
+<img src="~/assets/img/diagrams/light/live-query-relation-light.webp" darkSrc="~/assets/img/diagrams/live-query-relation.webp" alt="RELATE person:a->wrote->person:b writes one record, to the wrote table. A live query on wrote is notified with action CREATE and the edge's in and out. A live query on person is not notified, because no person record changed. Notifications are sent only after the transaction commits." />
+
 ## Consistency guarantees
 
-When using Live Queries, it is important to understand the ordering of messages and events when many clients and transactions are running in parallel. Notifications on live queries are only published for committed transactions.
+When using Live Queries, it is important to understand the ordering of messages and events when many clients and transactions are running in parallel. Notifications on live queries are only published for committed transactions. From SurrealDB 4.0, this includes a transaction that a client opens and commits itself, such as one started with an SDK's `begin()` method: its notifications are sent when it commits, and none are sent if it is cancelled or its commit fails. In earlier versions, a write inside such a transaction sent no notification.
 
 Ordering is kept correct on a best-effort basis, but it is not yet strictly guaranteed. As such, some messages may be received out of order from their commit order. However, transactions that are committed from the same client will always be in order.
 
 Security enforcement is always evaluated per notification and will reflect the value of authorisation at the time of publishing the notification. This means that if a transaction is committed, after which the authorisation immediately changes for the live query receiver, the receiver will get the notification under the new rules.
+
+The `WHERE` clause, the projection and the `FETCH` clause of a live query cannot change data when a notification is evaluated. A subquery in them that creates, updates or deletes records is refused at that point, and so is a function that changes state or waits, such as `sequence::nextval()` or `sleep()`. The live query still registers, but sends no notification for a change that reaches such an expression. Reads are not affected, so a subquery that selects from another table still works.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+-- Registers, but sends no notification: the projection tries to write
+LIVE SELECT *, (CREATE audit SET seen = time::now()) AS logged FROM person;
+```
 
 ### Changing a session's authentication ends its live queries
 
@@ -135,6 +250,7 @@ The `FETCH` clause can be used inside live queries as well.
 
 ```surql
 /**[test]
+run = false
 
 [[test.results]]
 value = "u'0f0d0e40-f371-4a68-8ee0-6d5eb3565b76'"
@@ -152,6 +268,12 @@ Since SurrealDB 3.0, parameters can be used inside a `LIVE SELECT` statement, in
 Note that a bare parameter cannot be used as the table reference. Use `type::table()` instead:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 -- Does not work: bare parameter as the table reference
 -- LIVE SELECT * FROM $table WHERE field > 50;
 
@@ -167,6 +289,18 @@ LIVE SELECT * FROM type::table($table) WHERE field > 50;
 Parameters can also be used inside a `LIVE SELECT` statement.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 LET $table = 'measurement';
 LET $location = 'Tallinn';
 LIVE SELECT * FROM type::table($table) WHERE location == $location;

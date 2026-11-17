@@ -1,0 +1,158 @@
+---
+position: 17
+title: Surqlize error handling
+description: The errors Surqlize throws, including OrmError, ValidationError, TypeParseError and DuplicateSurrealError, how to tell them apart with instanceof, and how errors from the SurrealDB SDK and server, timeouts and aborted requests reach your code.
+---
+
+# Surqlize error handling
+
+A query can fail in Surqlize, in the SDK, or on the server. Surqlize throws its own error classes for the first group and passes the other two through unchanged, so the same `instanceof` checks work for both.
+
+| Error | Thrown when |
+| ----- | ----------- |
+| `OrmError` | A query is built or used incorrectly. |
+| `ValidationError` | Data you write does not match the schema, with [runtime validation](/docs/libraries/surqlize-typescript/validation) on or through `parse()`. It extends `OrmError`. |
+| `TypeParseError` | A value from the database does not match the type in your schema. |
+| `DuplicateSurrealError` | A query fails with the server's empty-subject error on a connection that the SDK classes Surqlize imports did not create. It extends `OrmError`. |
+| SDK and server errors | The database rejects a query, a request times out, or a connection fails. |
+
+All of these classes are exported from `surqlize`, except the SDK errors, which come from `surrealdb`.
+
+The examples on this page use the ORM below.
+
+```ts title="Setup for the examples"
+import { Surreal } from "surrealdb";
+import { orm, table, t } from "surqlize";
+
+const user = table("user", {
+    name: t.object({ first: t.string(), last: t.string() }),
+    email: t.string(),
+    age: t.number(),
+});
+
+const surreal = new Surreal();
+await surreal.connect("ws://localhost:8000", {
+    namespace: "app",
+    database: "app",
+    authentication: { username: "root", password: "secret" },
+});
+
+const db = orm(surreal, user);
+```
+
+## OrmError
+
+`OrmError` reports a mistake in how a query is built or used. The causes include:
+
+- A filter object or sort object that names an unknown field, or a sort direction that is not `"asc"` or `"desc"`.
+- Calling `relate()` with a table that is not an edge.
+- Mixing write methods on one query, such as calling `.content()` after `.set()`.
+- Calling `.ignore()` and `.onDuplicate()` on the same insert, or calling `.values()` before `.fields()` or with an array whose length does not match the fields.
+- Calling `batch()` inside a transaction.
+- A grouped select with no `return()` projection, or `split()` combined with `groupBy()`.
+- An expression sort combined with `return()` or grouping.
+
+Some of these are also rejected by the type checker. The error covers the cases the types cannot catch, such as data from `JSON.parse`.
+
+A mistake that is visible when a method is called throws from that call. A check that needs the whole query, such as a missing projection on a grouped select, rejects the promise when the query runs.
+
+```ts title="Catch a build error"
+import { OrmError } from "surqlize";
+
+async function search(input: string) {
+    try {
+        const filter = JSON.parse(input);
+        return await db.select("user").where(filter);
+    } catch (error) {
+        if (error instanceof OrmError) {
+            console.error(error.message); // for example: Unknown field "nope" in where object
+        }
+        throw error;
+    }
+}
+```
+
+## TypeParseError
+
+Surqlize parses the results of the queries it runs against your schema. When a stored value does not match, for example because a field was written with another type or a required field is missing, the query rejects with a `TypeParseError`. A write that returns `"diff"` is not parsed. A `TypeParseError` has the following properties:
+
+- **`name`** is the name of the type that failed, such as `number` or `object`. It is not the name of the class, so check with `instanceof`.
+- **`expected`** is the type, or the list of types, that the schema describes.
+- **`found`** is the value that was received.
+
+```ts title="Catch a result that does not match the schema"
+import { TypeParseError } from "surqlize";
+
+try {
+    await db.select("user");
+} catch (error) {
+    if (error instanceof TypeParseError) {
+        console.error(`Expected ${error.expected} but found ${error.found}`);
+    }
+}
+```
+
+`TypeParseError` stops at the first mismatch. It extends `Error`, not `OrmError`.
+
+## ValidationError
+
+`ValidationError` is thrown before a query is sent, and lists every failing field in `issues`. The `table` property names the table. See [runtime validation](/docs/libraries/surqlize-typescript/validation).
+
+> [!NOTE]
+> The SDK exports a `ValidationError` of its own, for the server's `Validation` error kind. It is a different class from the one in `surqlize`, so import the one you check against from `surqlize`.
+
+## DuplicateSurrealError
+
+`DuplicateSurrealError` is thrown when a query fails with the server's empty-subject error, and the connection is not an instance of the SDK classes that Surqlize imports. The original error is available as `cause`. A second copy of `surrealdb` can cause this state. See [installation](/docs/libraries/surqlize-typescript/installation) for how to check for more than one copy.
+
+## SDK and server errors
+
+Errors from the database and the connection reach your code as the SDK's own classes. See [error handling](/docs/reference/javascript/concepts/error-handling) in the SDK documentation for the full list.
+
+| Situation | SDK error |
+| --------- | --------- |
+| A record with the same id already exists | `AlreadyExistsError` |
+| A table does not exist | `NotFoundError` |
+| A statement exceeds its server-side `TIMEOUT` | `QueryError` |
+| An operation the connection does not support, such as `db.live()` over HTTP | `UnsupportedFeatureError` |
+
+```ts title="Handle a duplicate record"
+import { AlreadyExistsError } from "surrealdb";
+
+try {
+    await db.create("user", "ada").set({
+        name: { first: "Ada", last: "Lovelace" },
+        email: "ada@example.com",
+        age: 36,
+    });
+} catch (error) {
+    if (error instanceof AlreadyExistsError) {
+        console.error(error.message);
+    } else {
+        throw error;
+    }
+}
+```
+
+If the record `user:ada` exists already, the create fails with an error like this:
+
+```text title="Error output"
+Database record `user:ada` already exists
+```
+
+A query that is abandoned with `.signal()` or `withSignal()` rejects with the reason of the signal. A query whose `.requestTimeout()` expires rejects with an error named `TimeoutError`, and so does a query abandoned by `AbortSignal.timeout()`. A query that fails with a conflict can be [retried](/docs/libraries/surqlize-typescript/request-options).
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Runtime validation"
+        description="Catch bad data before it is sent."
+        href="/docs/libraries/surqlize-typescript/validation"
+    />
+    <IconBox
+        title="Cancellation, timeouts, and retries"
+        description="Handle timeouts, aborts, and conflicts."
+        href="/docs/libraries/surqlize-typescript/request-options"
+    />
+</Boxes>

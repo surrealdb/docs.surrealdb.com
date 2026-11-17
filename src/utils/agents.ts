@@ -17,6 +17,16 @@ export type ModelAccess = "Locked" | "BYOK" | "Multi-provider";
 /** What the agent carries between turns and between sessions. */
 export type ContextModel = "Project memory" | "Indexed codebase";
 
+/** The configuration step for one agent, as the home page's setup panel shows it. */
+export interface AgentSetup {
+    /** The snippet's format, which decides how the panel lays it out. */
+    language: "bash" | "json";
+    /** The text the copy button puts on the clipboard. */
+    code: string;
+    /** Where the snippet goes and what to do next, with backticks around inline code. */
+    where: string;
+}
+
 export interface AgentSummary {
     /** Matches the page slug under `/docs/agents`, and the brand mark lookup. */
     id: string;
@@ -28,6 +38,7 @@ export interface AgentSummary {
     model: ModelAccess;
     context: ContextModel;
     openSource: boolean;
+    setup: AgentSetup;
 }
 
 /** The hosted MCP server every agent connects to. */
@@ -35,12 +46,22 @@ export const MCP_URL = "https://mcp.surrealdb.com";
 
 /**
  * Handed to an agent verbatim by the copy button, and by the same button on the
- * SurrealDB Studio organisation overview. It names the instructions document
- * rather than spelling the setup out, so the steps can change without the copied
- * text going stale in anyone's clipboard.
+ * SurrealDB Studio organisation overview, so a change here needs the same change
+ * there. It names the instructions document rather than spelling the setup out,
+ * so the steps can change without the copied text going stale in anyone's
+ * clipboard, and the document has the agent work out which client it is, so one
+ * prompt serves every agent.
  */
 export const SETUP_PROMPT =
-    "Fetch and execute the appropriate instructions to set me up for SurrealDB from https://surrealdb.com/docs/agents/instructions.md";
+    "Set me up for SurrealDB. Fetch https://surrealdb.com/docs/agents/instructions.md and follow it.";
+
+/** Installs the official Agent Skills into the project it runs in. */
+export const SKILLS_COMMAND = "npx skills add surrealdb/agent-skills";
+
+/** The JSON body of an MCP configuration that holds only the SurrealDB server. */
+function mcpConfig(key: string, server: Record<string, string>): string {
+    return JSON.stringify({ [key]: { surrealdb: server } }, null, 2);
+}
 
 /** The document the prompt points at, served as raw markdown. */
 export const INSTRUCTIONS_PATH = "/docs/agents/instructions.md";
@@ -61,6 +82,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Locked",
         context: "Project memory",
         openSource: false,
+        setup: {
+            language: "bash",
+            code: `claude mcp add --transport http surrealdb ${MCP_URL}\n${SKILLS_COMMAND}`,
+            where: "Run both commands in your project root, then run `/mcp` in Claude Code to sign in.",
+        },
     },
     {
         id: "codex",
@@ -72,6 +98,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Locked",
         context: "Project memory",
         openSource: true,
+        setup: {
+            language: "bash",
+            code: `codex mcp add surrealdb --url ${MCP_URL}\n${SKILLS_COMMAND}`,
+            where: "Run both commands in your project root, then approve the SurrealDB connection when Codex asks.",
+        },
     },
     {
         id: "cursor",
@@ -83,6 +114,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Multi-provider",
         context: "Indexed codebase",
         openSource: false,
+        setup: {
+            language: "json",
+            code: mcpConfig("mcpServers", { url: MCP_URL }),
+            where: `Add to \`~/.cursor/mcp.json\`, or \`.cursor/mcp.json\` for one project, and connect from Settings → MCP. Then run \`${SKILLS_COMMAND}\` in your project root.`,
+        },
     },
     {
         id: "github-copilot",
@@ -94,6 +130,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Multi-provider",
         context: "Indexed codebase",
         openSource: false,
+        setup: {
+            language: "json",
+            code: mcpConfig("servers", { type: "http", url: MCP_URL }),
+            where: `Add to \`.vscode/mcp.json\` with agent mode enabled, and start the server from the MCP view. Then run \`${SKILLS_COMMAND}\` in your project root.`,
+        },
     },
     {
         id: "vscode",
@@ -105,6 +146,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Multi-provider",
         context: "Project memory",
         openSource: true,
+        setup: {
+            language: "json",
+            code: mcpConfig("servers", { type: "http", url: MCP_URL }),
+            where: `Add to \`.vscode/mcp.json\`, or the user-level \`mcp.json\`, and start the server from the MCP view. Then run \`${SKILLS_COMMAND}\` in your project root.`,
+        },
     },
     {
         id: "windsurf",
@@ -116,6 +162,11 @@ export const AGENTS: AgentSummary[] = [
         model: "Multi-provider",
         context: "Indexed codebase",
         openSource: false,
+        setup: {
+            language: "json",
+            code: mcpConfig("mcpServers", { serverUrl: MCP_URL }),
+            where: `Add to \`~/.codeium/windsurf/mcp_config.json\`, restart Windsurf, and connect from Settings → MCP. Then run \`${SKILLS_COMMAND}\` in your project root.`,
+        },
     },
     {
         id: "zed",
@@ -127,5 +178,10 @@ export const AGENTS: AgentSummary[] = [
         model: "BYOK",
         context: "Project memory",
         openSource: true,
+        setup: {
+            language: "json",
+            code: mcpConfig("context_servers", { url: MCP_URL }),
+            where: `Add to \`~/.config/zed/settings.json\` and restart Zed. Then run \`${SKILLS_COMMAND}\` in your project root.`,
+        },
     },
 ];

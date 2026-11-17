@@ -254,17 +254,17 @@ Four things the server will not do, whatever it is asked:
 
 The hosted server covers SurrealDB Cloud. For a database the user runs, SurrealDB 3.1 and later ship an MCP server inside the binary, publishing the same data tools.
 
-Over HTTP, `surreal start` exposes `POST /mcp` on the same address as the REST API, authenticated the same way:
+Over HTTP, `surreal db start` exposes `POST /mcp` on the same address as the REST API, authenticated the same way:
 
 ```bash
-surreal start --user root --pass secret --bind 127.0.0.1:8000 memory
+surreal db start --user root --pass secret --bind 127.0.0.1:8000 memory
 # MCP endpoint: http://127.0.0.1:8000/mcp
 ```
 
 Over stdio, the client spawns SurrealDB as a child process with an embedded datastore:
 
 ```bash
-surreal mcp --user root --pass secret --ns main --db main memory
+surreal db mcp --user root --pass secret --ns main --db main memory
 ```
 
 Every stdio call runs with owner-level access, because there is no network handshake to attach credentials to. Use it for local development on a trusted machine, and use HTTP for anything shared. Run `/mcp` behind TLS in production: the session header acts like a bearer token until the session expires.

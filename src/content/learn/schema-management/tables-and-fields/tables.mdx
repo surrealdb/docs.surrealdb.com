@@ -6,20 +6,46 @@ description: "Declaring tables: schemaless vs schemafull, relations, views, chan
 
 # Tables
 
-A table is the first structural unit most people define: it is a named home for records. Even a `SELECT` statement requires a table to be defined before it will work.
+A table is the first structural unit most people define: it is a named home for records. The examples on this page build the tables of a small shop, with customers, products, orders and the purchases that link them. Even a `SELECT` statement requires a table to be defined before it will work.
 
 ```surql
-SELECT *
-  FROM doesnt_exist; -- Error: "The table 'doesnt_exist' does not exist"
-DEFINE TABLE doesnt_exist;
-SELECT * FROM doesnt_exist;
+/**[test]
+
+[[test.results]]
+match = "$result = \"The table 'product' does not exist\" OR $error = \"The table 'product' does not exist\""
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[]"
+
+*/
+SELECT * FROM product;
+//- "The table 'product' does not exist"
+DEFINE TABLE product;
+SELECT * FROM product;
+//- []
 ```
 
 As a convenience, the creation of a record in a non-strict database will [define the table](/docs/reference/query-language/statements/define/database#defining-a-strict-database) for you. The following example does not return any errors because the table definition will exist once `CREATE` is executed.
 
 ```surql
-CREATE doesnt_exist;
-SELECT * FROM doesnt_exist;
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: product:mug, name: 'Travel mug' }]"
+
+*/
+CREATE product:mug SET name = "Travel mug";
+SELECT * FROM product;
+```
+
+```surql title="Output"
+[{ id: product:mug, name: 'Travel mug' }]
 ```
 
 `DEFINE TABLE` can also set high-level rules, such as whether new fields are allowed without a definition, whether records are normal documents or graph edges, whether the table is a pre-computed view, and who may select / create / update / delete. A [`COMMENT`](/docs/reference/query-language/statements/define/overview#comments-on-definitions) is optional, and is useful when the table's role, record-ID convention, or graph edges would otherwise be unclear to readers or to agents that load the schema via [`INFO`](/docs/reference/query-language/statements/info) or MCP.
@@ -30,24 +56,65 @@ You need appropriate auth (root, namespace, or database owner/editor) and an act
 
 ## Defining a changefeed on a table
 
-The following expression shows how you can define a `CHANGEFEED` for a table. After creating, updating, and deleting records in the table as usual, using `SHOW CHANGES FOR` returns the mutations recorded in that window. If an entry reflects an update to an existing record and the feed stores differences (`INCLUDE ORIGINAL`), the diff is a **reverse diff**, namely the operations needed to reach the state immediately before that write. See [`DEFINE TABLE`](/docs/reference/query-language/statements/define/table#example-usage) for full examples and response shapes.
+A `CHANGEFEED` records every change to a table's records for a period of time. After creating, updating, and deleting records in the table as usual, `SHOW CHANGES FOR` returns the mutations recorded in that window, starting from a version number or a datetime after the changefeed began. If an entry reflects an update to an existing record and the feed stores differences (`INCLUDE ORIGINAL`), the diff is a **reverse diff**, namely the operations needed to reach the state immediately before that write. See [`DEFINE TABLE`](/docs/reference/query-language/statements/define/table#example-usage) for full examples and response shapes.
+
+The shop keeps three days of changes to its orders, so that another service can read what changed:
 
 ```surql
--- Define the changefeed and its duration
--- Optionally, append INCLUDE ORIGINAL to include info
--- on the current record before a change took place
-DEFINE TABLE reading CHANGEFEED 3d;
+/**[test]
 
--- Create some records in the reading table
-CREATE reading SET story = "Once upon a time";
-CREATE reading SET story = "there was a database";
+[[test.results]]
+error = false
 
--- Replay changes to the reading table since a certain date
--- Must be after the timestamp at which the changefeed began
-SHOW CHANGES FOR TABLE reading SINCE d"2025-09-07T01:23:52Z" LIMIT 10;
+[[test.results]]
+error = false
 
--- Alternatively, show the changes for the table since a version number
-SHOW CHANGES FOR TABLE reading SINCE 0 LIMIT 10;
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Keep three days of changes to the order table
+DEFINE TABLE order CHANGEFEED 3d;
+
+CREATE order:1 SET total = 25;
+UPDATE order:1 SET total = 30;
+
+-- Read the changes since version 0
+SHOW CHANGES FOR TABLE order SINCE 0 LIMIT 10;
+```
+
+The output holds one entry for the table definition and one for each write, each with a `versionstamp` that differs on every run:
+
+```surql title="Example output"
+[
+	{
+		changes: [
+			{
+				define_table: {
+					changefeed: { expiry: 3d, original: false },
+					drop: false,
+					id: 0,
+					kind: { kind: 'ANY' },
+					name: 'order',
+					permissions: { create: false, delete: false, select: false, update: false },
+					schemafull: false
+				}
+			}
+		],
+		versionstamp: 117624152836407296
+	},
+	{
+		changes: [{ update: { id: order:1, total: 25 } }],
+		versionstamp: 117624152836472832
+	},
+	{
+		changes: [{ update: { id: order:1, total: 30 } }],
+		versionstamp: 117624152836472833
+	}
+]
 ```
 
 ## Schemafull tables
@@ -55,123 +122,233 @@ SHOW CHANGES FOR TABLE reading SINCE 0 LIMIT 10;
 The following example demonstrates the `SCHEMAFULL` portion of the `DEFINE TABLE` statement. When a table is defined as schemafull, the database strictly enforces any schema definitions that are specified using the `DEFINE TABLE` statement. New fields can not be added to a `SCHEMAFULL` table unless they are defined via the [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field) statement.
 
 ```surql
--- Create schemafull user table.
-DEFINE TABLE user SCHEMAFULL;
+/**[test]
 
--- Define some fields.
-DEFINE FIELD firstName ON TABLE user TYPE string;
-DEFINE FIELD lastName ON TABLE user TYPE string;
-DEFINE FIELD email ON TABLE user TYPE string
-  ASSERT string::is_email($value);
+[[test.results]]
+error = false
 
--- Statement succeeds as all defined fields are present
-CREATE user CONTENT {
-    firstName: 'Tobie',
-    lastName: 'Hitchcock',
-    email: 'Tobie.Hitchcock@surrealdb.com'
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ email: 'ana@example.com', id: customer:ana, name: 'Ana Silva' }]"
+
+[[test.results]]
+error = true
+
+*/
+DEFINE TABLE customer SCHEMAFULL;
+DEFINE FIELD name ON TABLE customer TYPE string;
+DEFINE FIELD email ON TABLE customer TYPE string
+  ASSERT $value.is_email();
+
+-- Succeeds, as every field is defined and valid
+CREATE customer:ana CONTENT {
+    name: 'Ana Silva',
+    email: 'ana@example.com'
 };
+//- [{ email: 'ana@example.com', id: customer:ana, name: 'Ana Silva' }]
+
+-- Fails, because `newsletter` is not a defined field
+CREATE customer:ben CONTENT {
+    name: 'Ben Okafor',
+    email: 'ben@example.com',
+    newsletter: true
+};
+```
+
+```surql title="Error output"
+"Found field 'newsletter', but no such field exists for table 'customer'"
 ```
 
 ## Schemaless tables
 
-The following example demonstrates the `SCHEMALESS` portion of the `DEFINE TABLE` statement. This allows you to explicitly state that the specified table has no schema.
+The following example demonstrates the `SCHEMALESS` portion of the `DEFINE TABLE` statement. This allows you to explicitly state that the specified table has no schema. The fields that are defined are still checked, and any other field is accepted.
 
 ```surql
--- Create schemaless user table.
-DEFINE TABLE user SCHEMALESS;
+/**[test]
 
--- Define some fields.
-DEFINE FIELD firstName ON TABLE user TYPE string;
-DEFINE FIELD lastName ON TABLE user TYPE string;
-DEFINE FIELD email ON TABLE user TYPE string
-  ASSERT string::is_email($value);
+[[test.results]]
+error = false
 
--- Statement succeeds even with extra `photoURI` field, as table is schemaless
-CREATE user:tobie SET 
-    firstName = 'Tobie', 
-    lastName = 'Hitchcock', 
-    email = 'Tobie.Hitchcock@surrealdb.com', 
-    photoURI = 'photo/yxCFi22Jw2.webp';
+[[test.results]]
+error = false
 
--- Statement fails because `email` does not pass validation
-CREATE user:jaime SET 
-    firstName = 'Jamie', 
-    lastName = 'Hitchcock', 
-    email = 'Jamie.Hitchcock', 
-    photoURI = 'photo/yxCFi22Jw2.webp';
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ email: 'ana@example.com', id: customer:ana, name: 'Ana Silva', newsletter: true }]"
+
+[[test.results]]
+error = true
+
+*/
+DEFINE TABLE customer SCHEMALESS;
+DEFINE FIELD name ON TABLE customer TYPE string;
+DEFINE FIELD email ON TABLE customer TYPE string
+  ASSERT $value.is_email();
+
+-- Succeeds even with the extra `newsletter` field
+CREATE customer:ana CONTENT {
+    name: 'Ana Silva',
+    email: 'ana@example.com',
+    newsletter: true
+};
+//- [{ email: 'ana@example.com', id: customer:ana, name: 'Ana Silva', newsletter: true }]
+
+-- Fails, because `email` does not pass validation
+CREATE customer:ben CONTENT {
+    name: 'Ben Okafor',
+    email: 'ben.okafor',
+    newsletter: false
+};
+```
+
+```surql title="Error output"
+"Found 'ben.okafor' for field `email`, with record `customer:ben`, but field must conform to: $value.is_email()"
 ```
 
 ## `DROP` tables and pre-computed table views
 
 In SurrealDB, like in other databases, you can create views. The way you create views is using the `DEFINE TABLE` statement like you would for any other table, then adding the `AS` clause at the end with your `SELECT` query.
 
-`DROP` tables are useful in combination with events or foreign (view) tables, as you can compute a record and drop the input.
+`DROP` tables are useful in combination with events or foreign (view) tables, as you can compute a record and drop the input. The shop counts how often each product page is viewed, without keeping a record of every single view:
 
 ```surql
-DEFINE TABLE review DROP;
--- Define a table as a view which aggregates data from the review table
-DEFINE TABLE avg_product_review TYPE NORMAL AS
-SELECT
-	count() AS number_of_reviews,
-	math::mean(<float> rating) AS avg_review,
-	->product.id AS product_id,
-	->product.name AS product_name
-FROM review
-GROUP BY product_id, product_name;
+/**[test]
 
--- Query the projection
-SELECT * FROM avg_product_review;
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: product_views:[product:lamp], product: product:lamp, views: 1 }, { id: product_views:[product:mug], product: product:mug, views: 2 }]"
+
+[[test.results]]
+value = "[]"
+
+*/
+-- Records written to page_view are not stored
+DEFINE TABLE page_view DROP;
+-- A view that counts the page views of each product
+DEFINE TABLE product_views AS
+    SELECT count() AS views, product
+    FROM page_view
+    GROUP BY product;
+
+CREATE page_view SET product = product:mug;
+CREATE page_view SET product = product:mug;
+CREATE page_view SET product = product:lamp;
+
+SELECT * FROM product_views;
+//- [{ id: product_views:[product:lamp], product: product:lamp, views: 1 }, { id: product_views:[product:mug], product: product:mug, views: 2 }]
+SELECT * FROM page_view;
+//- []
 ```
 
 ## Defining permissions
 
 Table `PERMISSIONS` control what [record users](/docs/learn/security/authentication/users#record-users) (and [guests](/docs/learn/security/authorization/capabilities#guest-access), when guest access is enabled) may do with records in that table. They do not restrict [system users](/docs/learn/security/authentication/users#system-users) at the root, namespace, or database level, as those users are governed by roles instead.
 
-If you omit the clause, SurrealDB will default to `PERMISSIONS NONE` which denies `SELECT`, `CREATE`, `UPDATE`, and `DELETE` for record users until you grant access explicitly. The opposite shorthand is `PERMISSIONS FULL`, which allows all four operations.
+If you omit the clause, SurrealDB will default to `PERMISSIONS NONE` which denies `SELECT`, `CREATE`, `UPDATE`, and `DELETE` for record users until you grant access explicitly. The opposite shorthand is `PERMISSIONS FULL`, which allows all four operations. The output of `INFO FOR DB` shows the default for a table defined by a `CREATE` statement and for one defined by `DEFINE TABLE`:
 
 ```surql
-CREATE some_table;
-DEFINE TABLE some_other_table;
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+{
+	accesses: {},
+	analyzers: {},
+	apis: {},
+	buckets: {},
+	compatibility: 4,
+	configs: {},
+	extensions: {},
+	functions: {},
+	models: {},
+	params: {},
+	sequences: {},
+	tables: {
+		customer: 'DEFINE TABLE customer TYPE ANY SCHEMALESS PERMISSIONS NONE',
+		order: 'DEFINE TABLE order TYPE ANY SCHEMALESS PERMISSIONS NONE'
+	},
+	types: {},
+	users: {}
+}'''
+
+*/
+CREATE customer:ana;
+DEFINE TABLE order;
 
 INFO FOR DB;
 ```
 
 ```surql title="Output"
 {
+	accesses: {},
 	analyzers: {},
+	apis: {},
+	buckets: {},
+	compatibility: 4,
+	configs: {},
+	extensions: {},
 	functions: {},
 	models: {},
 	params: {},
-	scopes: {},
+	sequences: {},
 	tables: {
-		some_other_table: 'DEFINE TABLE some_other_table TYPE ANY SCHEMALESS PERMISSIONS NONE',
-		some_table: 'DEFINE TABLE some_table TYPE ANY SCHEMALESS PERMISSIONS NONE'
+		customer: 'DEFINE TABLE customer TYPE ANY SCHEMALESS PERMISSIONS NONE',
+		order: 'DEFINE TABLE order TYPE ANY SCHEMALESS PERMISSIONS NONE'
 	},
-	tokens: {},
+	types: {},
 	users: {}
 }
 ```
 
 You can also set independent rules for selecting, creating, updating, and deleting data. Each `FOR` clause is a SurrealQL expression evaluated in the context of the current authentication (often using the [`$auth`](/docs/learn/security/authorization/permissions-and-row-level-security) parameter which is set when a record user authenticates).
 
+In the shop, a customer signs in as a record user and sees only their own orders, while staff see and manage all of them:
+
 ```surql
--- Specify access permissions for the 'post' table
-DEFINE TABLE post SCHEMALESS
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE order SCHEMALESS
 	PERMISSIONS
 		FOR select
-			-- Published posts can be selected
-			WHERE published = true
-			-- A user can select all their own posts
-			OR user = $auth.id
-		FOR create, update
-			-- A user can create or update their own posts
-			WHERE user = $auth.id
-		FOR delete
-			-- A user can delete their own posts
-			WHERE user = $auth.id
-			-- Or an admin can delete any posts
-			OR $auth.admin = true
-;
+			-- A customer sees their own orders, and staff see every order
+			WHERE customer = $auth.id OR $auth.role = "staff"
+		FOR create
+			-- A customer can only place an order for themselves
+			WHERE customer = $auth.id
+		FOR update, delete
+			-- Only staff change or cancel an order
+			WHERE $auth.role = "staff";
 ```
 
 Field permissions work the same way but default to `PERMISSIONS FULL` instead of `NONE`. The table is the main access gate, while field permissions only narrow further when you need to (for example hiding a password). With `FULL`, a field follows the table's rules without adding its own. See [Setting permissions on fields](/docs/learn/schema-management/tables-and-fields/fields-and-validation#setting-permissions-on-fields) and [Permissions & row-level security](/docs/learn/security/authorization/permissions-and-row-level-security).
@@ -187,84 +364,143 @@ With `TYPE NORMAL`, you can specify a table to only store "normal" records, and 
 Finally, with `TYPE RELATION`, you can specify a table to only store relational type content. This can be useful when you want to restrict the type of data that can be stored in a table.
 
 ```surql
-DEFINE TABLE person TYPE ANY;
-DEFINE TABLE person;
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE order TYPE ANY;
+-- The same definition, as TYPE ANY is the default
+DEFINE TABLE OVERWRITE order;
 ```
 
-With `TYPE NORMAL`, you can specify a table to only store "normal" records, and not relations.
+With `TYPE NORMAL`, you can specify a table to only store "normal" records, and not relations. A customer is a normal record, never a link between two others:
 
 ```surql
--- Since it's default, we can also omit the TYPE clause
-DEFINE TABLE person TYPE NORMAL;
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE customer TYPE NORMAL;
 ```
 
-With `TYPE RELATION`, you can specify a table to only store relational type content, and restrict what kind of relations can be stored.
+With `TYPE RELATION`, you can specify a table to only store relational type content, and restrict what kind of relations can be stored. The shop's `bought` table links a customer to what they bought:
 
 ```surql
--- Just a RELATION table, no constraints on the type of table
-DEFINE TABLE likes TYPE RELATION;
+/**[test]
 
--- Define a relation table, and constrain the type of relation which can be stored
-DEFINE TABLE likes TYPE RELATION FROM user TO post;
--- OR use IN and OUT alternatively to FROM and TO
-DEFINE TABLE likes TYPE RELATION IN user OUT post;
--- To allow a link to one of a possible set of record types, use the | operator
-DEFINE TABLE likes TYPE RELATION FROM user TO post|video;
-DEFINE TABLE likes TYPE RELATION IN user OUT post|video;
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Only relations, between any two records
+DEFINE TABLE bought TYPE RELATION;
+
+-- Only relations from a customer to a product
+DEFINE TABLE OVERWRITE bought TYPE RELATION FROM customer TO product;
+-- IN and OUT are the same as FROM and TO
+DEFINE TABLE OVERWRITE bought TYPE RELATION IN customer OUT product;
+-- Use | to allow one of several tables
+DEFINE TABLE OVERWRITE bought TYPE RELATION FROM customer TO product | gift_card;
+DEFINE TABLE OVERWRITE bought TYPE RELATION IN customer OUT product | gift_card;
+```
+
+A relation that goes the wrong way is refused:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
+DEFINE TABLE bought TYPE RELATION FROM customer TO product;
+CREATE customer:ana, product:mug;
+
+RELATE product:mug->bought->customer:ana;
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `in` of `bought:03u2q4cy5qtmki73eg3q`: Expected `record<customer>` but found `product:mug`"
 ```
 
 ## Using ENFORCED to ensure that related records exist
 
-As relations are represented by standalone tables, they can be constructed before any linked records exist.
+As relations are represented by standalone tables, they can be constructed before any linked records exist. A query that starts from the linked records finds nothing until those records are created. Here the `customer` table does not exist yet, so the first `SELECT` returns an error.
 
 ```surql
-RELATE city:one->road_to->city:two SET
-    distance = 12.4,
-    slope = 5.4;
-```
+/**[test]
 
-As such, a query on the relation will return nothing until the records it has been defined upon are created.
+[[test.results]]
+error = false
 
-```surql
-SELECT ->road_to->city FROM city;
+[[test.results]]
+match = "$result = \"The table 'customer' does not exist\" OR $error = \"The table 'customer' does not exist\""
 
-CREATE city:one, city:two;
-SELECT ->road_to->city FROM city;
-```
+[[test.results]]
+error = false
 
-```surql title="Output"
--------- Query --------
+[[test.results]]
+value = "[{ \"->bought\": { \"->product\": [product:mug] } }]"
 
-[]
+*/
+-- Succeeds, although neither record exists
+RELATE customer:ana->bought->product:mug SET quantity = 2;
 
--------- Query --------
+SELECT ->bought->product FROM customer;
+//- "The table 'customer' does not exist"
 
-[
-	{
-		"->road_to": {
-			"->city": [
-				city:two
-			]
-		}
-	},
-	{
-		"->road_to": {
-			"->city": []
-		}
-	}
-]
+CREATE customer:ana, product:mug;
+SELECT ->bought->product FROM customer;
+//- [{ "->bought": { "->product": [product:mug] } }]
 ```
 
 If this behaviour is not desirable, the `ENFORCED` clause can be used on a table of `TYPE RELATION` to disallow a `RELATE` statement from working unless it points to existing data.
 
 ```surql
-DEFINE TABLE road_to TYPE RELATION IN city OUT city ENFORCED;
+/**[test]
 
-RELATE city:one->road_to->city:three SET
-    distance = 5.5,
-    slope = 30.0;
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = "The record 'product:lamp' does not exist"
+
+*/
+DEFINE TABLE bought TYPE RELATION IN customer OUT product ENFORCED;
+CREATE customer:ana;
+
+-- Fails, because the shop has no product:lamp
+RELATE customer:ana->bought->product:lamp SET quantity = 1;
 ```
 
-```surql title="Output"
-"The record 'city:one' does not exist"
+```surql title="Error output"
+"The record 'product:lamp' does not exist"
 ```

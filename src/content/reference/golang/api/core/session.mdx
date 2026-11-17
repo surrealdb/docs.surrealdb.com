@@ -1,14 +1,14 @@
 ---
 position: 2
 title: Session
-description: The Session struct represents an isolated SurrealDB session on a WebSocket connection with its own authentication and namespace state.
+description: Reference for the Session type of the SurrealDB Go SDK - a session attached to a WebSocket connection with its own authentication, namespace, database and variables - and its methods for signing in, refresh tokens, Fork, Reset, Detach, Begin and live queries.
 ---
 
 # `Session` {#session}
 
-The `Session` struct represents an additional SurrealDB session on a WebSocket connection. Each session has its own authentication state, namespace and database selection, and connection variables. Sessions require SurrealDB v3+ and a WebSocket connection.
+A `Session` is an extra session on a WebSocket connection, with its own authentication, namespace and database, and variables. [`db.Attach()`](/docs/reference/golang/api/core/db#attach) and [`db.Fork()`](/docs/reference/golang/api/core/db#fork) return one, and [`db.Sessions()`](/docs/reference/golang/api/core/db#sessions) lists them. Every query and CRUD function, such as [`Query`](/docs/reference/golang/api/core/db#query) and [`Select`](/docs/reference/golang/api/core/db#select), takes a `*Session` in place of a `*DB`. See [Multiple sessions](/docs/reference/golang/concepts/multiple-sessions) for explanations and examples.
 
-`Session` satisfies the [`sendable`](/docs/reference/golang/api/types#sendable) constraint, so all generic functions like [`Query`](/docs/reference/golang/api/core/db#query), [`Select`](/docs/reference/golang/api/core/db#select), [`Create`](/docs/reference/golang/api/core/db#create), etc. accept `*Session` directly.
+Sessions need a WebSocket connection. When the client reconnects, it attaches each session again under the same UUID and restores its state.
 
 **Source:** [session.go](https://github.com/surrealdb/surrealdb.go/blob/main/session.go)
 
@@ -18,49 +18,42 @@ The `Session` struct represents an additional SurrealDB session on a WebSocket c
 
 ### `db.Attach()` {#attach}
 
-Creates a new session on the WebSocket connection. The session starts unauthenticated and without a selected namespace or database.
+Attaches a new session to the connection. The new session starts signed out, with no namespace or database selected.
 
 ```go title="Syntax"
 session, err := db.Attach(ctx)
 ```
 
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Returns:** `(*Session, error)`
-
-Returns `ErrSessionsNotSupported` if the connection is not WebSocket.
-
-#### Examples
+**Returns:** `(*Session, error)`. On an HTTP connection, the error is `constants.ErrSessionsNotSupported`.
 
 ```go
 session, err := db.Attach(ctx)
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
 }
 defer session.Detach(ctx)
 
-session.SignIn(ctx, surrealdb.Auth{Username: "root",
-    Password: "secret"})
-session.Use(ctx, "my_ns", "my_db")
+if _, err := session.SignIn(ctx, surrealdb.Auth{Username: "root", Password: "secret"}); err != nil {
+	log.Fatal(err)
+}
+if err := session.Use(ctx, "surrealdb", "docs"); err != nil {
+	log.Fatal(err)
+}
 
-results, err := surrealdb.Query[[]Person](ctx, session,
-    "SELECT * FROM persons", nil)
+people, err := surrealdb.Query[[]Person](ctx, session, "SELECT * FROM person", nil)
 ```
+
+### `.Fork()` {#fork}
+
+Attaches a new session that starts as a copy of this one. The new session has the same namespace, database and variables, and is signed in with the same access token. After that, the two sessions are independent. `.Fork()` does not copy a token pair.
+
+```go title="Syntax"
+fork, err := session.Fork(ctx)
+```
+
+**Returns:** `(*Session, error)`
+
+After the access token of the session expires, `.Fork()` returns an error that wraps `constants.ErrForkTokenExpired`. For a session that `db.Sessions()` lists but this client did not attach, it returns `constants.ErrForkUntracked`.
 
 ---
 
@@ -68,7 +61,7 @@ results, err := surrealdb.Query[[]Person](ctx, session,
 
 ### `.ID()` {#id}
 
-Returns the session's UUID.
+Returns the UUID of the session.
 
 ```go title="Syntax"
 id := session.ID()
@@ -78,35 +71,13 @@ id := session.ID()
 
 ---
 
-## Methods
+## Authentication methods
 
-### `.Detach()` {#detach}
-
-Removes the session from the server. After calling `.Detach()`, the session cannot be used.
-
-```go title="Syntax"
-err := session.Detach(ctx)
-```
-
-**Returns:** `error`
-
-Returns [`ErrSessionClosed`](/docs/reference/golang/api/errors#sentinel-errors) if the session has already been detached.
-
-### `.Begin()` {#begin}
-
-Starts a new interactive transaction within this session.
-
-```go title="Syntax"
-tx, err := session.Begin(ctx)
-```
-
-**Returns:** `(*Transaction, error)` - see [`Transaction`](/docs/reference/golang/api/core/transaction)
-
-Returns [`ErrSessionClosed`](/docs/reference/golang/api/errors#sentinel-errors) if the session has been detached.
+These methods work like the methods with the same name on [`DB`](/docs/reference/golang/api/core/db#authentication-methods), but only for this session.
 
 ### `.SignIn()` {#signin}
 
-Signs in an existing user within this session.
+Signs a user in to this session.
 
 ```go title="Syntax"
 token, err := session.SignIn(ctx, authData)
@@ -116,7 +87,7 @@ token, err := session.SignIn(ctx, authData)
 
 ### `.SignInWithRefresh()` {#signinwithrefresh}
 
-Signs in with refresh token support within this session. SurrealDB v3+ only.
+Signs in through a `TYPE RECORD` access method defined `WITH REFRESH`, and returns an access token and a refresh token.
 
 ```go title="Syntax"
 tokens, err := session.SignInWithRefresh(ctx, authData)
@@ -126,7 +97,7 @@ tokens, err := session.SignInWithRefresh(ctx, authData)
 
 ### `.SignUp()` {#signup}
 
-Signs up a new record user within this session.
+Signs up a record user, and signs them in to this session.
 
 ```go title="Syntax"
 token, err := session.SignUp(ctx, authData)
@@ -136,7 +107,7 @@ token, err := session.SignUp(ctx, authData)
 
 ### `.SignUpWithRefresh()` {#signupwithrefresh}
 
-Signs up with refresh token support within this session. SurrealDB v3+ only.
+Signs up through an access method defined `WITH REFRESH`, and returns an access token and a refresh token.
 
 ```go title="Syntax"
 tokens, err := session.SignUpWithRefresh(ctx, authData)
@@ -144,9 +115,39 @@ tokens, err := session.SignUpWithRefresh(ctx, authData)
 
 **Returns:** [`(*Tokens, error)`](/docs/reference/golang/api/types#tokens)
 
+### `.Refresh()` {#refresh}
+
+Exchanges a token pair for a new one, and authenticates this session with it.
+
+```go title="Syntax"
+newTokens, err := session.Refresh(ctx, tokens)
+```
+
+**Returns:** `(*Tokens, error)`
+
+### `.Revoke()` {#revoke}
+
+Revokes the refresh token of a pair. The session stays signed in.
+
+```go title="Syntax"
+err := session.Revoke(ctx, tokens)
+```
+
+**Returns:** `error`
+
+### `.Tokens()` {#tokens}
+
+Returns the token pair that this session holds. It returns `nil` when the session holds no pair or when token renewal is off.
+
+```go title="Syntax"
+pair := session.Tokens()
+```
+
+**Returns:** `*Tokens`
+
 ### `.Authenticate()` {#authenticate}
 
-Authenticates this session with a JWT token.
+Authenticates this session with a JWT.
 
 ```go title="Syntax"
 err := session.Authenticate(ctx, token)
@@ -156,7 +157,7 @@ err := session.Authenticate(ctx, token)
 
 ### `.Invalidate()` {#invalidate}
 
-Invalidates the current authentication for this session.
+Signs this session out.
 
 ```go title="Syntax"
 err := session.Invalidate(ctx)
@@ -164,9 +165,23 @@ err := session.Invalidate(ctx)
 
 **Returns:** `error`
 
+### `.Info()` {#info}
+
+Returns the record of the record user signed in to this session.
+
+```go title="Syntax"
+info, err := session.Info(ctx)
+```
+
+**Returns:** `(map[string]any, error)`
+
+---
+
+## Session state
+
 ### `.Use()` {#use}
 
-Selects the namespace and database for this session.
+Selects the namespace and database of this session.
 
 ```go title="Syntax"
 err := session.Use(ctx, ns, database)
@@ -176,7 +191,7 @@ err := session.Use(ctx, ns, database)
 
 ### `.Let()` {#let}
 
-Defines a variable scoped to this session.
+Sets a variable in this session. The client keeps a copy of the variable, encoded once. It uses this copy to set the variable again when it reconnects, and to copy the variable to a fork.
 
 ```go title="Syntax"
 err := session.Let(ctx, key, val)
@@ -194,19 +209,19 @@ err := session.Unset(ctx, key)
 
 **Returns:** `error`
 
-### `.Info()` {#info}
+### `.Reset()` {#reset}
 
-Returns the record of the currently authenticated user in this session.
+Returns this session to the state it had when the client attached it. It signs the session out, clears its namespace, database and variables, and kills its live queries. The session stays attached.
 
 ```go title="Syntax"
-info, err := session.Info(ctx)
+err := session.Reset(ctx)
 ```
 
-**Returns:** `(map[string]any, error)`
+**Returns:** `error`
 
 ### `.Version()` {#version}
 
-Returns the SurrealDB version information.
+Returns the version of the server.
 
 ```go title="Syntax"
 ver, err := session.Version(ctx)
@@ -214,9 +229,23 @@ ver, err := session.Version(ctx)
 
 **Returns:** [`(*VersionData, error)`](/docs/reference/golang/api/types#versiondata)
 
+---
+
+## Transactions and live queries
+
+### `.Begin()` {#begin}
+
+Starts an interactive transaction in this session.
+
+```go title="Syntax"
+tx, err := session.Begin(ctx)
+```
+
+**Returns:** `(*Transaction, error)`. See [`Transaction`](/docs/reference/golang/api/core/transaction). After `.Detach()`, the error is `constants.ErrSessionClosed`.
+
 ### `.LiveNotifications()` {#livenotifications}
 
-Returns the notification channel for a live query.
+Returns the notification channel of a live query that this session started with [`Live`](/docs/reference/golang/api/core/db#live).
 
 ```go title="Syntax"
 ch, err := session.LiveNotifications(liveQueryID)
@@ -226,7 +255,7 @@ ch, err := session.LiveNotifications(liveQueryID)
 
 ### `.CloseLiveNotifications()` {#closelivenotifications}
 
-Closes the notification channel for a live query.
+Closes the notification channel of a live query, without stopping the live query on the server.
 
 ```go title="Syntax"
 err := session.CloseLiveNotifications(liveQueryID)
@@ -236,9 +265,23 @@ err := session.CloseLiveNotifications(liveQueryID)
 
 ---
 
+## Closing a session
+
+### `.Detach()` {#detach}
+
+Removes the session from the server and closes the channels of its live queries. After `.Detach()`, you cannot use the session, and its methods return `constants.ErrSessionClosed`.
+
+```go title="Syntax"
+err := session.Detach(ctx)
+```
+
+**Returns:** `error`
+
+---
+
 ## See also
 
-- [DB](/docs/reference/golang/api/core/db) for the main client reference
-- [Transaction](/docs/reference/golang/api/core/transaction) for session-scoped transactions
+- [DB](/docs/reference/golang/api/core/db) for the client and the query functions
+- [Transaction](/docs/reference/golang/api/core/transaction) for transactions in a session
 - [Multiple sessions](/docs/reference/golang/concepts/multiple-sessions) for session usage patterns
-- [Errors](/docs/reference/golang/api/errors) for `ErrSessionClosed` and `ErrSessionsNotSupported`
+- [Errors](/docs/reference/golang/api/errors#sentinel-errors) for `ErrSessionClosed` and the other session errors

@@ -1,17 +1,18 @@
 ---
 position: 1
 title: Errors
-description: The Go SDK provides structured error types and sentinel errors for handling SurrealDB failures.
+description: Reference for the errors of the SurrealDB Go SDK 2.x - ServerError and its Kind constants, the IsNotFound and other Is helpers, QueryError, RPCError, UnsupportedVersionError, HealthError, ImportError, and the sentinel errors of the surrealdb, connection and constants packages.
 ---
 
 # Errors {#errors}
 
-The Go SDK uses Go's standard `error` interface with typed errors that can be inspected using `errors.As` and `errors.Is`. Errors fall into three categories: structured server errors, query-level errors, and sentinel errors for common failure conditions.
+The Go SDK returns errors that you inspect with `errors.As` and `errors.Is`. This page lists each error type, the kinds of a server error and the helpers that match them, and the sentinel errors. For patterns that check and retry these errors, see [Error handling](/docs/reference/golang/concepts/error-handling).
 
 **Packages:**
-- `github.com/surrealdb/surrealdb.go` (type aliases)
-- `github.com/surrealdb/surrealdb.go/pkg/connection` (definitions)
-- `github.com/surrealdb/surrealdb.go/pkg/constants` (sentinels)
+
+- `github.com/surrealdb/surrealdb.go/v2`, which re-exports the error types of `pkg/connection`
+- `github.com/surrealdb/surrealdb.go/v2/pkg/connection`, which defines `ServerError`, `RPCError` and `HealthError`
+- `github.com/surrealdb/surrealdb.go/v2/pkg/constants`, which defines most sentinel errors
 
 ---
 
@@ -19,105 +20,227 @@ The Go SDK uses Go's standard `error` interface with typed errors that can be in
 
 ### `ServerError` {#servererror}
 
-A structured error returned by SurrealDB v3. Contains a `Kind`, `Message`, `Details`, and an optional `Cause` chain. Use `errors.As` to extract it from any error returned by the SDK.
+An error that the server reports for a request, such as a sign-in, a CRUD function or a query that does not parse. Use `errors.As` to read it from any error the SDK returns.
 
 ```go
 type ServerError struct {
-    Code    int
-    Message string
-    Kind    string
-    Details any
-    Cause   *ServerError
+	Code    int
+	Message string
+	Kind    string
+	Details any
+	Cause   *ServerError
 }
 ```
 
+| Field | Description |
+| --- | --- |
+| `Code` | The JSON-RPC error code, such as `-32000` |
+| `Message` | The message of the error |
+| `Kind` | The kind of the error, one of the [`Kind` constants](#kind-constants) |
+| `Details` | Details for the kind, as `{ kind, details }`, or `nil` |
+| `Cause` | The next error in the chain, or `nil` |
+
 **Methods:**
 
-- `.Error()` - returns the message, joining the cause chain with `": "`
-- `.Unwrap()` - returns the `Cause`, enabling `errors.Unwrap()` traversal
-- `.Is(target)` - returns `true` if `target` is a `ServerError`
-- `.As(target)` - populates `target` if it is `*ServerError` or `**ServerError`
+- `.Error()` returns the message, with the messages of the cause chain joined by `": "`
+- `.Unwrap()` returns `Cause`, so that `errors.Unwrap`, `errors.Is` and `errors.As` walk the chain
 
-**Available as:** `surrealdb.ServerError` (type alias)
-
-#### Examples
+**Available as:** `surrealdb.ServerError`, an alias of `connection.ServerError`
 
 ```go
-import "errors"
+_, err := surrealdb.Create[Person](ctx, db, models.NewRecordID("person", "tobie"), person)
 
-_, err := surrealdb.Select[Person](ctx, db, models.NewRecordID("persons", "missing"))
-if err != nil {
-    var se *surrealdb.ServerError
-    if errors.As(err, &se) {
-        fmt.Println("Kind:", se.Kind)
-        fmt.Println("Message:", se.Message)
-        if se.Details != nil {
-            fmt.Println("Details:", se.Details)
-        }
-    }
+var se *surrealdb.ServerError
+if errors.As(err, &se) {
+	fmt.Println(se.Kind, se.Message)
+}
+```
+
+```text title="Output when person:tobie exists"
+AlreadyExists Database record `person:tobie` already exists
+```
+
+### `Kind` constants {#kind-constants}
+
+The `surrealdb` package re-exports the known values of `ServerError.Kind`:
+
+| Constant | Value |
+| --- | --- |
+| `KindValidation` | `"Validation"` |
+| `KindConfiguration` | `"Configuration"` |
+| `KindThrown` | `"Thrown"` |
+| `KindQuery` | `"Query"` |
+| `KindSerialization` | `"Serialization"` |
+| `KindNotAllowed` | `"NotAllowed"` |
+| `KindNotFound` | `"NotFound"` |
+| `KindAlreadyExists` | `"AlreadyExists"` |
+| `KindConnection` | `"Connection"` |
+| `KindInternal` | `"Internal"` |
+
+[Errors](/docs/reference/rest-api/errors) documents the kinds and their details for every SDK.
+
+### `Is` helpers {#kind-helpers}
+
+Each helper reports whether an error is, or wraps, a `*ServerError` that matches its entry in the table below. It returns `false` for `nil` and for other errors.
+
+| Helper | Kind and detail |
+| --- | --- |
+| `IsNotFound(err)` | `NotFound` |
+| `IsNotAllowed(err)` | `NotAllowed` |
+| `IsInvalidAuth(err)` | `NotAllowed`, `Auth`, `InvalidAuth` |
+| `IsTokenExpired(err)` | `NotAllowed`, `Auth`, `TokenExpired` |
+| `IsScriptingBlocked(err)` | `NotAllowed`, `Scripting` |
+| `IsParseError(err)` | `Validation`, `Parse` |
+| `IsTimedOut(err)` | `Query`, `TimedOut` |
+| `IsCancelled(err)` | `Query`, `Cancelled` |
+| `IsNotExecuted(err)` | `Query`, `NotExecuted` |
+| `IsTransactionConflict(err)` | `Query`, `TransactionConflict`, which is safe to retry |
+| `IsDeserialization(err)` | `Serialization`, `Deserialization` |
+| `IsLiveQueryNotSupported(err)` | `Configuration`, `LiveQueryNotSupported` |
+
+```go
+if surrealdb.IsNotFound(err) {
+	fmt.Println("no such table")
 }
 ```
 
 ### `QueryError` {#queryerror}
 
-Represents a per-statement error within a query result. Returned in the `Error` field of [`QueryResult`](/docs/reference/golang/api/types#queryresult) when an individual statement fails.
+The error of one failed statement of a query. It is the `Error` field of a [`QueryResult`](/docs/reference/golang/api/types#queryresult), and the `Err` field of the `Done` frame of a [`StreamFrame`](/docs/reference/golang/api/types#streamframe). The error that `Query` returns joins the `QueryError` of each failed statement.
 
 ```go
 type QueryError struct {
-    Message string
+	Message string
 }
 ```
 
 **Methods:**
 
-- `.Error()` - returns the error message
-- `.Is(target)` - returns `true` if `target` is a `*QueryError`
+- `.Error()` returns the message
+- `.Is(target)` returns `true` when `target` is a `*QueryError`, so `errors.Is(err, &surrealdb.QueryError{})` reports whether `err` holds one
 
-#### Examples
+A `QueryError` holds the message only, so the `Is` helpers do not match it.
 
 ```go
-results, err := surrealdb.Query[[]any](ctx, db, "INVALID SQL", nil)
+results, err := surrealdb.Query[any](ctx, db, "RETURN 1; THROW 'Not allowed';", nil)
 
 if errors.Is(err, &surrealdb.QueryError{}) {
-    fmt.Println("Query contained errors")
+	for _, qr := range *results {
+		if qr.Error != nil {
+			fmt.Println(qr.Error.Message)
+		}
+	}
 }
+```
 
-for _, qr := range *results {
-    if qr.Error != nil {
-        fmt.Println("Statement error:", qr.Error.Message)
-    }
-}
+```text title="Output"
+An error occurred: Not allowed
 ```
 
 ### `RPCError` {#rpcerror}
 
-An RPC level error with `Code`, `Message`, and `Description` fields. On SurrealDB v3, `ServerError` is preferred as it provides richer information.
+The JSON-RPC error of a failed request, with `Code` and `Message` fields. It unwraps to a `*ServerError`, which has more information. Use `errors.As` with a `*ServerError` instead.
 
-**Available as:** `surrealdb.RPCError` (type alias, deprecated in favour of `ServerError`)
+**Available as:** `surrealdb.RPCError`, an alias of `connection.RPCError`. It is deprecated.
+
+### `UnsupportedVersionError` {#unsupportedversionerror}
+
+The client returns this error when it connects to a server whose version is outside the range that the SDK supports. It does this only with [`WithVersionCheck(true)`](/docs/reference/golang/api/core/db#withversioncheck).
+
+```go
+type UnsupportedVersionError struct {
+	Version string
+	Minimum string
+	Maximum string
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `Version` | The version the server reported |
+| `Minimum` | The oldest version supported, `MinimumServerVersion` |
+| `Maximum` | The first version not supported, `MaximumServerVersion` |
+
+### `HealthError` {#healtherror}
+
+[`db.Health()`](/docs/reference/golang/api/core/db#health) returns this error when the server answers its health check with a status other than `2xx`. The server does this, for example, when it cannot reach its datastore.
+
+```go
+type HealthError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `StatusCode` | The HTTP status code, such as `503` |
+| `Status` | The HTTP status, such as `503 Service Unavailable` |
+| `Body` | The start of the body, at most 4 KiB, with surrounding white space removed |
+
+**Available as:** `surrealdb.HealthError`, an alias of `connection.HealthError`
+
+### `ImportError` {#importerror}
+
+[`db.Import()`](/docs/reference/golang/api/core/db#import) returns this error when statements of the document fail. The server does not roll back the statements that succeed.
+
+```go
+type ImportError struct {
+	Failures []error
+}
+```
+
+`Failures` holds the error of each failed statement, in order. Each error is an `*RPCError` that unwraps to a `*ServerError`.
+
+**Methods:**
+
+- `.Error()` describes the first failure and the number of failures
+- `.Unwrap()` returns `Failures`, so `errors.Is` and `errors.As` look through each of them
 
 ---
 
-## Sentinel errors
+## Sentinel errors {#sentinel-errors}
 
-These are defined in `github.com/surrealdb/surrealdb.go/pkg/constants`:
+Check these with `errors.Is`, because the SDK wraps some of them.
 
-| Error | Value | Description |
-|---|---|---|
-| `ErrSessionsNotSupported` | `"sessions require WebSocket connection"` | Returned when calling `.Attach()` on a non-WebSocket connection |
-| `ErrTransactionsNotSupported` | `"interactive transactions require WebSocket connection"` | Returned when calling `.Begin()` on a non-WebSocket connection |
-| `ErrSessionClosed` | `"session already detached"` | Returned when using a session after `.Detach()` |
-| `ErrTransactionClosed` | `"transaction already committed or canceled"` | Returned when using a transaction after `.Commit()` or `.Cancel()` |
-| `ErrTimeout` | `"timeout"` | Returned when an operation times out |
-| `ErrNoNamespaceOrDB` | `"namespace or database or both are not set"` | Returned when operations require a namespace/database |
+### In `pkg/constants`
 
-### Examples
+| Error | Returned when |
+| --- | --- |
+| `ErrSessionsNotSupported` | You call `Attach`, `Fork` or `Sessions` on an HTTP connection |
+| `ErrTransactionsNotSupported` | You call `Begin` on an HTTP connection |
+| `ErrSessionClosed` | You use a session after `.Detach()` |
+| `ErrTransactionClosed` | You use a transaction after `.Commit()` or `.Cancel()` |
+| `ErrForkTokenExpired` | You call `Fork` after the access token of the session has expired |
+| `ErrForkUntracked` | You call `Fork` on a session that this client did not attach |
+| `ErrNeedsCBOR2` | The SDK tries to encode a value with no plain CBOR form, such as a `models.Regex`, for plain CBOR |
+| `ErrMethodNotAvailable` | A method is not available on the connection |
+
+`ErrNoNamespaceOrDB` is deprecated. The HTTP connection no longer needs a namespace and database for every request, and does not return it.
+
+### In the `surrealdb` package
+
+| Error | Returned when |
+| --- | --- |
+| `ErrClientClosed` | You use the client after `.Close()`, or after it gave up reconnecting |
+| `ErrLiveQueryEnded` | The client ended a live query, instead of restarting it, when it reconnected |
+| `ErrStreamProtocol` | The frames of a streamed query break the streaming protocol |
+
+### In `pkg/connection`
+
+| Error | Returned when |
+| --- | --- |
+| `ErrConnectionClosed` | The client lost the connection while a request waited for its answer |
+
+A request that times out returns an error that wraps `context.DeadlineExceeded`.
 
 ```go
-import "github.com/surrealdb/surrealdb.go/pkg/constants"
+import "github.com/surrealdb/surrealdb.go/v2/pkg/constants"
 
 session, err := db.Attach(ctx)
 if errors.Is(err, constants.ErrSessionsNotSupported) {
-    fmt.Println("Use a WebSocket connection for sessions")
+	log.Fatal("sessions need a WebSocket connection")
 }
 ```
 
@@ -125,8 +248,7 @@ if errors.Is(err, constants.ErrSessionsNotSupported) {
 
 ## See also
 
-- [Error handling](/docs/reference/golang/concepts/error-handling) for error handling patterns and retry guidance
-- [Types reference](/docs/reference/golang/api/types) for [`QueryResult`](/docs/reference/golang/api/types#queryresult) containing `QueryError`
-- [DB reference](/docs/reference/golang/api/core/db) for methods that return these errors
-- [Session reference](/docs/reference/golang/api/core/session) for `ErrSessionClosed` and `ErrSessionsNotSupported`
-- [Transaction reference](/docs/reference/golang/api/core/transaction) for `ErrTransactionClosed` and `ErrTransactionsNotSupported`
+- [Error handling](/docs/reference/golang/concepts/error-handling) for patterns that check errors, and for retry guidance
+- [Types reference](/docs/reference/golang/api/types) for `QueryResult` and `StreamFrame`
+- [DB reference](/docs/reference/golang/api/core/db) for the functions that return these errors
+- [Errors](/docs/reference/rest-api/errors) for the error kinds that every SDK shares

@@ -17,6 +17,12 @@ The full grammar and edge cases live under [`LIVE SELECT`](/docs/reference/query
 With `LIVE SELECT *`, every notification carries the full record: the new state for a create or an update, and the record as it was before deletion for a delete. The table must already exist, for example through a `DEFINE TABLE` statement or an earlier write, or the statement fails with `The table 'person' does not exist`. You receive a UUID as soon as the live query is registered. This UUID can later be passed in to a [`KILL`](/docs/reference/query-language/statements/kill) statement when you want to stop.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "u'b1f1d115-ad0f-460d-8cbf-dbc7ce48851c'"
+
+*/
 LIVE SELECT * FROM person;
 ```
 
@@ -31,6 +37,12 @@ Message layout on the wire is described in the [live query / WebSocket protocol]
 If you prefer patches instead of whole documents on update, use `DIFF`. Updates arrive as [JSON Patch](https://jsonpatch.com/)-style arrays, which can be smaller and easier to merge on the client when records are large.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "u'b87cbb0d-ca15-4f0a-8f86-caa680672aa5'"
+
+*/
 LIVE SELECT DIFF FROM person;
 ```
 
@@ -43,14 +55,59 @@ u'b87cbb0d-ca15-4f0a-8f86-caa680672aa5'
 You can narrow the subscription the same way you would a normal `SELECT`: only records that match your predicate participate.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 LIVE SELECT * FROM person WHERE age > 18;
 ```
+
+The filter is not a query that runs again over the table. Each time a write changes a record, SurrealDB checks that one record against the live query: the `WHERE` clause decides whether the subscriber is notified, and the projection shapes what it receives. While it does so, these parameters describe the change:
+
+| Parameter | Value |
+| --- | --- |
+| `$event` | `'CREATE'`, `'UPDATE'` or `'DELETE'` |
+| `$before` | The record before the write, or `NONE` for a created record |
+| `$after`, `$value` | The record after the write, or `NONE` for a deleted record |
+| `$auth`, `$session`, `$token`, `$access` | The subscriber's own session, not the session that made the write |
+
+A filter on `$event` subscribes to some kinds of change only, such as new records:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+LIVE SELECT * FROM person WHERE $event = 'CREATE';
+```
+
+A filter on `$before` also notifies when a record stops matching. The following live query notifies when a task becomes open, and again when an open task changes to another status:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+LIVE SELECT * FROM task WHERE status = 'open' OR $before.status = 'open';
+```
+
+A deleted record is checked as it was before the delete, so a filter on its fields still matches it. These are the same parameters that a [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) statement reads, so a condition written for an event usually works as a live query filter as well. The [`LIVE SELECT` reference](/docs/reference/query-language/statements/live-select#filter-by-event) has more examples.
 
 ## Consistency and security
 
 Notifications reflect committed work, so a live event will not take place if a transaction is rolled back.
 
-Under heavy concurrency, the system makes a best effort to preserve sensible ordering, but you should not assume a total order across all writers that matches commit order in every edge case.
+The notifications for the commits of one client arrive in the order of those commits. Under heavy concurrency, the system makes a best effort to preserve sensible ordering across clients, but you should not assume a total order across all writers that matches commit order in every edge case.
+
+From SurrealDB 4.0, a live query that is registered while another transaction is writing to its table is still told of that write when the write commits after the live query. Such a notification carries the record as it stands after the commit, and an update arrives without the record as it was before.
+
+The projection, `WHERE` and `FETCH` clauses of a live query are evaluated for each notification, and they cannot change data there: a subquery in them that creates, updates or deletes records is refused, and no notification is sent for that change. The [`LIVE SELECT` reference](/docs/reference/query-language/statements/live-select#consistency-guarantees) has the details.
 
 ### Field permissions
 
@@ -59,6 +116,15 @@ A notification carries the record that changed, and each subscriber gets its own
 This matters because a live query's projection and `WHERE` clause are both written by the subscriber, and either can read one of those parameters. A field the subscriber cannot select reads as `NONE` in both:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 -- Reads a restricted field into the notification, under a name of the caller's choosing
 LIVE SELECT $after.hidden AS leaked FROM test;
 
@@ -75,6 +141,18 @@ On the delete side `$before` covers both, since it is the only parameter still h
 From v3.0.0 onwards you can use session parameters in live queries, such as by binding names with `LET` before you open the subscription.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 LET $table = 'measurement';
 LET $location = 'Tallinn';
 LIVE SELECT * FROM type::table($table) WHERE location == $location;

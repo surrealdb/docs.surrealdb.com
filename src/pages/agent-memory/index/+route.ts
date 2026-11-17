@@ -1,7 +1,12 @@
 import type { PageContext } from "vike/types";
 
 /** First path segment after `/agent-memory/` owned by another Agent Memory page tree. */
-const AGENT_MEMORY_SIBLING_SECTIONS = new Set(["cookbooks", "integrations", "reference"]);
+const AGENT_MEMORY_SIBLING_SECTIONS = new Set([
+    "cookbooks",
+    "integrations",
+    "memory-and-knowledge",
+    "reference",
+]);
 
 export default function route({ urlPathname }: PageContext) {
     const path = urlPathname.replace(/\/$/, "") || "/";

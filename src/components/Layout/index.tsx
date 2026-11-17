@@ -74,8 +74,7 @@ export function DefaultLayout({
                                 gap="sm"
                             >
                                 <ActionIcon
-                                    variant="subtle"
-                                    color="gray"
+                                    variant="default"
                                     hiddenFrom="lg"
                                     onClick={toggleSidebar}
                                     aria-label="Toggle sidebar"

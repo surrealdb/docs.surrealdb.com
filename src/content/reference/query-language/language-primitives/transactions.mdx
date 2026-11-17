@@ -12,7 +12,7 @@ Each statement within SurrealDB is run within its own transaction by default. If
 
 The `BEGIN` or `BEGIN TRANSACTION` statement starts a transaction in which multiple statements can be run together.
 
-```surql title="Starting a transaction"
+```syntax title="Starting a transaction"
 BEGIN [ TRANSACTION ];
 ```
 
@@ -69,7 +69,7 @@ COMMIT TRANSACTION;
 
 The [COMMIT](/docs/reference/query-language/statements/commit) statement is used to commit the statements within a transaction, ensuring that all data modifications become a permanent part of the database.
 
-```surql title="Committing a transaction"
+```syntax title="Committing a transaction"
 COMMIT [ TRANSACTION ];
 ```
 
@@ -112,11 +112,13 @@ UPDATE account:two SET balance -= 300.00;
 COMMIT TRANSACTION;
 ```
 
+A commit can fail after the storage engine has started to write it, for example when a disk write or a sync to disk fails. The engine then cannot tell whether the transaction was applied, and the error says so: `The transaction's commit outcome is unknown; it may or may not have been applied`, followed by the cause. Unlike a write conflict, this error is not marked as retryable. Before running the transaction again, read the records it writes to find out whether it was applied, or write it so that running it twice gives the same result. An error raised before anything is written, such as a write conflict, a read-only or closed transaction, or a transaction that is too large, still means that nothing was applied.
+
 ## Cancelling a transaction
 
 The [CANCEL](/docs/reference/query-language/statements/cancel) statement can be used to cancel the statements within a transaction, reverting or rolling back any data modification made within the transaction as a whole.
 
-```surql title="Cancelling a transaction"
+```syntax title="Cancelling a transaction"
 CANCEL [ TRANSACTION ];
 ```
 
@@ -159,11 +161,47 @@ UPDATE account:two SET balance -= 300.00;
 CANCEL TRANSACTION;
 ```
 
+A cancelled transaction only rolls back changes to the database. Changes outside it, such as [files written to a bucket](/docs/reference/query-language/functions/database-functions/file), are kept.
+
+> [!WARNING]
+> `BEGIN`, `COMMIT` and `CANCEL` only take effect as top-level statements of a query. Inside a block, such as an `IF` or `FOR` body, a bare `{ }` block or a `DEFINE FUNCTION` body, they are ignored without an error. A `CANCEL` inside `IF` does not cancel the transaction, so the statements after it are still committed. To cancel a transaction on a condition, use `THROW` as shown below.
+
 ## THROW to conditionally cancel a transaction
 
 While transactions are automatically rolled back if an error occurs in any of its statements, [THROW](/docs/reference/query-language/statements/throw) can also be used to explicitly break out of a transaction at any point. `THROW` can be followed by any value which serves as the error message, usually a string.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:one }]"
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:two }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "An error occurred: Insufficient funds, would have $-50 after transfer"
+
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:one }, { dollars: 100, id: account:two }]"
+
+*/
+
 CREATE account:one SET dollars =  100;
 CREATE account:two SET dollars =  100;
 
@@ -197,11 +235,73 @@ SELECT * FROM account;
 ]
 ```
 
+## Skipping writes on a condition
+
+A rollback in SurrealQL, whether from `CANCEL` or from an error, always reports every statement in the transaction as not executed. Where the transaction should succeed but some writes are not needed, put those writes inside an `IF` block instead of throwing an error. In the following example, the counter only changes when the vote changes its score.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Setup
+CREATE vote:1 SET score = 3;
+
+BEGIN;
+LET $old = (SELECT VALUE score FROM ONLY vote:1);
+UPSERT vote:1 SET score = 4;
+IF $old != 4 { UPSERT counter:1 SET n += 1 };
+COMMIT;
+```
+
+For more than one dependent statement, a block with an early `RETURN` works as a guard clause, and `CONTINUE` and `BREAK` control a loop, all without ending the transaction. See [Control flow inside a transaction](/docs/learn/querying/concepts-and-guides/transactions#control-flow-inside-a-transaction).
+
+To roll back on a condition without returning an error, use a client-side transaction from an SDK instead. The client starts the transaction, checks the results of its queries, and then commits or cancels it. See [manual transactions in Rust](/docs/reference/rust/concepts/transaction) and [transactions in JavaScript](/docs/reference/javascript/concepts/transactions).
+
 ## Nested transactions and savepoints
 
 A transaction cannot contain another transaction, and SurrealQL has no savepoints to roll back part of one. A `BEGIN` inside an open transaction aborts the whole outer transaction, so none of its changes are written.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "Tried to start a transaction while another transaction was open"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a nested BEGIN"
+
+[[test.results]]
+error = "Invalid statement: Cannot COMMIT without starting a transaction"
+
+*/
+
 BEGIN;
 CREATE account:three SET dollars = 100;
 BEGIN;
@@ -222,6 +322,16 @@ A transaction always commits or cancels as a whole. To keep the earlier steps wh
 A transaction written with `BEGIN` and `COMMIT` has to begin and end in the same query: one call to `query()` in an SDK, or one request to the HTTP `/sql` endpoint. When the query ends, a transaction that is still open is cancelled, and a `COMMIT` sent in a later request has no transaction to commit:
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "Missing COMMIT statement"
+
+*/
+
 -- First request
 BEGIN;
 CREATE step:one;
@@ -232,6 +342,13 @@ Missing COMMIT statement
 ```
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = "Invalid statement: Cannot COMMIT without starting a transaction"
+
+*/
+
 -- Second request
 COMMIT;
 ```

@@ -1,15 +1,15 @@
 ---
 position: 6
 title: RecordID
-description: Record identifier with table name and ID components.
+description: "RecordID and StringRecordId in the Python SDK: the RecordID constructor and its type checks, RecordIdValue, table_name and id, binding a record ID in a query, str() and escaping, RecordID.parse(), equality and hashing, StringRecordId for SurrealQL text, pydantic fields and RecordIdType."
 ---
 
 # `RecordID` {#recordid}
 
-A `RecordID` represents a unique record identifier in SurrealDB, combining a table name with an ID value. It is the Python equivalent of SurrealDB's `record` type.
+A record ID names one record: a table name and an ID within that table, such as `person:tobie`. The Python SDK has two classes for a record ID. `RecordID` holds the two parts as Python values, and [`StringRecordId`](#stringrecordid) holds a record ID as SurrealQL text for the server to parse. This page documents both classes and the type aliases around them.
 
 ```python title="Import"
-from surrealdb import RecordID
+from surrealdb import RecordID, RecordIdValue, StringRecordId
 ```
 
 **Source:** [record_id.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/types/record_id.py)
@@ -34,12 +34,12 @@ RecordID(table_name, identifier)
         <tr>
             <td><code>table_name</code> <Label label="required" /></td>
             <td><code>str</code></td>
-            <td>The name of the table this record belongs to.</td>
+            <td>The name of the table that holds the record.</td>
         </tr>
         <tr>
             <td><code>identifier</code> <Label label="required" /></td>
-            <td><code>Any</code></td>
-            <td>The unique identifier for the record within the table.</td>
+            <td><a href="#recordidvalue"><code>RecordIdValue</code></a></td>
+            <td>The ID of the record within the table: a <code>str</code>, <code>int</code>, <code>uuid.UUID</code>, <code>list</code>, <code>tuple</code>, <code>dict</code> or <a href="/docs/reference/python/api/values/range"><code>Range</code></a>. A <code>Range</code> targets every record in the range.</td>
         </tr>
     </tbody>
 </table>
@@ -47,24 +47,116 @@ RecordID(table_name, identifier)
 ### Examples
 
 ```python title="String ID"
-record = RecordID("users", "john")
+RecordID("person", "tobie")
 ```
 
 ```python title="Numeric ID"
-record = RecordID("products", 42)
+RecordID("post", 42)
 ```
 
-```python title="List ID"
-record = RecordID("events", ["2025", "01", "01"])
+```python title="Array ID"
+RecordID("reading", ["London", 2025])
+```
+
+```python title="Object ID"
+RecordID("reading", {"city": "Paris", "day": 1})
+```
+
+```python title="UUID ID"
+import uuid
+
+RecordID("account", uuid.UUID("019d764a-c692-7631-a182-de9d745eb127"))
+```
+
+The type of the ID is part of the record ID. `RecordID("post", 42)` and `RecordID("post", "42")` name two different records, so a lookup with the wrong type finds nothing. A `tuple` is sent as an array and reads back as a `list`.
+
+The constructor checks the type of both arguments and raises `TypeError` before anything is sent. A table name must be a `str`, so `RecordID(Table("person"), 1)` raises as well. An ID cannot be a `bool`, `float`, `None`, `bytes`, `set` or [`SurrealSet`](/docs/reference/python/api/values/set). To have the server generate an ID, pass the table instead, as in `db.create(Table("person"), data)`.
+
+```python
+RecordID("person", 1.5)
+```
+
+```text title="Error output"
+TypeError: RecordID() id must be one of str, int, uuid.UUID, list, tuple, dict or Range, got float: 1.5. SurrealDB has no float record id - use an int, or '1.5' for a string id.
 ```
 
 ---
 
-## Static methods {#static-methods}
+## Properties {#properties}
 
-### `RecordID.parse()` {#parse}
+| Property | Type | Description |
+|---|---|---|
+| `table_name` | `str` | The table name, without escaping. |
+| `id` | [`Value`](/docs/reference/python/api/types#value) | The ID within the table, without escaping. |
 
-Parses a record ID from its string representation.
+```python
+record = RecordID("person", "tobie")
+print(record.table_name, record.id)
+```
+
+```text title="Output"
+person tobie
+```
+
+`id` is typed as `Value` rather than `RecordIdValue`, because a record ID read from the server can hold any value the server sends. Annotate a value that you build with [`RecordIdValue`](#recordidvalue).
+
+---
+
+## Record IDs in queries {#queries}
+
+Pass a `RecordID` to a query as a variable. It is sent as a typed value, so it needs no escaping and cannot change the meaning of the query text. CRUD methods such as `select()` and `create()` take a `RecordID` directly as their target.
+
+```python
+from surrealdb import RecordID, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    person = RecordID("person", "tobie")
+    db.create(person, {"name": "Tobie"})
+
+    query = db.query("SELECT name FROM $person", {"person": person})
+    print(query.execute())
+```
+
+```python title="Output"
+[[{'name': 'Tobie'}]]
+```
+
+A variable can only stand for a whole record ID. SurrealQL does not accept a variable as the ID part of a record ID literal, so `person:$id` is a parse error. To build a record ID from a variable inside SurrealQL, use `type::record("person", $id)`.
+
+---
+
+## Converting to text {#str}
+
+`str()` renders a record ID as SurrealQL text, for logs and for query text that cannot use a variable. `repr()` shows the two parts.
+
+```python
+print(str(RecordID("person", "tobie")))
+print(str(RecordID("users", 123)))
+print(str(RecordID("users", "123")))
+print(str(RecordID("users", "john-doe")))
+print(repr(RecordID("users", "123")))
+```
+
+```text title="Output"
+person:tobie
+users:123
+users:⟨123⟩
+users:⟨john-doe⟩
+RecordID(table_name=users, record_id='123')
+```
+
+A string ID that would otherwise read as a number, or that holds characters such as `-`, is escaped, and so is a table name that needs it. The SDK escapes with `⟨ ⟩`, which every supported server parses. SurrealDB 3.0 and later display the same record ID with backticks, as `` users:`john-doe` ``, and read both forms. `escape_identifier(name)`, which is exported from `surrealdb`, escapes one identifier the same way.
+
+Do not build query text from `record.id` alone. The string ID `"123"` and the integer ID `123` give the same characters, so only `str(record)`, which escapes the string, keeps them apart.
+
+---
+
+## `RecordID.parse()` {#parse}
+
+`RecordID.parse()` builds a `RecordID` from `table:id` text.
 
 ```python title="Syntax"
 RecordID.parse(record_str)
@@ -82,90 +174,166 @@ RecordID.parse(record_str)
         <tr>
             <td><code>record_str</code> <Label label="required" /></td>
             <td><code>str</code></td>
-            <td>A record ID string in <code>table_name:id</code> format.</td>
+            <td>Text in the form <code>table:id</code>.</td>
         </tr>
     </tbody>
 </table>
 
 **Returns:** `RecordID`
 
+`parse()` splits the text at the first `:`, so an ID can hold colons of its own. The ID is always a string, and the text is not read as SurrealQL. Text without a `:` raises `InvalidRecordIdError`.
+
 ```python
-record = RecordID.parse("users:john")
-print(record.table_name)  # "users"
-print(record.id)          # "john"
+print(repr(RecordID.parse("person:tobie")))
+print(repr(RecordID.parse("user:complex:id")))
+print(repr(RecordID.parse("post:42")))
 ```
+
+```text title="Output"
+RecordID(table_name=person, record_id='tobie')
+RecordID(table_name=user, record_id='complex:id')
+RecordID(table_name=post, record_id='42')
+```
+
+`RecordID.parse("post:42")` gives the string ID `"42"`, which does not find a record created with the numeric ID `42`. For numeric, array or object IDs, call the constructor, or use a [`StringRecordId`](#stringrecordid) so that the server reads the text as SurrealQL.
 
 ---
 
-## Properties {#properties}
+## Equality and hashing {#eq}
 
-| Property | Type | Description |
+Two `RecordID` values are equal when their table names are equal and their IDs are equal, including the type of the ID. A `RecordID` is hashable, so it can be a `dict` key or a member of a `set`, and an object ID hashes the same whatever the order of its keys.
+
+```python
+print(RecordID("person", "tobie") == RecordID("person", "tobie"))
+print(RecordID("post", 42) == RecordID("post", "42"))
+
+owners = {RecordID("person", "tobie"): "admin"}
+print(owners[RecordID("person", "tobie")])
+```
+
+```text title="Output"
+True
+False
+admin
+```
+
+A `RecordID` is never equal to a `StringRecordId`, even when both name the same record.
+
+---
+
+## `StringRecordId` {#stringrecordid}
+
+A `StringRecordId` holds a record ID written as SurrealQL text, such as `"person:tobie"`, and the server parses the text. Use it when a record ID arrives as text, for example from a URL or a log, and you want it to mean exactly what it means in SurrealQL. It works wherever a `RecordID` does: as the target of a CRUD method, as a query variable, and as an end of `relate()`. A record ID read back from the server is always a `RecordID`.
+
+A plain `str` does not work here, because the SDK always reads a plain string target as a table name. `db.select("person:tobie")` selects from a table that is named `person:tobie`.
+
+```python title="Syntax"
+StringRecordId(value)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>value</code> <Label label="required" /></td>
+            <td><code>str</code></td>
+            <td>One record ID as SurrealQL text, such as <code>"person:tobie"</code> or <code>"post:42"</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+The constructor raises `TypeError` for a value that is not a `str`, and `InvalidRecordIdError` for text without a `:` or for a range such as `"person:1..3"`. To target a range of records, use `RecordID("person", Range(...))`.
+
+| Property or method | Type | Description |
 |---|---|---|
-| `table_name` | `str` | The table name component of the record ID. |
-| `id` | [`Value`](/docs/reference/python/api/values/#value) | The identifier component of the record ID. |
+| `value` | `str` | The text, as given. |
+| `str(record)` | `str` | The same text. |
 
 ```python
-record = RecordID("users", "john")
-print(record.table_name)  # "users"
-print(record.id)          # "john"
+from surrealdb import RecordID, StringRecordId, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    db.create(RecordID("post", 42), {"title": "Hello"})
+
+    post = StringRecordId("post:42")
+    print(db.select(post).execute())
+    print(repr(db.query("RETURN $post", {"post": post}).first()))
 ```
 
----
-
-## Methods {#methods}
-
-### `__str__()` {#str}
-
-Returns the string representation in `table_name:id` format.
-
-```python
-record = RecordID("users", "john")
-print(str(record))  # "users:john"
+```python title="Output"
+{'id': RecordID(table_name=post, record_id=42), 'title': 'Hello'}
+RecordID(table_name=post, record_id=42)
 ```
 
-### `__eq__()` {#eq}
-
-Compares two `RecordID` instances for equality based on both `table_name` and `id`.
-
-```python
-a = RecordID("users", "john")
-b = RecordID("users", "john")
-print(a == b)  # True
-```
+The server reads `post:42` as the numeric ID `42`, where `RecordID.parse("post:42")` gives a string ID. The text must be a record ID as SurrealQL writes it, so a string ID that holds `-` needs backticks: ``StringRecordId("users:`john-doe`")``. SurrealDB 2.x and 4.0 refuse text that they cannot parse, but SurrealDB 3.3 reads as much as it can: it reads `StringRecordId("users:john-doe")` as `users:john`. For an ID that comes from user input, build a `RecordID` from its parts instead.
 
 ---
 
 ## Pydantic support {#pydantic}
 
-When the `pydantic` extra is installed (`pip install surrealdb[pydantic]`), `RecordID` can be used as a field type in Pydantic models with automatic validation and serialisation.
+`RecordID` and `StringRecordId` can be field types in a pydantic model when pydantic is installed, for example with `pip install "surrealdb[pydantic]"`. A field accepts an instance or `table:id` text. Text for a `RecordID` field goes through `RecordID.parse()`, so its ID is a string. In JSON mode both types dump as text, and their JSON schema is a string.
 
 ```python
 from pydantic import BaseModel
 from surrealdb import RecordID
 
-class User(BaseModel):
+class Person(BaseModel):
     id: RecordID
     name: str
 
-user = User(id=RecordID("users", "john"), name="John")
+person = Person(id="person:tobie", name="Tobie")
+print(person.id == RecordID("person", "tobie"))
+print(person.model_dump(mode="json"))
+```
+
+```text title="Output"
+True
+{'id': 'person:tobie', 'name': 'Tobie'}
+```
+
+Text without a `:` raises `InvalidRecordIdError`. To read records straight into such a model, pass `into=Person` to a CRUD method. See [Value types](/docs/reference/python/concepts/value-types#pydantic-models) for the other SDK types in a pydantic model.
+
+---
+
+## `RecordIdValue` {#recordidvalue}
+
+`RecordIdValue` is the union of the ID types that SurrealDB accepts. It is exported for annotating or casting values that you build.
+
+```python title="Type definition"
+RecordIdValue = (
+    str | int | uuid.UUID
+    | list[Any] | tuple[Any, ...] | dict[str, Any]
+    | Range
+)
 ```
 
 ---
 
 ## `RecordIdType` {#recordidtype}
 
-Methods that accept a record or table reference use the `RecordIdType` alias, which accepts a plain string, a [`Table`](/docs/reference/python/api/values/table), or a `RecordID`.
+`RecordIdType` is the union that CRUD methods accept as a target. It is not exported from `surrealdb`; import it from `surrealdb.data.types.record_id` to annotate your own functions.
 
-```python title="Type Definition"
-RecordIdType = str | Table | RecordID
+```python title="Type definition"
+RecordIdType = str | RecordID | StringRecordId | Table
 ```
 
-See the [Data types overview](/docs/reference/python/api/values/#recordidtype) for details.
+A `str` is always a table name, the same as a [`Table`](/docs/reference/python/api/values/table). Pass a `RecordID` or a `StringRecordId` to target one record.
 
 ---
 
 ## See also
 
-- [Data types](/docs/reference/python/api/values) - All SDK data types
-- [Table](/docs/reference/python/api/values/table) - Table name wrapper
-- [Surreal](/docs/reference/python/api/core/surreal) - Connection and query methods
+- [Python values](/docs/reference/python/api/values) for every value class
+- [Table](/docs/reference/python/api/values/table) for table references
+- [Range](/docs/reference/python/api/values/range) for range targets
+- [Data manipulation](/docs/reference/python/concepts/data-manipulation) for CRUD methods that take a record ID
+- [Record IDs](/docs/reference/query-language/language-primitives/data-types/record-ids) in SurrealQL

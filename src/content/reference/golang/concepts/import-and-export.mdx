@@ -1,0 +1,176 @@
+---
+position: 13
+title: Import and export
+description: Back up and restore a SurrealDB database from Go with DB.Export and DB.Import - write SurrealQL to any io.Writer, choose what to export with ExportOptions, import a document that starts with OPTION IMPORT, handle ImportError for failed statements, and know which token the requests use.
+---
+
+# Import and export
+
+[`DB.Export`](/docs/reference/golang/api/core/db#export) writes the namespace and database of the default session as a SurrealQL document. [`DB.Import`](/docs/reference/golang/api/core/db#import) runs such a document. Use the two methods together to back up and restore a database, or to copy a database to another server. This page covers how to export a database, and how to choose what to export. It also covers how to import a document, and what to do when some of its statements fail.
+
+## API references
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Method</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/db#export"><code>db.Export(ctx, w, options)</code></a></td>
+			<td scope="row" data-label="Description">Writes the database as SurrealQL to an <code>io.Writer</code></td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/db#import"><code>db.Import(ctx, document)</code></a></td>
+			<td scope="row" data-label="Description">Runs a SurrealQL document from an <code>io.Reader</code></td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/types#exportoptions"><code>ExportOptions</code></a></td>
+			<td scope="row" data-label="Description">Chooses what an export holds</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/errors#importerror"><code>ImportError</code></a></td>
+			<td scope="row" data-label="Description">Lists the statements of an import that failed</td>
+		</tr>
+	</tbody>
+</table>
+
+## How import and export work
+
+Both methods send an HTTP request to the server, whichever transport the client uses: `Export` sends `POST /export`, and `Import` sends `POST /import`. They work on WebSocket and HTTP connections alike, in the namespace and database of the default session.
+
+Both methods authenticate with the token that the client last received, and do not use the WebSocket session. That token comes from `.SignIn()`, `.SignUp()`, `.Authenticate()` or a renewal. A WebSocket session can outlive its token. By default, the token of a system user lasts one hour. After the token expires, `Export` and `Import` fail with `401 Unauthorized`, but queries still work. Sign in again to get a new token. A client that has not signed in gets `403 Forbidden`.
+
+## Exporting a database
+
+`Export` writes the document to any `io.Writer`, such as a file, a buffer or an HTTP response. With a `nil` options value, `Export` exports every definition and every record:
+
+```go
+f, err := os.Create("backup.surql")
+if err != nil {
+	log.Fatal(err)
+}
+defer f.Close()
+
+if err := db.Export(ctx, f, nil); err != nil {
+	log.Fatal(err)
+}
+```
+
+The document starts with `OPTION IMPORT;`. After that statement, it holds the definitions and the records of each table. For a database with one `person` record, the document looks like this:
+
+```surql title="Example output"
+-- ------------------------------
+-- OPTION
+-- ------------------------------
+
+OPTION IMPORT;
+
+-- ------------------------------
+-- TABLE: person
+-- ------------------------------
+
+DEFINE TABLE person TYPE NORMAL SCHEMAFULL PERMISSIONS NONE;
+
+DEFINE FIELD OVERWRITE name ON person TYPE string PERMISSIONS FULL;
+
+-- ------------------------------
+-- TABLE DATA: person
+-- ------------------------------
+
+INSERT [ { id: person:tobie, name: 'Tobie' } ];
+```
+
+`Export` writes the document as the server produces it, and does not close the writer.
+
+## Choosing what to export
+
+Pass [`ExportOptions`](/docs/reference/golang/api/types#exportoptions) to leave parts out. The zero value of `ExportOptions` exports what the server exports by default:
+
+```go
+err := db.Export(ctx, f, &surrealdb.ExportOptions{
+	Tables:         []string{"person", "post"},
+	ExcludeUsers:   true,
+	ExcludeRecords: false,
+})
+```
+
+| Field | What it does |
+| --- | --- |
+| `Tables` | Limits the export to these tables, when it is not empty |
+| `ExcludeRecords` | Exports the definitions of tables, without their records |
+| `ExcludeUsers` | Leaves out `DEFINE USER` statements |
+| `ExcludeAccesses` | Leaves out `DEFINE ACCESS` statements |
+| `ExcludeParams` | Leaves out `DEFINE PARAM` statements |
+| `ExcludeFunctions` | Leaves out `DEFINE FUNCTION` statements |
+| `ExcludeAnalyzers` | Leaves out `DEFINE ANALYZER` statements |
+
+An export over HTTP cannot hold the history of a versioned table, because the server refuses that option over HTTP.
+
+## Importing SurrealQL
+
+`Import` runs a SurrealQL document from any `io.Reader`, in the namespace and database of the default session:
+
+```go
+f, err := os.Open("backup.surql")
+if err != nil {
+	log.Fatal(err)
+}
+defer f.Close()
+
+if err := db.Use(ctx, "surrealdb", "restored"); err != nil {
+	log.Fatal(err)
+}
+
+if err := db.Import(ctx, f); err != nil {
+	log.Fatal(err)
+}
+```
+
+`Import` does not close the reader, so close it yourself.
+
+## The OPTION IMPORT statement
+
+The server requires an imported document to start with `OPTION IMPORT;`. An exported document already starts with that statement. Without it, `Import` fails with `400 Bad Request` and the message ``Import requires `OPTION IMPORT;` as the first statement``. To import a document of your own, add the statement at the start:
+
+```go
+document := strings.NewReader(`OPTION IMPORT;
+CREATE person:jaime SET name = 'Jaime';
+CREATE person:ana SET name = 'Ana';`)
+
+err := db.Import(ctx, document)
+```
+
+`OPTION IMPORT` turns off events, live queries, field processing and the output of each statement, so that the import runs fast. The server does not check field types and assertions. It stores a value unchanged, even when a `DEFINE FIELD` statement would refuse that value. To run statements with every side effect, use [`Query`](/docs/reference/golang/concepts/executing-queries) instead.
+
+## Handling statements that fail
+
+The server keeps the changes of the statements that succeed, even when other statements in the document fail. When statements fail, `Import` returns an [`*ImportError`](/docs/reference/golang/api/errors#importerror) that lists their errors in order:
+
+```go
+err := db.Import(ctx, document)
+
+var ie *surrealdb.ImportError
+if errors.As(err, &ie) {
+	for _, failure := range ie.Failures {
+		var se *surrealdb.ServerError
+		if errors.As(failure, &se) {
+			log.Printf("%s: %s", se.Kind, se.Message)
+		}
+	}
+}
+```
+
+```text title="Output when person:tobie already exists"
+AlreadyExists: Database record `person:tobie` already exists
+```
+
+Each failure unwraps to a [`*ServerError`](/docs/reference/golang/api/errors#servererror), so the [`Is` helpers](/docs/reference/golang/api/errors#kind-helpers) work on it. The server does not roll back the statements that succeeded. To import all or nothing, import into an empty database. If the import fails, remove that database.
+
+## Learn more
+
+- [DB API reference](/docs/reference/golang/api/core/db#export) for the signatures of `Export` and `Import`
+- [Error handling](/docs/reference/golang/concepts/error-handling#errors-from-an-import) for `ImportError`
+- [surreal db export](/docs/reference/cli/db/commands/export) and [surreal db import](/docs/reference/cli/db/commands/import) for the same operations from the command line

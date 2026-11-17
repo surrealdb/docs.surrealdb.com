@@ -1,14 +1,14 @@
 ---
 position: 5
 title: Live queries
-description: The Go SDK supports real-time live queries that stream change notifications from the database through Go channels.
+description: Receive changes to a SurrealDB table in Go with Live and LiveNotifications, read CREATE, UPDATE, DELETE and KILLED notifications from a channel, receive JSON Patch diffs, start a LIVE SELECT with Query, stop a live query with Kill, and understand how live queries restart after a reconnect.
 ---
 
 # Live queries
 
-Live queries allow your application to receive real-time notifications whenever records in a table are created, updated, or deleted. The Go SDK delivers notifications through Go channels, making it easy to integrate with goroutines and concurrent patterns.
+A live query sends your program a notification each time a record in a table is created, updated or deleted. The Go SDK delivers the notifications on a Go channel, so a goroutine can read them while the rest of the program continues to run. This page shows how to start a live query, read its notifications and stop it. It also explains what happens to a live query when the client reconnects.
 
-Live queries require a WebSocket connection (`ws://` or `wss://`). They are available on [`*DB`](/docs/reference/golang/api/core/db) and [`*Session`](/docs/reference/golang/api/core/session) but not on [`*Transaction`](/docs/reference/golang/api/core/transaction).
+Live queries need a WebSocket connection (`ws://` or `wss://`). They are available on a [`*DB`](/docs/reference/golang/api/core/db) and a [`*Session`](/docs/reference/golang/api/core/session), but not on a [`*Transaction`](/docs/reference/golang/api/core/transaction). Over HTTP, `Live` fails with `Unable to perform the realtime query`.
 
 ## API references
 
@@ -25,88 +25,77 @@ Live queries require a WebSocket connection (`ws://` or `wss://`). They are avai
 			<td scope="row" data-label="Description">Starts a live query on a table and returns its UUID</td>
 		</tr>
 		<tr>
-			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#kill"><code>surrealdb.Kill(ctx, s, id)</code></a></td>
-			<td scope="row" data-label="Description">Stops a live query and closes its notification channel</td>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#livenotifications"><code>db.LiveNotifications(id)</code></a></td>
+			<td scope="row" data-label="Description">Returns the notification channel of a live query</td>
 		</tr>
 		<tr>
-			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#livenotifications"><code>db.LiveNotifications(id)</code></a></td>
-			<td scope="row" data-label="Description">Returns the notification channel for a live query</td>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#kill"><code>surrealdb.Kill(ctx, s, id)</code></a></td>
+			<td scope="row" data-label="Description">Stops a live query and closes its channel</td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#closelivenotifications"><code>db.CloseLiveNotifications(id)</code></a></td>
-			<td scope="row" data-label="Description">Closes the notification channel without killing the server-side query</td>
+			<td scope="row" data-label="Description">Closes the channel without stopping the live query on the server</td>
 		</tr>
 	</tbody>
 </table>
 
 ## Starting a live query
 
-Use the [`Live`](/docs/reference/golang/api/core/db#live) function to subscribe to changes on a table. It returns a [`UUID`](/docs/reference/golang/api/values/uuid) that identifies the live query.
+`Live` starts a live query on a table and returns a [`*models.UUID`](/docs/reference/golang/api/values/uuid) that identifies it. The table must exist, so define it first:
 
 ```go
-liveID, err := surrealdb.Live(ctx, db, models.Table("persons"), false)
+if _, err := surrealdb.Query[any](ctx, db, "DEFINE TABLE IF NOT EXISTS person", nil); err != nil {
+	log.Fatal(err)
+}
+
+liveID, err := surrealdb.Live(ctx, db, models.Table("person"), false)
 if err != nil {
 	log.Fatal(err)
 }
 ```
 
-The `diff` parameter controls notification format. When `false`, notifications contain the full record. When `true`, they contain JSON Patch diffs instead.
+The last argument chooses what each notification holds. With `false`, it holds the record. With `true`, it holds the [JSON Patch](#receiving-changes-as-json-patch) operations that changed the record.
 
-## Receiving notifications
+## Reading notifications
 
-After starting a live query, call [`.LiveNotifications()`](/docs/reference/golang/api/core/db#livenotifications) on the [`*DB`](/docs/reference/golang/api/core/db) or [`*Session`](/docs/reference/golang/api/core/session) to get a channel that receives [`Notification`](/docs/reference/golang/api/types#notification) values.
-
-```go
-ch, err := db.LiveNotifications(liveID.String())
-if err != nil {
-	log.Fatal(err)
-}
-
-for notification := range ch {
-	fmt.Printf("Action: %s, Result: %v\n", notification.Action, notification.Result)
-}
-```
-
-Each notification includes:
-
-| Field | Type | Description |
-|---|---|---|
-| `ID` | `*models.UUID` | The live query UUID |
-| `Action` | `Action` | One of `CREATE`, `UPDATE`, or `DELETE` |
-| `Result` | `interface{}` | The record data or JSON Patch diff |
-
-## Processing notifications in a goroutine
-
-A common pattern is to process live query notifications in a separate goroutine while the main goroutine continues other work.
+`.LiveNotifications()` returns the channel that receives the live query's [`Notification`](/docs/reference/golang/api/types#notification) values. Read it in a goroutine:
 
 ```go
-liveID, err := surrealdb.Live(ctx, db, models.Table("persons"), false)
-if err != nil {
-	log.Fatal(err)
-}
-
-ch, err := db.LiveNotifications(liveID.String())
+notifications, err := db.LiveNotifications(liveID.String())
 if err != nil {
 	log.Fatal(err)
 }
 
 go func() {
-	for n := range ch {
+	for n := range notifications {
 		switch n.Action {
-		case "CREATE":
-			fmt.Println("New record:", n.Result)
-		case "UPDATE":
-			fmt.Println("Updated record:", n.Result)
-		case "DELETE":
-			fmt.Println("Deleted record:", n.Result)
+		case connection.CreateAction:
+			fmt.Println("created:", n.Result)
+		case connection.UpdateAction:
+			fmt.Println("updated:", n.Result)
+		case connection.DeleteAction:
+			fmt.Println("deleted:", n.Result)
 		}
 	}
+	fmt.Println("live query ended")
 }()
 ```
 
+Each notification holds three fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `ID` | `*models.UUID` | The UUID of the live query |
+| `Action` | `connection.Action` | `CREATE`, `UPDATE`, `DELETE` or `KILLED` |
+| `Result` | `any` | The record, as a `map[string]any`, or the JSON Patch operations |
+
+The SDK decodes `Result` into `any`, so a record arrives as a `map[string]any`, with its `id` as a `models.RecordID`. The `connection` package is `github.com/surrealdb/surrealdb.go/v2/pkg/connection`.
+
+When several changes happen quickly, one after another, their notifications can arrive in a different order from the changes.
+
 ## Stopping a live query
 
-Use the [`Kill`](/docs/reference/golang/api/core/db#kill) function to terminate a live query on the server and close its notification channel.
+`Kill` stops the live query on the server:
 
 ```go
 if err := surrealdb.Kill(ctx, db, liveID.String()); err != nil {
@@ -114,12 +103,86 @@ if err := surrealdb.Kill(ctx, db, liveID.String()); err != nil {
 }
 ```
 
-[`Kill`](/docs/reference/golang/api/core/db#kill) both sends the kill RPC to the server and closes the local notification channel. If you only want to close the channel without killing the server-side query, use [`.CloseLiveNotifications()`](/docs/reference/golang/api/core/db#closelivenotifications) instead.
+The server then sends a notification with the action `KILLED`. After that, the channel closes and the `for ... range` loop ends.
+
+`.CloseLiveNotifications()` closes the channel without stopping the live query on the server. The server can also end a live query itself, for example when its table is removed. The channel then receives a `KILLED` notification but stays open, so call `.CloseLiveNotifications()` to close it.
+
+## Receiving changes as JSON Patch
+
+With `diff` set to `true`, each notification holds the JSON Patch operations that changed the record. `Result` is then a `[]any` of maps with `op`, `path` and `value` keys:
+
+```go
+liveID, err := surrealdb.Live(ctx, db, models.Table("person"), true)
+if err != nil {
+	log.Fatal(err)
+}
+
+notifications, err := db.LiveNotifications(liveID.String())
+if err != nil {
+	log.Fatal(err)
+}
+
+for n := range notifications {
+	if ops, ok := n.Result.([]any); ok {
+		for _, op := range ops {
+			fmt.Println(op)
+		}
+	}
+}
+```
+
+A diff is smaller than the whole record, which matters for large records that change one field at a time.
+
+## Live queries from SurrealQL
+
+A [`LIVE SELECT`](/docs/reference/query-language/statements/live-select) statement sent with `Query` starts a live query too, and returns its UUID. It can filter the records and choose the fields that notifications hold:
+
+```go
+result, err := surrealdb.Query[models.UUID](ctx, db,
+	"LIVE SELECT * FROM product WHERE stock < 10",
+	nil,
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+liveID := (*result)[0].Result.String()
+notifications, err := db.LiveNotifications(liveID)
+```
+
+Read and stop it as you would one that `Live` started. When the client reconnects, it cannot restart a live query that a `LIVE SELECT` statement started: see [Reconnecting](#reconnecting).
+
+## Live queries in sessions
+
+A live query belongs to the session that started it. Start it on a [`*Session`](/docs/reference/golang/concepts/multiple-sessions) and read it with that session's `.LiveNotifications()`:
+
+```go
+liveID, err := surrealdb.Live(ctx, session, models.Table("person"), false)
+if err != nil {
+	log.Fatal(err)
+}
+
+notifications, err := session.LiveNotifications(liveID.String())
+```
+
+The live query runs with the permissions of the user that the session is signed in as. `.Reset()` and `.Detach()` on a session kill its live queries.
+
+## Reconnecting
+
+When the client [reconnects](/docs/reference/golang/concepts/reliable-connections), it starts each live query that `Live` started again on the new connection. The query keeps its UUID, so the channel from `.LiveNotifications()` keeps receiving notifications. The live query restarts in the namespace and database that its session had selected when you called `Live`. It uses these even if the session has selected others since then.
+
+The client ends a live query instead of restarting it in two cases:
+
+- The session is no longer signed in as the same user as when the query started. This makes sure that a live query never runs as someone else.
+- The server refuses to start the live query again.
+
+When the client ends a live query, its channel closes. The status event of the reconnect reports `surrealdb.ErrLiveQueryEnded`, and `.LiveNotifications()` returns that error for the query.
+
+The client does not receive notifications for changes that happen while it is disconnected. A reconnect loses a live query that a `LIVE SELECT` statement started, so use `Live` for a live query that must survive a reconnect.
 
 ## Learn more
 
-- [DB API reference](/docs/reference/golang/api/core/db) for complete function signatures and parameters
-- [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for WebSocket connection requirements
-- [Multiple sessions](/docs/reference/golang/concepts/multiple-sessions) for session-scoped live queries
-- [Reliable connections](/docs/reference/golang/concepts/reliable-connections) for live queries that persist across reconnections
-- [SurrealQL LIVE statement](/docs/reference/query-language/statements/live-select) for the underlying query language syntax
+- [DB API reference](/docs/reference/golang/api/core/db#live) for complete function signatures and parameters
+- [Reliable connections](/docs/reference/golang/concepts/reliable-connections) for what a reconnect restores
+- [Multiple sessions](/docs/reference/golang/concepts/multiple-sessions) for live queries in a session
+- [LIVE SELECT statement](/docs/reference/query-language/statements/live-select) for the query language syntax

@@ -7,12 +7,18 @@ vike-content-collection (Zod-validated markdown collections).
 ## Commands
 
 ```bash
-bun run dev   # start dev server
-bun run qa    # apply code quality formatting
-bun run qc    # check code quality
+bun run dev             # start dev server
+bun run qa              # apply code quality formatting
+bun run qc              # check code quality
+bun run diagrams:check  # list diagrams whose page sections have changed
+bun run screenshots:check # list screenshots whose UI has changed in Studio
+bun run check:links     # check every internal link and anchor in src/content
+bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task.
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
+
+The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
 
 ## References
 
@@ -43,6 +49,29 @@ Apply SOLID where it fits:
 - SCSS modules: `style.module.scss`, kebab-case class names, imported as `import classes from "./style.module.scss"`.
 - Inline `style` only for truly dynamic values.
 - Shared UI that could benefit other SurrealDB frontends belongs in `@surrealdb/ui`, not here.
+
+### Comments describe the code, not its history
+
+A comment says what the code does and why it needs to, in the present tense.
+The history of a change - the audit that found a problem, the date something
+broke, what the code did before - belongs in the commit message and the pull
+request description, which keep it next to its date. In a comment it starts to
+go out of date on the day it merges, and a later reader cannot tell whether the
+problem it describes still exists.
+
+| Avoid                                                                                     | Use                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `An audit in November 2026 found 16 dead anchors that had shipped.`                       | `The build does not catch these: a broken link renders, and a broken anchor scrolls nowhere.` |
+| `Without this, pages in a hidden folder were listed although no navigation reached them.` | `This keeps a page that no navigation reaches out of the generated lists as well.`     |
+
+Pages follow the same rule. Write the behaviour that stays true, such as
+"`--beta` installs the most recent beta, which can be older than the stable
+release", not the state of things on the day of writing, such as "no beta of a
+later version is published yet".
+
+This guide is the exception. Its dated figures, such as the count of duplicate
+links in October 2026, record why a rule exists, and a reader takes them as
+history.
 
 ### Language
 
@@ -217,6 +246,25 @@ milliseconds") over vague importance ("crucial for modern workflows"). Use
 tables when comparing options (codecs, deployment modes, auth methods). Link to
 related pages inline rather than duplicating full explanations.
 
+**Link once.** Link a term or a page at its first mention in a page's prose,
+and not again in the same section. A reader who followed the link, or chose not
+to, gains nothing from a second one, and a paragraph that repeats a link reads
+as a row of buttons. In October 2026, 88 of 1,128 pages linked the same target
+twice or more within one section of prose, 131 times in all.
+
+This is Wikipedia's rule against duplicate links, with one difference. A
+Wikipedia reader mostly starts at the top of an article, and ours often do not:
+a search result, the sidebar or an `#anchor` link puts a reader in the middle
+of a page. So a long page, around the 1,700 words of the 90th percentile and
+more, may link a term again at its first mention in a later `##` section that a
+reader could reach directly. A short page links it once.
+
+Tables and lists are exempt, because a reader scans them rather than reading
+them in order: a reference table can link every row, and a "See also" list
+links what it lists. Headings never hold a link. The renderer already makes
+each heading a link to its own anchor, so a link inside one is a link inside a
+link, which three headings had in October 2026.
+
 **Examples.** Runnable code with realistic data. SurrealQL reference pages often
 include inline test assertions and response blocks. SDK pages show imports,
 configuration, and the trade-off when an option changes behaviour. Tutorials
@@ -281,6 +329,38 @@ stays beside the section it qualifies, however far down that section sits.
 Reordering breaks no links, because anchors come from heading text, but check
 each moved section for references to content that is no longer above it.
 
+**Version markers.** `<Since v="…" />` renders as a badge, and a badge reads as
+a label for the block it heads. It goes in one of three places only: on its own
+line directly under the heading of the section it dates, directly under the
+frontmatter when the whole page is new, or in a table cell, as in the
+environment variable tables. In October 2026, 34 badges sat mid-section or at
+the end of a sentence, where a reader cannot tell what they date.
+
+Where only part of a section is new, write the version into the sentence
+instead: "From SurrealDB 3.3, sort fields do not need to appear in the `SELECT`
+list." Where a sentence already gives the version ("From 3.3.0 a server started
+on it…", "…are new in SurrealDB 3.1"), it needs no badge as well. An inline
+mention such as "[`.expect()`](…) (from SurrealDB 3.1)" takes the same plain
+form, never a badge in brackets.
+
+**Version tabs.** Where `<Tabs>` holds one tab per version, the newest version
+comes first, because the first tab is the one shown and the newest release is
+what a reader downloads. "SurrealDB 3.1 and later" goes before "Before
+SurrealDB 3.1". In October 2026, 11 of 46 version tab groups put the older
+version first. Tabs that share a `syncKey` switch together by label, so reorder
+every group with that key at once, and check for prose that refers to a tab by
+position ("the first tab").
+
+Where content differs between major versions, the group uses
+`syncKey="surrealdb-version"` and the labels `SurrealDB 4.x` and `SurrealDB 3.x`,
+exactly as written in `MAJOR_VERSIONS` (`src/utils/major-version.ts`). The
+version menu in the header selects those labels in every such group on the page
+and on later pages, so a group with any other spelling ignores it. A difference
+inside one major version is a `<Since>` badge or a sentence, not a tab. The badge
+hides itself at or below the `.0.0` of the version the reader selected, so a
+`v4.0.0` badge shows only to a reader on 3.x, and a `v3.0.0` badge shows to
+nobody.
+
 **Spelled-out defaults.** A clause that only restates the default belongs on the
 page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
 DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
@@ -307,7 +387,7 @@ take a `LET`, a `THROW`, a `BREAK`, a `CONTINUE`, or two statements separated by
 the wrong token and names a construct the reader never wrote. The form also
 persists: a `DEFINE FUNCTION`, `DEFINE FIELD` or `DEFINE EVENT` keeps a body in
 the schema, and the stored form is never normalised, so `INFO FOR DB` and
-`surreal export` both emit `THEN … END` again and `surreal import` has to parse
+`surreal db export` both emit `THEN … END` again and `surreal db import` has to parse
 it back. That round trip is what keeps the parse path in the server, so treat
 the syntax as permanent and simply never teach it.
 
@@ -315,6 +395,18 @@ The word `THEN` is unrelated and correct in `DEFINE EVENT … THEN`,
 `DEFINE API … THEN` and `REFERENCE ON DELETE THEN`, where it is the only syntax.
 Leave those, and leave historical `THEN … END` in release notes and migration
 pages, which stay chronological.
+
+**Escaping parts of a record ID.** Write a table name or record key that needs
+escaping between backticks: ``user:`john-doe` ``. SurrealDB has displayed
+escaped parts this way since 3.0, so the example matches the output a reader
+sees, and a backtick is on every keyboard. The `⟨ ⟩` brackets from 2.x still
+parse, for compatibility, but an example that uses them teaches a form
+SurrealDB no longer prints, and leaves the reader with two spellings of one
+record ID. Keep `⟨ ⟩` only where the subject is 2.x or the compatibility
+itself, as on the record IDs page and in migration guides. This one arrives
+from outside as well as from habit: a PR's own release note used
+`user:⟨john-doe⟩` in October 2026, so check wording copied from a PR or an
+issue before it reaches a page.
 
 **`RETURN` in examples.** Bare expressions are valid statements that yield the
 same value, so a snippet that is a single expression drops the leading
@@ -347,10 +439,18 @@ can tell which half is runnable.
 `Output` is the plain label, and `Response` is kept only on the HTTP and RPC
 pages, where it is the counterpart of a `Request` block. Anything with the word
 `output` in it pairs and renders in full, so use a qualifier whenever the
-value shown is one of several a reader might see - `Sample output` and
-`Possible output` for a generated record id, a datetime or a live API,
-`Expected output` for a value a test asserts, `Error output` for a failure, or a
-condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+value shown is not exactly what every run gives:
+
+- `Example output` when the shape is fixed but incidental values differ on each
+  run: a generated record id, a datetime, a UUID, a request id or a timing.
+- `Possible output` when the result itself is random: a random number, how many
+  records come back, an order that depends on generated ids, or a timeout that
+  may or may not fire.
+- `Expected output` for a value a test asserts, `Error output` for a failure,
+  or a condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+
+Where the block's own setup makes the value the same on every run, use plain
+`Output`, even for a datetime or a record id the setup writes out.
 `Response` and `Result` only pair at the start of a title, because a code block
 titled for what it does with a response (`Handle Individual Responses`,
 `Map results onto a dataclass`) would otherwise be joined to the example above
@@ -391,7 +491,7 @@ CREATE ONLY cat:one;
 
 Because `//-` asserts that the statement returned this, a value a rerun would
 not reproduce needs the label above to say so - the inline counterpart of the
-`Possible output` and `Sample output` fence titles:
+`Possible output` and `Example output` fence titles:
 
 ```surql
 -- Possible output, since the timeout may or may not be exceeded
@@ -453,6 +553,83 @@ On a block that sets up its data first, the fence labels the **last** statement,
 the same convention `RETURN` follows: three `CREATE`s and then the `SELECT`
 whose result is shown is one fence pair, not four.
 
+**Self-contained examples.** A SurrealQL example runs exactly as written on a
+fresh database, for a reader who pastes it from the site and for one who reads
+the raw MDX. When it uses a table, records, an index, a type or a parameter
+that an earlier block on the page creates, copy those statements into the top
+of the block rather than relying on the reader having run the earlier one.
+Copy only what the block uses. Where nothing on the page creates it, write the
+smallest setup that makes the query return something meaningful: usually two
+or three `CREATE` statements with the fields the query reads.
+
+Put the setup under a label line and end it with a blank line:
+
+```surql
+-- Setup from the example above
+CREATE person:tobie SET name = 'Tobie', age = 30;
+CREATE person:jaime SET name = 'Jaime', age = 25;
+
+SELECT name FROM person WHERE age > 28;
+```
+
+The site collapses everything from the label to the first blank line under a
+"setup lines" toggle, so the reader sees the query first, while the copy button,
+the raw MDX and the `.md` endpoints keep the whole block. The label is one of
+`-- Setup`, `-- Setup from the example above` (or `examples`, or `below`), or
+`-- Setup:` followed by a note such as the page the data comes from. Any other
+comment that starts with the word, such as `-- Setup accounts` inside a
+transaction the page is teaching, stays visible, so use one of those forms only
+for setup a reader can skip. Statements after the blank line are the example,
+and the stated results follow the usual rules: an `Output` fence is the last
+statement's value, a `//-` line the value of the statement above it, and a
+`/** [test] */` config lists one result per statement, setup included.
+
+Mark a block `notest` (```` ```surql notest ````) only when it cannot run on its
+own: a template whose parameters an SDK, an HTTP request or the application
+supplies, old syntax shown on purpose, or a statement that needs a signed-in
+session, credentials or a dataset. `notest` does not show on the page. It is
+never a way to skip an example that is wrong for the current release.
+
+**Long lines in code.** A code block shows about 70 characters on a
+1440-pixel laptop screen, about 98 on a 1920-pixel monitor and about 36 on a
+phone, and scrolls sideways past that. Write for 70. A longer line is not wrong
+in itself. The question is whether a reader can tell what the hidden part says
+without scrolling to it.
+
+- **Leave it** when the hidden part is predictable: the last words of an error
+  whose meaning is already clear (`…results in an arithmetic overflow`), more of
+  a pattern that has already started, or a length that is the point of the
+  example, such as an array of a thousand items.
+- **Make it visible** when the hidden part is what the example is there to
+  show: the last value of a sort order, the result a function returns, or the
+  one field that differs. In November 2026 the mixed-type sort on the dates and
+  times page put the interval, which most readers had never seen sorted, at
+  character 85 of its output.
+
+To make it visible, use the first of these that works:
+
+1. **Lay a value out over several lines.** SurrealQL ignores whitespace between
+   tokens, so an array or object in an `Output` fence can put one element per
+   line, indented with a tab, and it still reads back as the same value.
+2. **Lay the statement out over several lines**, with each argument or each
+   element on its own line, for the same reason. The one place a line break
+   changes the meaning is next to the `..` of a record range: before it, the
+   query returns `NONE` instead of the records, and after it, the query does
+   not parse. Break inside the bounds instead.
+3. **Shorten the example**: fewer elements, shorter strings, shorter names,
+   provided it still shows the point.
+
+A `//-` result stays on one line, because everything after the marker is the
+value. When one would hide what matters, move the result to an `Output` fence
+(possible when it belongs to the last statement), or shorten the input that the
+value or the error repeats back.
+
+Never mark a continued line with `\` or any other character. SurrealQL does not
+read it, so a copied example fails to run, and the `.md` endpoints serve it to
+agents as part of the value. The site does not wrap long lines either, because
+wrapping would turn a long array that shows its own length into a wall of
+lines, so the choice is made for each example instead.
+
 **Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
 exceptions, security caveats, and breaking or easy-to-miss details.
 
@@ -492,11 +669,23 @@ thing, not when it passes a word count.
 
 **One home per topic.** Where a subject genuinely needs both a guide and a
 reference, write both, and give them titles that survive being seen apart -
-"Python quickstart" against "Python SDK", "Authenticating surrealctl" against
+"Python quickstart" against "Python SDK", "Authenticating surreal cloud" against
 "Authentication reference". Two pages called "Authentication" are
 indistinguishable in a search result, in `llms.txt`, and to an agent choosing
 which to fetch. Whichever page is not the authority on a mechanism summarises it
 in a sentence and links; the mechanism is written out once.
+
+**A guide is a short course, with examples of its own.** A guide under `learn/`
+is read from top to bottom, so it shows every clause it teaches on the page
+rather than sending the reader to the reference halfway through. It does so
+with its own examples: one scenario that runs through the whole guide, such as
+an audit log for a shop that gains a clause at each step. It never copies the
+reference page's examples. The reference keeps one isolated example per clause
+and stays the authority that search and agents are pointed to, and the guide
+answers "how do I build this" where the reference answers "what does this
+clause do". Two pages that show the same examples compete for the same search
+and leave an agent to pick one at random. In November 2026, 11 guides shared
+between 2 and 13 examples with their reference page.
 
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
@@ -536,6 +725,32 @@ schema:`, `Save the statements above as schema.surql`). What fails is the bare
 imperative standing in for the explanation: `Measure it:` orders the reader
 around a page where the sentence should have said what the measurement shows.
 
+**Shapes that read as generated.** Three sentence shapes mark a draft as
+written by a model even when every word in it is correct. Each one is
+built for rhythm, and the rhythm is what a reader notices first.
+
+| Shape                                       | Avoid                                                                                                                           | Use                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| A run of sentences with the same structure  | `A document store keeps content. A vector index keeps embeddings. A graph keeps relationships. None of them keeps what an agent learnt.` | `Document stores, vector indexes and graphs each keep one kind of data, and none of them records what an agent learnt or when.` |
+| A list whose items all have the same build  | `A stale index, a missing permission, a dropped event: any one of them stops the pipeline.`                                     | `The pipeline stops if an index is stale, a permission is missing or an event is dropped.`                                |
+| `X is not A. It is B.`                      | `Time is not a metadata field. It is a dimension of the data.`                                                                  | `A record can hold different values at different times, and a query can ask for the value at any of them.`               |
+
+The third shape is the general form of the imputed misconception described
+under **Do not presume the reader's situation**. It fails even when nobody is
+being corrected, because the reader still has to take in the wrong idea
+before the sentence gives the right one. State the right one. `not` stays
+where it carries a fact: "fields are not part of this vocabulary and cannot
+be extended" says what the reader cannot do.
+
+The test for all three is whether the structure carries information. A
+table of six functions with one sentence each is a list doing its job, and
+`a document, a node in the graph and an entry in the vector index` names
+three real things. What fails is the shape repeated because it sounds
+finished: three parallel sentences, then a short one that sums them up.
+One instance in a section can be emphasis. Several in one paragraph, or the
+same contrast made twice on a page, read as generated, and readers who
+notice it start to doubt the facts around it as well.
+
 **No in-group asides.** "and nobody notices for a quarter", "each of these has
 bitten someone", "this saves you a page at 3 am" assume the reader shares a
 working life - fiscal quarters, an on-call rotation, a particular kind of
@@ -568,7 +783,7 @@ Fine, because these describe what SurrealDB asks of the reader and remove an
 obligation:
 
 - "No need to learn another query language just for time series."
-- "You do not have to author Rust yourself to benefit from Surrealism."
+- "You do not have to author Rust yourself to benefit from SurrealDB extensions."
 - "You do not need to create the table first - SurrealDB adds it on the first write."
 
 Not fine, because each one only works if the reader is in a state we have
@@ -616,6 +831,52 @@ When you need to write new documentation or update existing articles, make use o
 3. Check British English and links.
 4. `bun run qa` and `bun run qc`.
 
+## Environment variables and flags
+
+Settings are documented in two places, and a change to one usually needs the other:
+
+- The [environment variables](src/content/reference/cli/db/environment-variables.mdx) page and the command pages describe each setting in the current release.
+- The [version history chart](src/content/reference/cli/db/version-history.mdx) shows which `SURREAL_` variables and `surreal db` flags each release had, with their first and last versions and their defaults. Its data is `public/cli-history/data.json`, which `public/cli-history/history.html` and `history.js` render.
+
+The chart covers tagged releases only, read from the source at each tag, so it changes when a release is tagged rather than when a page is edited. After a release, regenerate it:
+
+```bash
+git -C ~/surrealdb fetch --tags
+bun run generate:cli-history
+```
+
+`scripts/cli-history/generate.ts` reads every release tag of a local clone of surrealdb/surrealdb (`~/surrealdb`, or `SURREALDB_REPO`) with git only, takes release dates from `gh release list`, and writes `public/cli-history/data.json`, with its intermediate files in `generated/cli-history`. A run over all tags takes under a minute. Then update the version the page names as its latest, which appears in its `description`, its opening paragraph and its scope section. Check the diff of `data.json` before committing: a new tag should add a tag entry and extend or close ranges, and an unexpected swing in the counts the script prints usually means a source file moved and the extractor needs a new path.
+
+When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
+
+## Deployment targets
+
+Vercel serves production. A Cloudflare Worker (`docs`) is built
+from the same code for previews and for the move off Vercel; nothing about the
+Vercel build changes.
+
+```bash
+bun run build:cloudflare    # Workers build (DEPLOY_TARGET=cloudflare)
+bun run preview:cloudflare  # build, then wrangler dev
+bun run test:routes         # check the compiled route table
+```
+
+- `vercel.ts` stays the one place routing rules are written. Vercel serves them
+  from its edge; `scripts/generate-edge-routes.ts` compiles them into
+  `generated/edge-routes.json` and `src/lib/edge-routes.ts` applies them in the
+  Worker, in Vercel's order. A rule added to `vercel.ts` or `redirects.ts`
+  reaches both.
+- The Worker takes no zone route. The apex Worker in the www repo reaches it
+  through a service binding (`DOCS`) with `/docs` stripped, as the Vercel
+  rewrite does today.
+- Responses on any host other than `surrealdb.com` (previews, `workers.dev`)
+  carry `X-Robots-Tag: noindex, nofollow`.
+- `/api/search` and `/api/feedback` are shared handlers in `src/lib/api/`;
+  `api/` holds the Vercel adapters. On Cloudflare `SURREAL_ENDPOINT` must be an
+  `https://` URL, because Workers cannot open an outbound WebSocket.
+- Search indexing (`postbuild`) runs on Vercel production builds and the
+  re-index workflow, never in the Workers build.
+
 ## Content collections
 
 Content lives in `src/content`. Frontmatter schemas live in
@@ -637,9 +898,9 @@ its id is that directory's path relative to `src/content`. So
 has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
-section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
-`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
-`labs-items`.
+section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*`
+and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
+Labs entries are not a collection: see [Labs](#labs).
 
 Every doc collection's `+Content.ts` is the same boilerplate:
 
@@ -653,8 +914,6 @@ export const Content = defineCollection({
 });
 ```
 
-`labs-items` is the exception: `labSchema` and `type: "content"`.
-
 > [!IMPORTANT]
 > `+Content.ts` belongs at the collection root only. Discovery recurses
 > unconditionally, so a nested `+Content.ts` registers a second collection over
@@ -666,8 +925,11 @@ export const Content = defineCollection({
 - **`pageSchema`** - `title`, `description`, `position`, `icon`, `hidden`, all
   optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
   error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
-- **`labSchema`** - `title`, `category` and `author` required; `description`,
-  `url`, `topics` (max 2) and `languages` optional.
+- **`labSchema`** - one Labs entry, checked by `bun run generate:labs` and
+  `bun run generate:labs-blog` rather than by a collection. `title`, `date`,
+  `stage` (journey: Explore to Operate), `format` (what kind of thing it is) and
+  `author` required; `description`, `url`, `topics` and `languages` optional.
+  The values live in `src/utils/labs.ts`.
 
 `type: "both"` means `__category.json` files are collection entries as well, and
 they are validated by the same `pageSchema`. A folder's `__category.json` carries
@@ -711,6 +973,10 @@ unrankable, and unguessable by an agent constructing a path.
 3. Ordering comes from `position` in frontmatter for pages and from
    `__category.json` for folders. Both default to `0` and ties fall back to
    filesystem order, so set `position` explicitly on anything you add or move.
+   A position is a whole number, and the schema refuses anything else. To place
+   a page between two others, add one to the position of every sibling after
+   it, `__category.json` folders included, instead of using a fraction such as
+   `5.5`.
 4. Never name a file after the folder it sits in. `authentication/authentication`
    says the same word twice in the URL and reads as a mistake; if the page is the
    folder's landing page it is `index`, and otherwise it is named after itself.
@@ -741,7 +1007,9 @@ page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
 ### Redirects
 
 Redirects live in `redirects.ts` (the `docsRedirects` array), read by `vercel.ts`
-in production and by `plugins/vite-dev-redirects.ts` in dev and preview. There is
+in production, compiled from `vercel.ts` for the Cloudflare Worker (see
+[Deployment targets](#deployment-targets)), and read by
+`plugins/vite-dev-redirects.ts` in dev and preview. There is
 no `aws/` directory.
 
 `www.surrealdb.com` rewrites `/docs/(.*)` to this project with the `/docs` prefix
@@ -771,6 +1039,14 @@ Two things to check alongside a move:
   than a gap. Twelve unreachable tutorials went unnoticed for seven weeks that
   way, each answering 302 and resolving to a page that returned 200.
 
+### Short URLs
+
+`/docs/<word>` answers for the words a reader types and an agent constructs before it has seen the navigation: `/docs/python`, `/docs/kubernetes`, `/docs/select`, `/docs/define-table`, `/docs/string` for the string functions and `/docs/strings` for the data type. The list is `short-urls.ts`, and `redirects.ts` adds it after every other rule as 302s, because each one names the current best page for a word rather than a page that moved. When a page moves, change its target in `short-urls.ts` and keep the word.
+
+Part of the list is chosen by hand and part follows the reference tree: every statement, `DEFINE` and `ALTER` page, clause, `surreal` command, function family and data type has one. `bun run check:links` fails when a target is not a page, when a word would hide a page or is taken by an earlier redirect, when a word is listed twice, and when a page in one of those reference folders has no short URL, so a new statement is reported until it gets one.
+
+The www repo's `redirects.json` runs first and already maps a few of these words, such as `install` and `cloud`. Where it does, its target is the one a reader gets, so keep the two the same, or remove the www entry and let this list answer.
+
 ## Content components
 
 Markdown pages can use a small set of React components. Most are registered in
@@ -787,6 +1063,8 @@ every component in that file.
 | `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
+| `<DemoEmbed pages={[…]} />`      | A page from `public/` in a frame, such as a showcase demo.    |
+| `<Details summary="…">`         | A block, such as a long example, closed under a summary line. |
 
 `<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
 it around an output pair while parsing, and no page writes it by hand.
@@ -836,13 +1114,33 @@ curl -s http://localhost:4321/docs/<path> \
 
 Any iframe without `query=` is a dead embed. To sweep for leaked attribute text, search the rendered page for `&quot; /&gt;` rather than `" />` - the page serves it entity-encoded, and grepping for the raw form finds nothing.
 
+### Runnable code blocks
+
+A SurrealQL fence can run where it stands. Add a `runnable` attribute to its info string, and the block gets a **Run Query** button that swaps it for an embedded Studio holding the same query, with **Close** to go back to the block. The attribute's value is a list of `key="value"` pairs that `@surrealdb/ui` passes to the embedded Studio, so it takes the same keys as `<SurrealistMini>`. The one most pages need is `dataset`, a path on datasets.surrealdb.com:
+
+````mdx
+```surql runnable='dataset="/datasets/drone-navigation/schengen.surql"'
+SELECT * FROM place;
+```
+````
+
+Put the whole value in single quotes and each pair's value in double quotes. The info string's parser reads `'…'` as one value, and `@surrealdb/ui` then splits the pairs inside it. A bare `runnable` with no value runs the query against an empty database. www.surrealdb.com uses the same attribute, so the syntax carries over between the two sites.
+
+Use a runnable block when the code is already part of the page's text, as in a tutorial step. It stays an ordinary block until a reader asks for it, so a `title="Output"` fence below still pairs with it, and the dataset downloads only on the first **Run Query**. Use `<SurrealistMini>` for an editor that should be open as soon as the page loads. Leave a block plain when running it against the dataset would fail, such as a listing of the `DEFINE` statements the dataset already contains.
+
+The button is rendered in the browser, so `curl` cannot see it. Count the buttons in the page from the browser console instead, and compare the number with the runnable fences in the source:
+
+```js
+[...document.querySelectorAll("button")].filter((b) => /Run Query/.test(b.innerText)).length;
+```
+
 ### `<Synopsis>`
 
 Write the usage lines as the block body:
 
 ```mdx
 <Synopsis>
-surrealctl instance create [OPTIONS] <NAME>
+surreal cloud instance create [OPTIONS] <NAME>
 </Synopsis>
 ```
 
@@ -858,7 +1156,7 @@ button, because a synopsis is not paste-ready.
 <OptionsTable
 	title="Options"
 	options={[
-		{ "name": "--type", "short": "-t", "value": "<TYPE>", "env": "SURREALCTL_TYPE", "description": "Instance type to provision." },
+		{ "name": "--type", "short": "-t", "value": "<TYPE>", "env": "SURREAL_CLOUD_TYPE", "description": "Instance type to provision." },
 		{ "name": "--replicas", "type": "number", "default": 1, "description": "Number of `scale` plan replicas." }
 	]}
 />
@@ -869,6 +1167,113 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 `Environment variable` columns render only when a row uses them, so a table never
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
+
+## Tested examples
+
+Every runnable SurrealQL example is a test. Each one starts with a `/**[test] ... */` config comment, and the language-test runner in the SurrealDB repository, built with its `docs` feature, reads the pages and runs every `surql` block that has one. The site strips the comment, so a reader never sees it, and the raw `.md` endpoints strip it too.
+
+A block is a test when its language is `surql`, it is not marked `notest`, and its title does not mark it as output. A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
+
+The config states the result of every statement, as `[[test.results]]` entries in the order the statements run. The page states results in the ways described under **Showing output**: an adjacent `Output` or `Expected output` fence gives the value of the last statement, `Error output` says that it fails (or fails to parse, when the output starts with `Parse error`), and a `//-` line gives the value of the statement above it. A qualified title such as `Example output` or `Possible output` is not compared. A statement the page says nothing about is expected to succeed, as `error = false`.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: person:tobie, name: 'Tobie' }]"
+
+*/
+CREATE person:tobie SET name = 'Tobie';
+SELECT * FROM person;
+```
+
+The result is written twice, once for the reader and once for the runner, and `bun run check:doc-tests` keeps the two in step. It fails when a test block has no config, and when a config expects a different value from the one its page shows. It compares values without regard to layout, so a value laid out over several lines in an `Output` fence matches the same value on one line in the config, and a generated record key matches any other. A config can also check a result in a way the page cannot show, such as `match = "$result.len() = 3"` for a result whose order varies, and the script leaves those alone.
+
+For a new example, write the example and its `Output` fence or `//-` lines, then run `bun run check:doc-tests --fix`, which writes a config from them. When an example changes, change its result in both places. When the script reports a disagreement on an example you did not touch, run the example: either the page or the config is out of date, and only running it tells you which. A block whose code calls `eval::` needs `[env.capabilities]` with `allow-eval-query = true`, which `--fix` adds.
+
+### `<DemoEmbed>`
+
+```mdx
+<DemoEmbed title="Who decides here?" height={820} pages={[{ "label": "Who decides here?", "src": "/docs/showcase/who-decides/who-decides.html" }]} />
+```
+
+`<DemoEmbed>` shows a page from `public/` in a frame, with one tab for each
+entry in `pages`. Markdown strips a raw `<iframe>`, so this is the only way to
+embed one. A showcase demo keeps its files in `public/showcase/<name>/`.
+
+Two mistakes break an embed on surrealdb.com while it still works in
+`bun run dev`:
+
+- **A page named `index.html`.** Vercel serves `/docs/x/index.html` as `/docs/x`
+  with no trailing slash, so a relative `fetch("data.json")` asks for
+  `/docs/data.json`. Name the page after what it shows, as in `who-decides.html`.
+- **An inline `<script>`.** The Content-Security-Policy that surrealdb.com sends
+  has no `'unsafe-inline'` in `script-src`, so the browser blocks the script,
+  and a Vercel preview can still look correct. Put the script in its own `.js`
+  file. Inline styles are allowed.
+
+#### A SurrealDB engine in the page
+
+`public/showcase/who-decides/engine.wasm` is the unmodified binary of
+`@surrealdb/wasm-native` 3.3.4, about 14 MB. It loads only with the wasm-bindgen
+glue code built for that exact version, and that glue is bundled into
+`who-decides.js` with the demo's interface, so another page cannot load the file
+on its own. A new demo that runs SurrealDB in the browser installs
+`@surrealdb/wasm` and `@surrealdb/wasm-native` and bundles its own copy.
+
+When a second demo needs the engine, move the engine to one shared folder, such
+as `public/showcase/engine/`, with its glue as a separate module, and load it
+from there in both demos instead of committing a second 14 MB copy. Updating the
+shared engine to a new SurrealDB release then changes every demo that uses it,
+so open each of them afterwards.
+
+## Diagrams
+
+Explanatory diagrams are drawn in TypeScript, not by hand. Each one is a figure in `scripts/diagrams/figures/*.ts`, built from the shared theme and SVG helpers in `scripts/diagrams/lib.ts`, and `bun run diagrams:render [name]` turns it into a light and dark WebP pair in `src/assets/img/diagrams/`. A page shows a figure with the usual pair:
+
+```mdx
+<img src="~/assets/img/diagrams/light/NAME-light.webp" darkSrc="~/assets/img/diagrams/NAME.webp" alt="..." />
+```
+
+A figure draws the page's own example, with the values that example actually produces, so that the picture and the code beside it say the same thing. Run the example before drawing it: in November 2026 doing so found a `FOR UPDATE` example that did not prevent write skew, `MAXDEPTH` record counts that were nearly three times too high, and an operator precedence table that put `??` near the top instead of at the bottom. Where a figure cannot use real data, it says that its data is illustrative.
+
+The alt text states what the figure shows in full sentences. The raw `.md` endpoints serve only the alt text, so an agent reading one gets nothing else from the image.
+
+Skip minor integration pages, such as the AI framework and data tooling pages under `build/integrations/`. A figure there is costly to keep correct for the few readers it serves.
+
+### Keeping figures accurate
+
+Every figure file exports `verified`, which says what its figures were checked against and when: a release, a source commit, or the page's own example. A figure can override it with its own `verified`. `bun run diagrams:render` records each figure in `scripts/diagrams/manifest.json`, with a fingerprint of every page section that shows it, and also writes the same provenance into each WebP as XMP.
+
+`bun run diagrams:check` compares the sections as they are now with the fingerprints in the manifest, and lists every figure whose section has changed, every figure added to or removed from a page, and every figure with no `verified` record. The check cannot tell whether a figure is now wrong, only that the text it was drawn to match is different, so the next step is to look:
+
+- If the figure no longer matches, fix the figure file, update its `verified`, and render it again.
+- If it still matches, run `bun run diagrams:check --accept NAME` to record the current sections.
+
+Run the check before finishing any task that changed content, as the commands at the top of this file say. Also run it after a release, alongside reading the `verified` records: a change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it, and the `verified` record says which release or source to check again.
+
+### Figures in SurrealDB University
+
+A University lesson on www.surrealdb.com can show a docs figure without a copy of its code or its images. List the figure in `scripts/diagrams/shared.json` with the www files that show it, and run `bun run diagrams:share`, which `diagrams:render` also runs. That copies the pair to `public/diagrams/`, where it has a fixed address the lesson uses:
+
+```mdx
+<img src="/docs/diagrams/NAME-light.webp" darkSrc="/docs/diagrams/NAME.webp" alt="..." />
+```
+
+The images under `src/assets` get a hashed name in every build, so they cannot be linked from another site. www accepts a `/docs/diagrams/` address in `src/content/course-*` only, and its `validate-images.ts` fails the build on one anywhere else. Docs figures skip the website's design review, so they stay out of the rest of the website.
+
+A shared figure changes in the lessons as soon as the docs deploy, so a change to one is a change to those lessons too. `bun run diagrams:check` reports a public copy that differs from the rendered image, and, when a clone of www.surrealdb.com is at `~/www.surrealdb.com` or `WWW_REPO`, a listed lesson that does not show the figure and a lesson that shows one without being listed. Before changing a shared figure, read the lessons `shared.json` names for it. A new shared figure must be deployed in the docs before a www preview or deploy can show it, so merge the docs change first.
+
+## Screenshots
+
+A screenshot goes out of date when the interface it shows changes, and that interface lives in another repository. `scripts/screenshots/manifest.json` maps each screenshot, as a path under `src/assets/img`, to the Studio source files that render the screen, and records the Studio commit the screenshot matches. `bun run screenshots:check` lists every screenshot whose source files have changed on Studio's main branch since that commit, with the commits that changed them.
+
+The check reads a local clone of surrealdb/studio at `~/studio`, or at `STUDIO_REPO`, and does not fetch it, so run `git -C ~/studio fetch` first. As with diagrams, it cannot tell whether a change is visible: retake the screenshot, or run `bun run screenshots:check --accept NAME` to record it as matching the current UI. Each entry's `capture` says how to retake it: `scripted` with the capture script, `sign-in` with the capture script and a signed-in SurrealDB Cloud session, or `manual` by hand. Add an entry for a new Studio screenshot when you add the image, and see `--unmapped` for those that still have none.
+
+`bun run screenshots:capture` retakes every screenshot whose entry has a `shot`: the path within the organisation, any steps to reach the screen, and the element to crop to. It drives Chrome with its own profile in `generated/screenshots/`, which git ignores. Run it once with `--sign-in`, sign in in the window it opens, open the organisation the screenshots should show, and close the window. Later runs reuse that session without a window. Screenshots are taken in dark mode at twice the pixel density. The script hides announcements, tips and open menus rather than clicking them away, and it refuses to save a screenshot in which an email address is visible, so the signed-in account does not appear in the docs. After retaking a screenshot, check it, update the alt text if the screen changed, and accept it with `screenshots:check --accept`.
 
 ## Data loading and rendering
 
@@ -903,7 +1308,7 @@ It returns `{ content, headings, navigation, contentPath, breadcrumbs, title, de
 renders `content` through `@surrealdb/ui`'s `MarkdownViewer` with `jsxMode="render"`
 and the components from `registerMarkdownComponents`.
 
-Labs listing: `sortCollection(getCollection("labs-items"), "title", "asc")`.
+Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges `src/data/labs.json` with `src/data/labs-blog.json`, newest first. See [Labs](#labs).
 
 Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 `{ content, headings }`:
@@ -961,6 +1366,18 @@ title per page is the floor, so at the current page count most of the ceiling is
 already spent before a description is written. If the file needs to get smaller,
 the lever is fewer pages or shorter URLs, not a shorter preamble.
 
+### Agent guides
+
+`https://surrealdb.com/llms/guides/<slug>` serves a documentation page as markdown
+under a short, stable address to hand a coding agent, such as
+`python-migration-2x-to-3x`. The map from slug to page is
+`src/utils/agent-guides.ts`, and the route in `src/pages/+server.ts` answers at
+`/docs/llms/guides/<slug>`. The address outside `/docs` needs a rewrite of
+`/llms/guides/*` to this project in the `vercel.ts` of www.surrealdb.com. With that
+rule in place, a new guide is a change to this repo alone. A slug is quoted in
+prompts and release notes: when its page moves, change the path in the map and keep
+the slug.
+
 ## Related lessons and posts
 
 A page can end with a box linking to SurrealDB University lessons and blog posts
@@ -984,6 +1401,18 @@ only after doing the same.
 - Lessons and posts are cached in `generated/related-sources`. Run with
   `RELATED_REFRESH=1` when regenerating for a commit, so the file reflects what
   is published.
+
+## Labs
+
+`/docs/labs` lists projects, tutorials, videos and talks, with a search and filters by stage, format, topic and language. Its entries are maintained in the [awesome-surreal](https://github.com/surrealdb/awesome-surreal) repository, one YAML file per entry in `entries/`, and the same files generate that repository's README, so the README and Labs list the same things. A new entry is a pull request there, not here.
+
+This repository holds a copy in `src/data/labs.json`, which `bun run generate:labs` writes from awesome-surreal's `main` branch and which is committed, so the docs never fetch it at build or request time. Run it after an entry merges there. `AWESOME_SURREAL_REF` reads another branch or a commit, and `AWESOME_SURREAL_DIR` reads a local checkout. The script checks every entry against `labSchema`, so a stage, format, topic or language that `src/utils/labs.ts` does not list fails the import: add the value to `src/utils/labs.ts` first, because the filters are built from that file. An entry marked `labs: false` is in the README only.
+
+A card shows an author photo from `src/assets/img/labs-authors/<avatar>.jpg` (or `.png`) when the entry names an `avatar` and the file exists, and a placeholder otherwise. An entry that gives the author's `github` username and no `avatar` gets the photo from that GitHub profile: `generate:labs` downloads it once, saves it under the username in lowercase, and the photo is committed with `labs.json`, so the site never loads images from GitHub and the CSP needs no change. A photo is not downloaded again, so to replace one, delete the file and run the import again. Check new photos in the diff before committing.
+
+### Blog posts in Labs
+
+The Labs listing also shows the blog's `tutorials` and `engineering` posts. They come from `src/data/labs-blog.json`, which `bun run generate:labs-blog` writes from the public website API and which is committed, so the docs never call the API at runtime. Run it after posts are published. The list endpoint gives authors only as `people:` record IDs, which `src/data/labs-blog-authors.json` maps to the `name`, `role` and `avatar` a card shows. A post is credited to the first of its authors found there, and to SurrealDB when none is. A new author's posts credit SurrealDB until their ID is added, so check the regenerated diff for new IDs.
 
 ## Link graph
 

@@ -1,0 +1,133 @@
+---
+position: 12
+title: Streaming results
+description: Read query results with the Go SDK as SurrealDB streams them, using QueryStream and a range-over-func loop - StreamFrame rows, Done frames, single values, provisional rows, several statements, stopping early to cancel the query, timeouts, memory, and the fallback over HTTP.
+---
+
+# Streaming results
+
+[`Query`](/docs/reference/golang/api/core/db#query) waits until every statement has finished, and holds the whole result in memory before it returns. [`QueryStream`](/docs/reference/golang/api/core/db#querystream) yields the result in frames while the query runs. Your code can use the records of a large `SELECT` as they arrive, and can stop the query before it finishes. This page covers reading frames, what each frame holds, and how streaming behaves on each transport.
+
+Streaming uses the `query_stream` method over WebSocket. Over HTTP, or when the server refuses the method, `QueryStream` runs the query with `Query` instead. It then yields the whole result as frames of the same form.
+
+## API references
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Function</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#querystream"><code>surrealdb.QueryStream[T](ctx, s, sql, vars)</code></a></td>
+			<td scope="row" data-label="Description">Runs a query and yields its result frame by frame</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/types#streamframe"><code>StreamFrame[T]</code></a></td>
+			<td scope="row" data-label="Description">One step of a query's result</td>
+		</tr>
+	</tbody>
+</table>
+
+## Reading records as they arrive
+
+`QueryStream` returns an `iter.Seq2[StreamFrame[T], error]`, which a `for ... range` loop reads. The type parameter is the type of one row in `Rows`:
+
+```go
+type Reading struct {
+	ID    *models.RecordID `json:"id,omitempty"`
+	Value int              `json:"value"`
+}
+
+for frame, err := range surrealdb.QueryStream[Reading](ctx, db, "SELECT * FROM reading", nil) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, r := range frame.Rows {
+		process(r)
+	}
+	if frame.Done {
+		fmt.Println("finished in", frame.Time)
+	}
+}
+```
+
+A `SELECT` of 20,000 records arrives in about 80 frames, with a few hundred records in each frame. As a result, the program can use the first records before the last ones arrive.
+
+## What a frame holds
+
+Each [`StreamFrame`](/docs/reference/golang/api/types#streamframe) belongs to one statement of the query:
+
+| Field | Description |
+| --- | --- |
+| `Statement` | The index of the statement, from 0 |
+| `Rows` | Rows of the statement. More frames can follow with more rows. |
+| `Done` | `true` on the last frame of the statement. No frame follows it for that statement. |
+| `Err` | The statement's error, as a `*QueryError`, on its `Done` frame |
+| `Single` | `true` on the `Done` frame of a statement that returns one value rather than a list |
+| `Value` | The value of a `Single` statement |
+| `Time` | How long the statement took, on its `Done` frame |
+
+A statement that returns one value, such as `RETURN 42` or `SELECT * FROM ONLY person:tobie`, has no rows. Its `Done` frame sets `Single` and holds the result in `Value`.
+
+## Rows are provisional until Done
+
+The rows of a statement are not final until its `Done` frame. When that frame carries an `Err`, the statement failed, and every row delivered for that statement is retracted. Your code can act on rows as they arrive, for example by writing them to a file. In that case, be ready to undo the work when the statement fails. Alternatively, collect the rows and act on them at the `Done` frame.
+
+## Reading several statements
+
+For a query with several statements, `QueryStream` yields the frames of each statement in turn. Use the `Statement` field to find which statement a frame belongs to:
+
+```go
+sql := "RETURN 42; THROW 'boom'; SELECT id FROM reading LIMIT 2"
+
+for frame, err := range surrealdb.QueryStream[any](ctx, db, sql, nil) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	if frame.Done && frame.Err != nil {
+		fmt.Printf("statement %d failed: %v\n", frame.Statement, frame.Err)
+	}
+}
+```
+
+```text title="Output"
+statement 1 failed: An error occurred: boom
+```
+
+All the statements share one type parameter. When the statements return different types, use `any`. A row that does not decode into the type parameter is an error, and that error ends the iteration.
+
+Some errors belong to no single statement, such as a query that does not parse or a lost connection. `QueryStream` yields such an error as the loop's `err`, and the error ends the iteration. The error retracts every statement that has no `Done` frame yet.
+
+## Stopping early
+
+Leave the loop with `break` or `return` to stop reading. The SDK then cancels the query on the server, so the server stops producing records:
+
+```go
+count := 0
+for frame, err := range surrealdb.QueryStream[Reading](ctx, db, "SELECT * FROM reading", nil) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	count += len(frame.Rows)
+	if count >= 1000 {
+		break
+	}
+}
+```
+
+In a [transaction](/docs/reference/golang/concepts/transactions#streaming-in-a-transaction), when you leave the loop, the SDK waits for the server to end the cancelled query. This makes sure that a later `.Commit()` or `.Cancel()` comes after the end of that query. The statements that ran before you left the loop stay in the transaction.
+
+## Timeouts and memory
+
+The timeout of the connection limits only the wait for the first frame, which the server sends at once. After that, the context that you pass is the only limit on the wait. This is because a statement can send nothing for a long time before it has rows or finishes. To limit the whole query, pass a context with a deadline.
+
+The server does not wait for your loop. The SDK buffers the frames that arrive faster than the loop reads them, and this buffer has no size limit. A loop that reads slowly can therefore still hold the whole result in memory, as `Query` does.
+
+## Learn more
+
+- [Executing queries](/docs/reference/golang/concepts/executing-queries) for `Query` and the other ways to run SurrealQL
+- [DB API reference](/docs/reference/golang/api/core/db#querystream) for the signature of `QueryStream`
+- [Types reference](/docs/reference/golang/api/types#streamframe) for the `StreamFrame` type

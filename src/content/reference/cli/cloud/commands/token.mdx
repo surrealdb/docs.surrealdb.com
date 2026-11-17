@@ -1,0 +1,226 @@
+---
+position: 11
+title: surreal cloud token
+description: Reference for surreal cloud token - listing, creating and revoking personal access tokens, and listing the scopes a token can be granted. Covers the login-session requirement, the secret guard, expiry, and the 10-minute revocation lag.
+---
+
+# surreal cloud token
+
+`surreal cloud token` manages personal access tokens: the `sdbp_…` credentials that authenticate CI jobs and automation against the control plane.
+
+<Synopsis>
+surreal cloud token <COMMAND> [OPTIONS]
+surreal cloud tokens <COMMAND> [OPTIONS]
+</Synopsis>
+
+| Verb | Purpose | Alias |
+| --- | --- | --- |
+| [`list`](#token-list) | List your personal access tokens | `ls` |
+| [`create`](#token-create) | Create a personal access token | |
+| [`delete`](#token-delete) | Revoke a personal access token | `rm` |
+| [`scopes`](#token-scopes) | List the scopes a token can be granted | |
+
+> [!IMPORTANT]
+> Every verb in this group needs an interactive login session. A personal access token is refused locally, before any request is sent, and exits `4`. This is deliberate: a leaked token must not be able to mint its own replacements, nor revoke the one an operator would use to clean up after it. The refusal is decided by the credential's kind rather than by its scopes, so no token can be minted carrying something that lifts it.
+
+```text title="What a token gets instead"
+Managing personal access tokens needs an interactive login session, so nothing was sent.
+
+Sign in with:  surreal cloud auth login
+```
+
+Being signed out is a different answer with a different code: `3`, not `4`. Sign in with [`auth login`](/docs/reference/cli/cloud/commands/auth#auth-login).
+
+These tokens are not database credentials. For a token a SurrealDB client can authenticate with, use [`instance token`](/docs/reference/cli/cloud/commands/instance#instance-token).
+
+## surreal cloud token list {#token-list}
+
+List your personal access tokens.
+
+<Synopsis>
+surreal cloud token list [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags) and nothing else. Column ids are `label`, `id`, `scopes`, `created_at` and `expires_at`, with `user_id` under `--wide`.
+
+```bash
+surreal cloud token list
+```
+
+```text title="Output"
+LABEL              ID                    SCOPES                  CREATED       EXPIRES
+build runner       67upif0m8sh1cn1p2c8t  read:cloud              2 months ago  in 4 days
+nightly export     6a2k9lqzt4v8bn3m1x5c  read:cloud              3 days ago    never
+```
+
+```bash title="Label and expiry of every token"
+surreal cloud token list --json | jq -r '.[] | .label + " " + .expires_at'
+```
+
+Expired tokens are listed as the API sends them, with a past expiry, because they are the ones to find when a job has stopped authenticating.
+
+Only the label, the id, the scopes and the timestamps are stored - the secret itself exists once, at creation. A token with no expiry shows `never` in the table and carries the `9999-12-31T23:59:59Z` sentinel under `--json`.
+
+## surreal cloud token create {#token-create}
+
+Create a personal access token.
+
+<Synopsis>
+surreal cloud token create [OPTIONS] <LABEL>
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "<LABEL>",
+            "required": true,
+            "description": "What this token is for, shown in every listing. Between 1 and 120 characters."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--scope",
+            "value": "<SCOPE>",
+            "description": "A scope to grant. Repeat the flag to grant several, up to 32."
+        },
+        {
+            "name": "--expires-in",
+            "value": "<DAYS>",
+                        "description": "Days until the token expires, between 1 and 365, or the word `never`. When omitted, the API applies its own 30 days."
+        },
+        {
+            "name": "--reveal",
+            "description": "Print the secret even when stdout is a terminal."
+        }
+    ]}
+/>
+
+The secret is returned exactly once. Capture it on creation or create another one.
+
+```bash title="Capture the secret into a variable"
+TOKEN=$(surreal cloud token create "build runner" --scope read:cloud | tail -1)
+```
+
+```bash title="Several scopes, and a shorter life"
+surreal cloud token create "nightly export" \
+    --scope read:cloud \
+    --scope write:cloud-instances \
+    --expires-in 90 \
+    | tail -1 > /run/secrets/surreal-cloud-token
+```
+
+Stdout carries a detail view of the token with the secret removed, then **the bare secret as the last line** - so `| tail -1` is the whole capture recipe. The success line goes to stderr. The follow-up command in the view names the token's id rather than its label, because a label may contain spaces.
+
+> [!WARNING]
+> This is the one command in the whole CLI with no `--json` form. Passing `--json` is a usage error, exit `2`, raised before anything is minted.
+
+```text title="Passing --json"
+`token create` has no --json form. The secret is returned exactly once, and it can neither go inside
+the document nor share stdout with it.
+Run it without --json and take the last line:
+  surreal cloud token create <label> | tail -1
+```
+
+**Refusals**, all exit `2` and all before the request, checked in this order:
+
+- `--json`, as above.
+- stdout is a terminal and `--reveal` was not passed:
+
+```text
+Refusing to print a secret to a terminal, where it would stay in your scrollback.
+Pipe it:  surreal cloud token create <label> | tail -1
+Or pass --reveal if you meant to see it.
+```
+
+- A label outside 1 to 120 characters, counted after trimming.
+- More than 32 scopes, after repeated `--scope` values are collapsed into one: `A token carries at most 32 scopes; 40 were given.`
+- An `--expires-in` that is neither a number of days from 1 to 365 nor the word `never`. `never` is matched without regard to case.
+
+**Warnings** before the request, on stderr:
+
+- `--expires-in never` warns, because the API's own schema calls a non-expiring token discouraged.
+- No `--scope` at all notes that the token will be permitted nothing, and points at [`token scopes`](#token-scopes).
+
+No command changes a token's scopes or expiry afterwards. To change either, create a new token and [revoke](#token-delete) the old one.
+
+Scopes are not pre-checked against the catalogue. An ungrantable scope answers 403 naming the problem, which is more useful than the bare 400 the API gives for everything else.
+
+## surreal cloud token delete {#token-delete}
+
+Revoke a personal access token.
+
+<Synopsis>
+surreal cloud token delete [OPTIONS] <TOKEN>
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "<TOKEN>",
+            "required": true,
+            "description": "The token, by id or label."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--force",
+            "description": "Revoke without confirming."
+        }
+    ]}
+/>
+
+```bash title="By label"
+surreal cloud token delete "build runner"
+```
+
+```bash title="By id, from a script"
+surreal cloud token delete 67upif0m8sh1cn1p2c8t --force --json
+```
+
+**Refusals.** The confirmation names the token by label and id, and the lookup lists your tokens first. Declining prints `Nothing was revoked.` and exits `0`. Labels are not unique, so a label shared by two tokens is reported as ambiguous with both ids rather than guessed at. In a non-interactive session without `--force` or `--yes`, it exits `2` having sent nothing.
+
+> [!NOTE]
+> Revocation is not instantaneous everywhere. The gateway caches token exchanges for a few minutes, so a revoked token may keep working for up to about ten minutes, and the success message says so. Treat revocation as the start of the process when responding to a leak, and rotate whatever the token could reach.
+
+## surreal cloud token scopes {#token-scopes}
+
+List the scopes a token can be granted.
+
+<Synopsis>
+surreal cloud token scopes [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags) and nothing else. Column ids are `id`, `category` and `label`, with `description` under `--wide`.
+
+```bash
+surreal cloud token scopes
+```
+
+```bash title="Just the ids, to paste into a create"
+surreal cloud token scopes --columns id --no-header
+```
+
+This lists what a token *can* be granted. [`auth scopes`](/docs/reference/cli/cloud/commands/auth#auth-scopes) lists what the credential in hand actually carries.
+
+## Related pages
+
+- [Authentication](/docs/reference/cli/cloud/authentication#personal-access-tokens) - how a token is supplied, and what it cannot do
+- [`auth` commands](/docs/reference/cli/cloud/commands/auth) - signing in with a login session
+- [`instance token`](/docs/reference/cli/cloud/commands/instance#instance-token) - database tokens, which are a different credential
+- [Output and exit codes](/docs/reference/cli/cloud/output-and-exit-codes#the-secret-guard) - the secret guard
+- [Overview](/docs/reference/cli/cloud) - the rest of the reference
+- [SurrealDB CLI](/docs/reference/cli/db) - for working with the data inside an instance

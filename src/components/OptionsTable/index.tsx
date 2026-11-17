@@ -34,7 +34,7 @@ export interface ReferenceOption {
      */
     default?: string | number | boolean;
     /**
-     * Environment variable that supplies the same value: `SURREALCTL_TYPE`.
+     * Environment variable that supplies the same value: `SURREAL_CLOUD_TYPE`.
      */
     env?: string;
     /**

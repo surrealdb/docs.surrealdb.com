@@ -6,16 +6,9 @@ description: "End-user HTTP endpoints on the unified substrate. For SurrealDB Ag
 
 # REST API
 
-SurrealDB Agent Memory exposes two HTTP surfaces from the **api** role:
+SurrealDB Agent Memory exposes its end-user HTTP API under `/api/v1/{context_id}/...` on the Context host. Authenticate with a Context API key as `Authorization: Bearer`. **MCP** is served at `/mcp` on the same host.
 
-| Surface | Prefix | Authentication |
-| --- | --- | --- |
-| **End-user API** | `/api/v1/{context_id}/...` | Context API key as `Authorization: Bearer` |
-| **Management API** | `/api/v1/...` (no context id in path) | Management key as `Authorization: Bearer` |
-
-Both surfaces share the same host and port (default `http://localhost:9090`). **MCP** is served at `/mcp` on the same listener.
-
-See [Management API](/docs/agent-memory/reference/management-api) for Context and key lifecycle.
+Contexts and API keys are created in [SurrealDB Studio](https://studio.surrealdb.com). See [Agent Memory on SurrealDB Cloud](/docs/agent-memory/quickstarts/surrealdb-cloud).
 
 ## Authentication
 
@@ -37,7 +30,7 @@ Optional **delegated identity** on a single request (depth 1, intersected with t
 X-Spectron-On-Behalf-Of: <principal-id>
 ```
 
-Use this when an agent acts for another principal - for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access.
+Use this when an agent acts for another principal - for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access. The target principal must allow delegation, which is off until its `delegation_allowed` flag is set; otherwise the request returns `403`, and an unknown target returns `404`. The header works the same way on `/mcp` and on document uploads. Sending it more than once, or with a value that is not plain printable ASCII, returns `400`.
 
 The same `Idempotency-Key` (scoped to context + principal) within 24 hours returns the stored response. A different body with the same key, or a duplicate request while the first is still in flight, returns `409 Conflict`. Failed writes release the reservation so a retry can re-run.
 
@@ -63,13 +56,13 @@ A flat `["a", "b"]` means **a OR b**. For **a AND b** in one clause, nest: `[["a
 Register paths before first use:
 
 ```bash
-agent-memory scopes create org/acme
-agent-memory scopes create org/acme/user/alice
+surreal memory scopes create org/acme
+surreal memory scopes create org/acme/user/alice
 ```
 
 See [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope).
 
-JSON responses use **camelCase** field names (`queryMs`, `sessionId`, `traceId`, …).
+JSON responses use **camelCase** field names (`queryMs`, `sessionId`, `traceId`, …). Request bodies differ by route: read and query bodies (`/query`, `/context`, `/documents/query`, `/chat`, session context) use camelCase, and the `/facts` and `/facts/batch` write bodies use snake_case. A field the server does not know is ignored without an error, so a wrongly cased field has no effect.
 
 ## Pagination
 
@@ -140,15 +133,15 @@ Content-Type: application/json
 
 `infer` values: `full` (LLM extraction, default), `triples` (caller-supplied structured triples), `preview` (dry run), `none` (literal store).
 
-Optional **`observed_at`** (RFC 3339) sets the **known time** (`created_at`) of derived facts. Use when ingesting serial narrative - novels, episodes, franchise films - so **`asOf`** recall matches how far the user has read or watched, not when you bulk-imported the corpus. In the example above, this would be useful to replay a narrative in which a user or character is unaware of the fact until the date indicated. See [Narrative playback and spoiler safety](/docs/agent-memory/reasoning/temporal-validity#narrative-playback-and-spoiler-safety). Omitted means wall-clock ingest time.
+Optional **`observed_at`** (RFC 3339) sets the **known time** (`created_at`) of derived facts. Use when ingesting serial narrative - novels, episodes, franchise films - so **`asOf`** recall matches how far the user has read or watched, not when you bulk-imported the corpus. In the example above, this would be useful to replay a narrative in which a user or character is unaware of the fact until the date indicated. See [Narrative playback and spoiler safety](/docs/agent-memory/memory-and-knowledge/reasoning/temporal-validity#narrative-playback-and-spoiler-safety). Omitted means wall-clock ingest time.
 
 **Response (`infer: full`):** nested **`extraction`** (entities, attributes, relations, …), plus `sessionId`, `turnId`, and `mode`. **`infer: none`** returns `chunkId`, `sessionId`, and `turnId` for the literal memory chunk.
 
-When supplying triples or structured entities, `memory_category` on entities, attributes, and relations must be one of **`identity`**, **`knowledge`**, or **`context`**. Invalid values are rejected with `400 Bad Request`. Instructions and uncertainties use their own tables; episodic material lives on sessions and turns.
+When supplying triples or structured entities, `memory_category` on entities, attributes, and relations must be one of **`identity`**, **`knowledge`**, or **`context`**. Invalid values are rejected with `422 Unprocessable Entity`. With `infer: "triples"`, a top-level `memory_category` applies to every triple without its own, and a triple with neither is stored as `knowledge`; other `infer` modes ignore the top-level field. `context` facts expire after 7 days (see [Expiry of context facts](/docs/agent-memory/mental-model/memory-lifecycle#expiry-of-context-facts)). Instructions and uncertainties use their own tables; episodic material lives on sessions and turns.
 
 ### Batch conversation
 
-Preferred path for multi-turn ingest (replaces per-turn `POST .../sessions/{id}/turns` for new integrations):
+Preferred path for multi-turn ingest. There is no per-session turns write route: a single turn is written with `POST /facts` plus `session_id` and `role`.
 
 ```http
 POST /api/v1/{context_id}/facts/batch
@@ -179,13 +172,12 @@ Sessions remain for browsing transcripts and session-scoped state. **Writes** sh
 
 ```http
 POST   /api/v1/{context_id}/sessions
-GET    /api/v1/{context_id}/sessions/{session_id}
 DELETE /api/v1/{context_id}/sessions/{session_id}
-GET    /api/v1/{context_id}/sessions/{session_id}/turns?limit=100&offset=0
-GET    /api/v1/{context_id}/sessions/{session_id}/context
+GET    /api/v1/{context_id}/sessions/{session_id}/turns?limit=100
+POST   /api/v1/{context_id}/sessions/{session_id}/context
 ```
 
-`list_turns` paginates: **`limit`** defaults to 100 (max 500); **`offset`** skips turns. The CLI `sessions show` / `transcript` commands page through turns automatically.
+There is no route that reads a single session. The turn listing pages with `limit` and `cursor` as described under [Pagination](#pagination): **`limit`** defaults to 100 (max 500). The older **`offset`** parameter is deprecated. The CLI `sessions show` / `transcript` commands page through turns automatically. Session context returns `{"context": "..."}`.
 
 Create session body:
 
@@ -211,7 +203,7 @@ Content-Type: application/json
   "k": 10,
   "lens": [["org/acme/user/alice"]],
   "labels": ["subject=alice"],
-  "scope_view": "strict",
+  "scopeView": "strict",
   "asOf": "2025-02-01T00:00:00Z",
   "source": "ingest-cli"
 }
@@ -221,16 +213,16 @@ Content-Type: application/json
 | --- | --- |
 | `lens` | DNF scope selector narrowing the read region (clamped to the key’s grant). |
 | `labels` | Descriptive `key=value` tags that **filter** hits within the allowed region - labels never widen access on their own. |
-| `scope_view` | How broadly to fold results within the grant: `strict` (default - caller’s region only), `crossTeam` (cross-principal shared reads), or `merged` (same-fact records at narrower scopes). **`crossTeam`** and **`merged`** resolve like **`strict`**. None widen past the caller’s grant. |
+| `scopeView` | How broadly to fold results within the grant: `strict` (default - caller’s region only), `crossTeam` (cross-principal shared reads), or `merged` (same-fact records at narrower scopes). **`crossTeam`** and **`merged`** resolve like **`strict`**. None widen past the caller’s grant. |
 | `include` | Which result families to return: `facts` (entities and attributes) and/or `passages` (document chunks and sections). Default: both. Omitted or empty means no narrowing. Filters the **response** only - retrieval and trace reinforcement still see the full candidate set. |
 | `mode` | Closed set: `hybrid`, `vector`, `bm25`, or `graph`. Invalid values return `400`. |
 | `asOf` | Known-time filter - recall what the system would have believed at this instant (supersession walk by `created_at` for attributes; relations are gated by `created_at` and open validity). Omitted means current state. |
 | `includeDuplicates` | When `false` (default), near-duplicate document passages and stored conversation text are excluded from fused recall so the same wording does not occupy multiple ranks. Set `true` to include them (parity with `/documents/query`). |
 | `source` | Free-form label recorded on the retrieval trace for audit replay; does not affect ranking. |
 
-**`k`** on `/query` and document query default to **10** and are capped at **50** (operator-tunable downward only - see [Configuration](/docs/agent-memory/reference/configuration#request-and-list-limits)). The internal retrieval pool is fixed separately from `k`.
+**`k`** on `/query` and document query default to **10** and are capped at **50** (see [Configuration](/docs/agent-memory/reference/configuration#request-and-list-limits)). The internal retrieval pool is fixed separately from `k`.
 
-Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`; optional **`occurredAt`** - known time of the underlying record for temporal resolution), optional **`contextHits`** (same-section siblings from section expansion - not counted against `k`), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`). See [Recalling memories](/docs/agent-memory/retrieve/recall#section-expansion).
+Response includes `tier` (`direct`, `cache`, `hybrid`, or `escalated`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`; optional **`occurredAt`** - known time of the underlying record for temporal resolution), optional **`contextHits`** (same-section siblings from section expansion - not counted against `k`), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`). See [Recalling memories](/docs/agent-memory/memory-and-knowledge/retrieve/recall#section-expansion).
 
 ### Formatted context block (`/context`)
 
@@ -245,7 +237,15 @@ Content-Type: application/json
 }
 ```
 
-Returns a string suitable for LLM system-prompt injection.
+Returns an object whose `context` field is a string suitable for LLM system-prompt injection, together with `tier` and `queryMs`:
+
+```json
+{
+  "context": "…",
+  "tier": "hybrid",
+  "queryMs": 42
+}
+```
 
 ### Chat (SSE optional)
 
@@ -256,21 +256,24 @@ Content-Type: application/json
 {
   "message": "Summarise what you know about me",
   "scopes": [["org/acme/user/alice"]],
-  "session_id": "sess_01HF..."
+  "sessionId": "sess_01HF..."
 }
 ```
 
-Use `Accept: text/event-stream` for streaming replies.
+Set `"stream": true` in the body for a streamed reply over server-sent events.
 
-The response (and the SSE **`done`** frame) includes a **`citations`** list when the model cites retrieved sources inline with `[S1]`-style markers. Each citation resolves a marker to its source record (`id`, `kind`, `snippet`, `score`, optional `occurredAt`, optional **`role`**). For document passages it also includes **`documentTitle`** and **`positionPercent`** - an approximate percentage through the document, not a raw chunk id. When the source is a prior assistant reply, **`role`** is `"assistant"`. Citations index both ranked `hits` and section-expansion `contextHits`. See [Chat sessions](/docs/agent-memory/sessions/chat-sessions) for transcript-window and ranking behaviour.
+The response (and the SSE **`done`** frame) includes a **`citations`** list when the model cites retrieved sources inline with `[S1]`-style markers. Each citation resolves a marker to its source record (`id`, `kind`, `snippet`, `score`, optional `occurredAt`, optional **`role`**). For document passages it also includes **`documentTitle`** and **`positionPercent`** - an approximate percentage through the document, not a raw chunk id. When the source is a prior assistant reply, **`role`** is `"assistant"`. Citations index both ranked `hits` and section-expansion `contextHits`. See [Chat sessions](/docs/agent-memory/memory-and-knowledge/sessions/chat-sessions) for transcript-window and ranking behaviour.
 
 ---
 
 ## State, profile, entities
 
 ```http
-POST /api/v1/{context_id}/state
+GET  /api/v1/{context_id}/state
 GET  /api/v1/{context_id}/profile
+GET  /api/v1/{context_id}/attributes
+GET  /api/v1/{context_id}/relations
+GET  /api/v1/{context_id}/actions
 GET  /api/v1/{context_id}/entities
 GET  /api/v1/{context_id}/entities/search
 GET  /api/v1/{context_id}/entities/top
@@ -280,6 +283,8 @@ GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}/history/{key}
 GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}/neighbourhood
 DELETE /api/v1/{context_id}/entities/{entity_type}/{entity_name}
 ```
+
+**`GET /attributes`** lists live attributes, newest first. Live means not superseded and inside its validity window. **`GET /relations`** lists live relation edges, newest first. **`GET /actions`** lists live actions (dated events), newest first by write time, and `since`/`until` bound the event time. All three page with `cursor`.
 
 Tri-temporal reads accept `asOf`, `atInstant`, `validFrom`, and `validUntil` query parameters on entity GETs.
 
@@ -302,7 +307,7 @@ One request that answers what a Context knows about a subject. `/lookup` is a co
 | Body field | Default | Meaning |
 | --- | --- | --- |
 | `query` | required | What the reader asked about. |
-| `subject` | resolved from `query` | Answer about `<type>:<name>` directly, skipping resolution. |
+| `subject` | resolved from `query` | Answer about `<type>/<name>` directly (for example `person/alice`), skipping resolution. |
 | `entityType` | any | Restrict resolution to one entity type. |
 | `include` | every section except `passages` | Which sections to fill. |
 | `ambiguityMargin` | server default | How far the top candidate must beat the runner-up before the answer counts as unambiguous. |
@@ -340,6 +345,7 @@ POST /api/v1/{context_id}/lifecycle/expire
 POST /api/v1/{context_id}/lifecycle/decay
 POST /api/v1/{context_id}/elaborate
 POST /api/v1/{context_id}/consolidate
+POST /api/v1/{context_id}/derived/retire
 POST /api/v1/{context_id}/fsck
 ```
 
@@ -347,7 +353,9 @@ POST /api/v1/{context_id}/fsck
 
 **`POST /consolidate`** is **caller-scoped** when invoked on the data plane: facts are pooled only from the caller's **`memory:read`** region, and persistence requires **`memory:write`** over each scope group. A readable-but-not-writable group returns a **dry-run preview** in the response but is not committed. The background scheduler pass is unchanged and pools every scope. An empty read region denies all pooling (fail-closed).
 
-**`POST /forget`** accepts a natural-language **`query`**, optional **`purge: true`** for permanent erasure, and optional **`dryRun: true`** to return a match count without expiring anything (see [Forgetting memories](/docs/agent-memory/operations/forget)).
+**`POST /forget`** accepts a natural-language **`query`**, optional **`purge: true`** for permanent erasure, and optional **`dryRun: true`** to return a match count without expiring anything (see [Forgetting memories](/docs/agent-memory/memory-and-knowledge/operations/forget)). Forgetting also retires, or with `purge` deletes, the gists, rollups, elaborated relations and consolidated facts built from what it removes.
+
+**`POST /derived/retire`** takes `{"stages": [...]}`, naming any of `gist`, `rollup`, `elaboration` and `consolidation`, and retires every current row those stages produced. It needs `grant:manage` over the whole Context. See [Retire what a stage produced](/docs/agent-memory/memory-and-knowledge/operations/forget#retire-what-a-stage-produced).
 
 `consolidate` responses reference per-record **`DecisionKind`** values: `create`, `update`, or `supersede`.
 
@@ -359,13 +367,19 @@ POST /api/v1/{context_id}/fsck
 POST   /api/v1/{context_id}/documents
 GET    /api/v1/{context_id}/documents
 GET    /api/v1/{context_id}/documents/{id}
+PUT    /api/v1/{context_id}/documents/{id}
 GET    /api/v1/{context_id}/documents/{id}/raw
 GET    /api/v1/{context_id}/documents/{id}/chunks
+GET    /api/v1/{context_id}/documents/{id}/keywords
 DELETE /api/v1/{context_id}/documents/{id}
 POST   /api/v1/{context_id}/documents/query
 GET    /api/v1/{context_id}/documents/keywords
+GET    /api/v1/{context_id}/documents/keywords/{normalised}
+POST   /api/v1/{context_id}/documents/keywords/search
 POST   /api/v1/{context_id}/documents/recompute-links
 ```
+
+`PUT /documents/{id}` replaces a document and runs its pipeline again. It keeps the document's existing scope and labels. `GET /documents/{id}/keywords` lists the keywords linked to one document, `GET /documents/keywords` lists keywords across the Context, `GET /documents/keywords/{normalised}` returns a keyword and its linked documents, and `POST /documents/keywords/search` runs a vector search over keyword embeddings.
 
 Upload uses `multipart/form-data`; processing is asynchronous via the job queue.
 
@@ -383,22 +397,27 @@ POST /api/v1/{context_id}/documents
 Content-Type: multipart/form-data
 
 file=<binary>
-metadata={"title":"Returns Policy","scopes":[["org/acme/team/eng"]],"labels":["team=eng"],"observedAt":"2024-01-15T00:00:00Z"}
+metadata={
+  "title": "Returns Policy",
+  "scopes": [["org/acme/team/eng"]],
+  "labels": ["team=eng"],
+  "observedAt": "2024-01-15T00:00:00Z"
+}
 ```
 
 ### List documents
 
 ```http
-GET /api/v1/{context_id}/documents?pageSize=20&mimeType=application/pdf
+GET /api/v1/{context_id}/documents?limit=20&mimeType=application/pdf
 ```
 
 Query parameters use **camelCase** (`mimeType`). Page with `limit` and `cursor` as described under [Pagination](#pagination); the older zero-indexed `page` and `pageSize` parameters are still accepted here for existing callers.
 
 ### Document query (`/documents/query`)
 
-Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). Optional flags **`useHyde`**, **`decomposeQuery`**, and **`useReranker`** are honoured when configured: HyDE embeds a hypothetical answer for the vector leg; decomposition fans out sub-questions; reranking rescores top candidates with a cross-encoder when `SPECTRON_RERANKER_URL` is set (see [Configuration](/docs/agent-memory/reference/configuration#reranker-optional)). All degrade gracefully when the backing provider is absent.
+Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). Optional flags **`useHyde`**, **`decomposeQuery`**, and **`useReranker`** are honoured when configured: HyDE embeds a hypothetical answer for the vector leg; decomposition fans out sub-questions; reranking rescores top candidates with a cross-encoder when the deployment has a reranker provider (see [Configuration](/docs/agent-memory/reference/configuration#reranker-optional)). All degrade gracefully when the backing provider is absent.
 
-When using graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be a recognised edge kind - unknown values return `400 Bad Request`:
+When using graph-density reranking, optional **`graphEdges`** selects which structural signals contribute. Each value must be a recognised edge kind - unknown values return `400 Bad Request`:
 
 | Value | Signal |
 | --- | --- |
@@ -421,7 +440,7 @@ GET /api/v1/{context_id}/inspect
 GET /api/v1/{context_id}/audit
 ```
 
-**`/traces/stats`** accepts `scope[…]`, `since`, and **`windowHours`** (rolling window for operational counters). The response includes aggregate counts and health signals for retrieval, decision, and response traces in the window.
+**`/traces/stats`** accepts only **`windowHours`** (rolling window for operational counters, default `24`). The response includes aggregate counts and health signals for retrieval, decision, and response traces in the window.
 
 **Scope gate:** callers with **`grant:manage`** see Context-wide aggregates. Scope-enforcing keys receive a **zeroed** stats view for regions outside their grant, mirroring trace listing so that cross-principal usage metadata does not leak.
 
@@ -429,7 +448,7 @@ GET /api/v1/{context_id}/audit
 
 ## Self-service keys and `/me`
 
-Members who hold a brokered or admin-minted key can manage their own keys on the data-plane API without a management credential:
+Members who hold a brokered or admin-minted key can manage their own keys on the data-plane API:
 
 ```http
 GET    /api/v1/{context_id}/me
@@ -448,7 +467,7 @@ POST   /api/v1/{context_id}/keys/{name}/rotate
 Per-Context policy (see [Configuration](/docs/agent-memory/reference/configuration)):
 
 - **`allow_self_service_keys`** - set `false` to require Cloud-brokered keys only.
-- **`max_token_ttl_seconds`** - server-side TTL clamp on every mint path (management, broker, self-service).
+- **`max_token_ttl_seconds`** - server-side TTL clamp on every mint path (SurrealDB Studio, Cloud-brokered, self-service).
 
 See [Key policy](/docs/agent-memory/reference/configuration#key-policy).
 
@@ -456,20 +475,38 @@ See [Key policy](/docs/agent-memory/reference/configuration#key-policy).
 
 ---
 
+## Ingest judge review
+
+```http
+GET  /api/v1/{context_id}/judgements
+GET  /api/v1/{context_id}/judgements/{judgement_id}
+POST /api/v1/{context_id}/judgements/{judgement_id}/override
+POST /api/v1/{context_id}/judgements/{judgement_id}/approve
+POST /api/v1/{context_id}/judgements/{judgement_id}/reject
+POST /api/v1/{context_id}/judgements/dry-run
+```
+
+The review log of the [ingest judge](/docs/agent-memory/memory-and-knowledge/operations/ingest-judge). `GET /judgements` filters on `verdict` (`pass`, `warn` or `fail`), `stage` (`input` or `row`) and `held=true`, and pages with `limit` and `cursor`, newest first. `override` records a reviewer's verdict and, with `"replay": true`, ingests a kept request. `approve` and `reject` decide content held for approval. `dry-run` judges recorded entries under a candidate addendum without storing anything. Every route needs `grant:manage` over the whole Context.
+
+---
+
 ## Scopes and principals
 
 ```http
-GET  /api/v1/{context_id}/scopes
-POST /api/v1/{context_id}/scopes
-POST /api/v1/{context_id}/scopes/forget
-POST /api/v1/{context_id}/scope-grants   # returns 501 - cross-principal sharing surface locked
+GET    /api/v1/{context_id}/scopes
+POST   /api/v1/{context_id}/scopes
+DELETE /api/v1/{context_id}/scopes
+POST   /api/v1/{context_id}/scopes/forget
+POST   /api/v1/{context_id}/scope-grants   # returns 501 - cross-principal sharing surface locked
 
-GET  /api/v1/verbs                       # management API - grant verb catalog
-
-GET  /api/v1/{context_id}/principals
-POST /api/v1/{context_id}/principals
-GET  /api/v1/{context_id}/principals/{principal_id}/effective
+GET    /api/v1/{context_id}/principals
+GET    /api/v1/{context_id}/principals/{principal_id}
+POST   /api/v1/{context_id}/principals/{principal_id}/grants
+DELETE /api/v1/{context_id}/principals/{principal_id}/grants
+GET    /api/v1/{context_id}/principals/{principal_id}/effective
 ```
+
+`DELETE /scopes` tombstones a scope node (a soft delete). The root scope `/` is reserved and cannot be tombstoned. The principal routes require `grant:manage`: `POST .../grants` grants a scope pattern to a principal for the given verbs, and `DELETE .../grants` revokes it. Principals are created in SurrealDB Studio or through the SurrealDB Cloud API, not here, and that is also where a principal's `delegation_allowed` flag is set.
 
 See [Permissions and delegation](/docs/agent-memory/mental-model/contexts-and-scope#permissions-and-delegation).
 
@@ -493,4 +530,4 @@ Not available in the current release.
 
 ## Errors
 
-All errors follow [RFC 7807 problem details](/docs/agent-memory/reference/errors).
+Every error body is `{"message": "..."}`, and the status is the HTTP status code. See [Errors](/docs/agent-memory/reference/errors).

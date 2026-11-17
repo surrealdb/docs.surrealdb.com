@@ -1,0 +1,1 @@
+-- Empty: the shot needs only a connected database.

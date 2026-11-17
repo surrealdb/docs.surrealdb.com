@@ -11,7 +11,17 @@ Error handling in SurrealQL allows you to stop execution and return a meaningful
 You can use `THROW` to immediately stop a query and return an error to the client:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = true
+
+*/
 THROW "Something went wrong";
+```
+
+```surql title="Error output"
+'An error occurred: Something went wrong'
 ```
 
 When executed, the query is aborted and the error is returned.
@@ -19,6 +29,24 @@ When executed, the query is aborted and the error is returned.
 `THROW` is often used to validate input or guard business logic:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
+LET $email = "tobie@surrealdb.com";
+LET $amount = 0;
+
 IF !$email {
     THROW "Email is required";
 };
@@ -28,9 +56,34 @@ IF $amount <= 0 {
 };
 ```
 
+```surql title="Error output"
+'An error occurred: Transfer amount must be greater than zero'
+```
+
 `THROW` is especially useful inside manual transactions.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Setup
+CREATE account:one SET balance = 100;
+
 BEGIN TRANSACTION;
 
 UPDATE account:one SET balance -= 150;
@@ -47,22 +100,56 @@ COMMIT TRANSACTION;
 The value passed to THROW is returned to the client.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = true
+
+*/
 THROW "Invalid username or password";
+```
+
+```surql title="Error output"
+'An error occurred: Invalid username or password'
 ```
 
 You can also include dynamic data:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
+LET $username = "tobie";
 THROW "User not found: " + <string>$username;
+```
+
+```surql title="Error output"
+'An error occurred: User not found: tobie'
 ```
 
 Or even structured data.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = true
+
+*/
 THROW {
     code: 400,
     message: "Invalid request"
 };
+```
+
+```surql title="Error output"
+"An error occurred: { code: 400, message: 'Invalid request' }"
 ```
 
 ## Avoiding errors
@@ -70,6 +157,12 @@ THROW {
 Type safety and strict definitions can be used to avoid throwing errors based on custom logic. For example, the `ASSERT` clause in a [DEFINE FIELD](/docs/reference/query-language/statements/define/field) statement can be used to ensure that a statement will fail if the string for the `email` field provided is not a valid email.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE FIELD email ON TABLE user TYPE string
   ASSERT string::is_email($value);
 ```
@@ -78,9 +171,28 @@ Working with a schema in this way allows throwing errors to be taken care of by 
 
 ## Assertions while debugging
 
-When you are iterating on a query in the CLI or SurrealDB Studio, it is not always obvious which step in a long [method chain](/docs/reference/query-language/functions/database-functions/#method-syntax) produced an unexpected value. The [`value::expect()`](/docs/reference/query-language/functions/database-functions/value#valueexpect) function (<Since v="v3.1.0" />) checks a condition on the current value and returns that same value when the closure is `true`, or fails the statement with a clear error (and an optional custom message).
+When you are iterating on a query in the CLI or SurrealDB Studio, it is not always obvious which step in a long [method chain](/docs/reference/query-language/functions/database-functions/#method-syntax) produced an unexpected value. The [`value::expect()`](/docs/reference/query-language/functions/database-functions/value#valueexpect) function, available from SurrealDB 3.1, checks a condition on the current value and returns that same value when the closure is `true`, or fails the statement with a clear error (and an optional custom message).
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+[
+    { name: 'Tommy from London' }, 
+    { name: 'Billy from London' }
+];'''
+
+*/
 CREATE person:one SET name = "Tommy", city = "London";
 CREATE person:two SET name = "Billy", city = "London";
 
@@ -99,6 +211,51 @@ $records
 ```
 
 This can be used for temporary invariants while debugging. For permanent rules, prefer `DEFINE FIELD … ASSERT` on the schema. `.expect()` clones the value it receives, so remove it from hot paths once you are finished debugging.
+
+### Checking whether an expression runs
+
+Sometimes the question is whether something is evaluated at all, not what it returns. A `THROW` placed in the expression answers it: the statement fails with your message if the expression runs, and succeeds if it does not.
+
+A computed field, for example, is evaluated only when a query needs it:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ n: 1 }]"
+
+[[test.results]]
+match = "$result = 'An error occurred: summary was computed' OR $error = 'An error occurred: summary was computed'"
+
+*/
+DEFINE TABLE item SCHEMAFULL;
+DEFINE FIELD n ON item TYPE int;
+DEFINE FIELD summary ON item COMPUTED { THROW "summary was computed" };
+-- RETURN NONE, because returning the new record would compute summary as well
+CREATE item:one SET n = 1 RETURN NONE;
+
+-- Does not read summary, so the field is not computed
+SELECT n FROM item;
+//- [{ n: 1 }]
+
+-- Reads every field, so summary is computed
+SELECT * FROM item;
+//- 'An error occurred: summary was computed'
+```
+
+The same works for a branch of a function or an `IF`, to see which one runs. Remove the `THROW` when you are finished, because it stops the statement every time the expression runs.
 
 ## SDK error handling
 

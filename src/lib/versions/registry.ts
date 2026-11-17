@@ -19,7 +19,9 @@ export const sdkFetcherRegistry: Record<string, VersionFetcher> = {
     // The Rust SDK ships as the `surrealdb` crate from the same repo as the
     // server, so version.surrealdb.com is a valid stand-in if crates.io fails.
     rust: createCratesIoFetcher("surrealdb", createSurrealDbVersionFetcher()),
-    golang: createGoProxyFetcher("github.com/surrealdb/surrealdb.go"),
+    // Each major version of a Go module from v2 on has its own module path,
+    // and the proxy reports the latest release of the path it is asked for.
+    golang: createGoProxyFetcher("github.com/surrealdb/surrealdb.go/v2"),
     java: createMavenFetcher("com.surrealdb", "surrealdb"),
 };
 

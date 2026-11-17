@@ -13,174 +13,228 @@ Closures are small inline functions. They are generally used in two ways:
 
 Parameters passed into closures are contained within `||`, after which the body of the function is written. They are not a replacement for [`DEFINE FUNCTION`](/docs/reference/query-language/statements/define/function) when you need a named, reusable routine with permissions.
 
-## Basic examples
+The examples on this page follow an online bookshop: pricing a book, checking a basket, and flagging titles that are low on stock. The [closures reference](/docs/reference/query-language/language-primitives/data-types/closures) lists the syntax on its own.
 
 ## Basic function definitions
 
-```surql
--- Define an anonymous function that doubles a number
-LET $double = |$n: number| $n * 2;
-RETURN $double(2);  -- Returns 4
+A closure bound to a parameter is called like a function. The first one adds 20% VAT to a price, and the second builds the label shown under a book cover.
 
--- Define a function that concatenates two strings
-LET $concat = |$a: string, $b: string| $a + $b;
-RETURN $concat("Hello, ", "World!");  -- Returns "Hello, World!"
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "12f"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'Dune by Frank Herbert'"
+
+*/
+LET $with_vat = |$price: number| $price * 1.2;
+$with_vat(10);
+//- 12f
+
+LET $label = |$title: string, $author: string| $title + " by " + $author;
+$label("Dune", "Frank Herbert");
+//- 'Dune by Frank Herbert'
 ```
 
 ## Error handling and type enforcement
 
-Like regular functions, you can also enforce type constraints within your functions to prevent type mismatches.
+Like regular functions, closures can declare the type of each argument and of the value they return. A call with an argument of the wrong type fails instead of producing a wrong price or a broken label.
 
 ```surql
--- Define a function that greets a person, returning a string
-LET $greet = |$name: string| -> string { "Hello, " + $name + "!" };
-RETURN $greet("Alice");   -- Returns "Hello, Alice!"
+/**[test]
 
--- Define a function with a return type
-LET $to_upper = |$text: string| -> string { string::uppercase($text)
-  };
-RETURN $to_upper("hello");  -- Returns "HELLO"
-RETURN $to_upper(123);      -- Error: type mismatch
+[[test.results]]
+value = "NONE"
 
--- Define a function that accepts only numbers
-LET $square = |$num: number| $num * $num;
-RETURN $square(4);    -- Returns 16
-RETURN $square("4");  -- Error: type mismatch
+[[test.results]]
+value = "'Emma by Jane Austen'"
+
+[[test.results]]
+error = "Incorrect arguments for function ANONYMOUS(). Expected a value of type 'string' for argument $author"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "Incorrect arguments for function ANONYMOUS(). Expected a value of type 'number' for argument $price"
+
+*/
+-- A label that must be built from two strings and must return one
+LET $label = |$title: string, $author: string| -> string { $title + " by " + $author };
+$label("Emma", "Jane Austen");
+//- 'Emma by Jane Austen'
+$label("Emma", 1815);
+//- "Incorrect arguments for function ANONYMOUS(). Expected a value of type 'string' for argument $author"
+
+-- A price passed as a string is refused
+LET $with_vat = |$price: number| $price * 1.2;
+$with_vat("10");
+//- "Incorrect arguments for function ANONYMOUS(). Expected a value of type 'number' for argument $price"
 ```
 
 ## Closures in functions
 
 Many of SurrealDB's functions require a closure to be passed in, making it easy to use complex logic on a value or the elements of an array.
 
-The `chain` function which performs an operation on a value before passing it on:
+The `chain` function performs an operation on a value before passing it on. Here it turns a price typed into a form, such as `£12.50`, into a whole number of pence:
 
 ```surql
-"Two"
-    .replace("Two", "2")
-    .chain(|$num| <number>$num * 1000);
+/**[test]
+
+[[test.results]]
+value = "1250"
+
+*/
+"£12.50"
+    .replace("£", "")
+    .chain(|$price| <int>(<decimal>$price * 100));
 ```
 
 ```surql title="Output"
-2000
+1250
 ```
 
-We can see that the input to the `.chain()` method is indeed a closure by creating our own that is assigned to a parameter. This closure can be passed into `.chain()`, returning the same output as above.
+The input to the `.chain()` method is a closure, so a closure that is assigned to a parameter can be passed in instead. This returns the same output as above, and the bookshop can use `$to_pence` on every price it reads.
 
 ```surql
-LET $my_func = |$num| <number>$num * 1000;
+/**[test]
 
-"Two"
-    .replace("Two", "2")
-    .chain($my_func);
-```
+[[test.results]]
+value = "NONE"
 
-The following example shows a chain of array functions used to remove useless data, followed by a check to see if all items in the array match a certain condition, and then a cast into another type. The [`array::filter`](/docs/reference/query-language/functions/database-functions/array#arrayfilter) call in the middle ensures that the [`string::len`](/docs/reference/query-language/functions/database-functions/string#stringlen) function that follows is being called on string values.
+[[test.results]]
+value = "1250"
 
-```surql
-[NONE, NONE, "good data", "Also good", "important", NULL]
-    .filter(|$v| $v.is_string())
-    .all(|$s| $s.len() > 5)
-    .chain(|$v| <string>$v);
+*/
+LET $to_pence = |$price| <int>(<decimal>$price * 100);
+
+"£12.50"
+    .replace("£", "")
+    .chain($to_pence);
 ```
 
 ```surql title="Output"
-'true'
+1250
 ```
 
-To fail the query when the pipeline does not meet your assumptions (for example while debugging), end the chain with [`.expect()`](/docs/reference/query-language/functions/database-functions/value#valueexpect) instead of casting to a string:
+Several of these methods can follow each other. A basket sent by a browser can hold empty entries, so the next example removes everything that is not an object with [`array::filter`](/docs/reference/query-language/functions/database-functions/array#arrayfilter), which makes sure that the check that follows reads `qty` from a basket line. [`array::all`](/docs/reference/query-language/functions/database-functions/array#arrayall) then checks that every line orders at least one copy, and `.chain()` turns the result into a message.
 
 ```surql
-[NONE, NONE, "good data", "Also good", "important", NULL]
-    .filter(|$v| $v.is_string())
-    .all(|$s| $s.len() > 5)
-    .expect(|$ok| $ok,
-      "Expected at least one string longer than 5 characters");
+/**[test]
+
+[[test.results]]
+value = "'Basket is valid'"
+
+*/
+[{ title: 'Dune', qty: 2 }, NONE, { title: 'Emma', qty: 1 }, NULL]
+    .filter(|$line| $line.is_object())
+    .all(|$line| $line.qty > 0)
+    .chain(|$ok| IF $ok { 'Basket is valid' } ELSE { 'Basket has an empty line' });
+```
+
+```surql title="Output"
+'Basket is valid'
+```
+
+To fail the query when the basket does not meet your assumptions, end the chain with [`.expect()`](/docs/reference/query-language/functions/database-functions/value#valueexpect) instead. Here the second line orders no copies:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = "An error occurred: value::expect assertion failed with message: 'Every basket line needs a quantity above 0'"
+
+*/
+[{ title: 'Dune', qty: 2 }, NONE, { title: 'Emma', qty: 0 }, NULL]
+    .filter(|$line| $line.is_object())
+    .all(|$line| $line.qty > 0)
+    .expect(|$ok| $ok, "Every basket line needs a quantity above 0");
+```
+
+```surql title="Error output"
+"An error occurred: value::expect assertion failed with message: 'Every basket line needs a quantity above 0'"
 ```
 
 ## Capturing parameters
 
 Another aspect of closures is that they are able to capture parameters in their environment. This is in fact where the name "closure" comes from, as they are anonymous functions that are able to "enclose" such parameters without needing to pass them through the `||` parallel bars that hold its input arguments.
 
-```surql
-LET $okay_nums = [1,2,3];
-
-[1,5,6,7,0].filter(|$n| $n IN $okay_nums);
-```
-
-## Closures and writes
-
-Whether a closure can modify database resources depends on your version.
-
-<Tabs syncKey="closure-writes-version">
-  <TabItem label="Before SurrealDB 3.3">
-
-Closures work inside a read-only context, and cannot be used to modify database resources. This holds even when the write sits inside a function the closure calls.
+The closure below reads `$in_stock` without taking it as an argument, and keeps only the requested titles that the shop has.
 
 ```surql
--- 1. Create a test table and function
-DEFINE TABLE test_table SCHEMAFULL;
-DEFINE FIELD name ON test_table TYPE string;
+/**[test]
 
-DEFINE FUNCTION fn::test_create($name: string) -> object {
-    CREATE test_table CONTENT { name: $name };
-    { created: true, name: $name };
-};
+[[test.results]]
+value = "NONE"
 
--- 2. Call the function directly - works
-fn::test_create("direct_call");
+[[test.results]]
+value = "['Dune', 'Emma']"
 
--- 3. Call the function inside .map() - fails
-LET $names = ["Alice", "Bob", "Charlie"];
-$names.map(|$n| fn::test_create($n));
+*/
+LET $in_stock = ['Dune', 'Emma'];
+
+['Dune', 'Ulysses', 'Emma'].filter(|$title| $title IN $in_stock);
 ```
 
 ```surql title="Output"
-Error: "Couldn't write to a read only transaction"
+['Dune', 'Emma']
 ```
 
-In many cases, a closure can be substituted by another operation such as a `FOR` loop or a regular `SELECT` statement.
+Closures capture parameters from SurrealDB 3.0. Before 3.0, a closure could not see `$in_stock`, so the query above returned `[]`. See [Capturing parameters](/docs/reference/query-language/language-primitives/data-types/closures#capturing-parameters).
 
-```surql
-DEFINE TABLE test_table SCHEMAFULL;
-DEFINE FIELD name ON test_table TYPE string;
-
-DEFINE FUNCTION fn::test_create($name: string) -> object {
-    CREATE test_table CONTENT { name: $name };
-    { created: true, name: $name };
-};
-
--- Function to create a record called for each name
-SELECT VALUE fn::test_create($this) FROM ["Alice", "Bob", "Charlie"];
-```
-
-  </TabItem>
-  <TabItem label="SurrealDB 3.3 and later">
+## Closures and writes
 
 A closure that writes makes the expression holding it a write, so it can modify database resources like any other statement. This applies wherever the closure is invoked, including closure-taking functions such as `map`, `filter` and `fold`, and it follows a write reached through a function the closure calls.
 
-```surql
--- 1. Create a test table and function
-DEFINE TABLE test_table SCHEMAFULL;
-DEFINE FIELD name ON test_table TYPE string;
+The bookshop records a `stock_alert` for each title that is running out. The function `fn::flag_low_stock` creates the record, and `.map()` calls it once for each title.
 
-DEFINE FUNCTION fn::test_create($name: string) -> object {
-    CREATE test_table CONTENT { name: $name };
-    { created: true, name: $name };
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+[
+	{ flagged: true, title: 'Dune' },
+	{ flagged: true, title: 'Emma' }
+]'''
+
+*/
+DEFINE TABLE stock_alert SCHEMAFULL;
+DEFINE FIELD title ON stock_alert TYPE string;
+
+DEFINE FUNCTION fn::flag_low_stock($title: string) -> object {
+    CREATE stock_alert CONTENT { title: $title };
+    { flagged: true, title: $title };
 };
 
--- 2. Call the function directly
-fn::test_create("direct_call");
-
--- 3. Call the function inside .map()
-LET $names = ["Alice", "Bob", "Charlie"];
-$names.map(|$n| fn::test_create($n));
+LET $low_stock = ['Dune', 'Emma'];
+$low_stock.map(|$title| fn::flag_low_stock($title));
 ```
 
 ```surql title="Output"
 [
-	{ created: true, name: 'Alice' },
-	{ created: true, name: 'Bob' },
-	{ created: true, name: 'Charlie' }
+	{ flagged: true, title: 'Dune' },
+	{ flagged: true, title: 'Emma' }
 ]
 ```
 
@@ -189,12 +243,45 @@ A closure whose body only reads still resolves as a read, so `map`, `filter` and
 A `FOR` loop or a `SELECT` over a list remains a good choice where it reads more clearly:
 
 ```surql
--- Function called once for each name
-SELECT VALUE fn::test_create($this) FROM ["Alice", "Bob", "Charlie"];
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+[
+	{ flagged: true, title: 'Dune' },
+	{ flagged: true, title: 'Emma' }
+]'''
+
+*/
+-- Setup from the example above
+DEFINE TABLE stock_alert SCHEMAFULL;
+DEFINE FIELD title ON stock_alert TYPE string;
+DEFINE FUNCTION fn::flag_low_stock($title: string) -> object {
+    CREATE stock_alert CONTENT { title: $title };
+    { flagged: true, title: $title };
+};
+
+-- Function called once for each title
+SELECT VALUE fn::flag_low_stock($this) FROM ['Dune', 'Emma'];
 ```
 
-  </TabItem>
-</Tabs>
+```surql title="Output"
+[
+	{ flagged: true, title: 'Dune' },
+	{ flagged: true, title: 'Emma' }
+]
+```
+
+Before SurrealDB 3.3, a closure ran in a read-only context, even when the write sat inside a function it called, so the `.map()` call above failed with `Couldn't write to a read only transaction`. The `SELECT` form works in every version.
 
 ## Conclusion
 

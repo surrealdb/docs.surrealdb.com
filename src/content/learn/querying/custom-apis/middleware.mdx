@@ -13,121 +13,155 @@ Custom middleware functions are ordinary [user-defined functions](/docs/referenc
 * The current request object (conventionally `$req`).
 * A `next` closure that continues the chain and eventually runs `THEN` when no middleware remains.
 
-You can add extra parameters after those two. Their values are supplied when you attach the function to `DEFINE API` (for example passing in `time::now()` to return the time at which a request was processed).
+You can add extra parameters after those two. Their values are supplied when you attach the function to `DEFINE API`, such as the percentage of a discount.
 
 The function must return an object - that is the response object passed to the next middleware or returned to the client. Names like `$req` and `$next` are only conventions; what matters is the order of arguments and that you actually call `$next($req)` when you want the pipeline to proceed.
 
+The examples continue the guesthouse API from [Managing APIs](/docs/learn/querying/custom-apis/managing-apis) with a `/quote` route, which prices a stay. Middleware adds VAT to the quote and then applies a discount.
+
 ## Starting from a handler with no middleware
 
+The handler returns a fixed quote for three nights in the garden room:
+
 ```surql
-DEFINE API "/custom_response"
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ nights: 3, price: 400, room: 'garden' }"
+
+*/
+DEFINE API "/quote"
     FOR get
         THEN {
             {
                 status: 200,
-                body: {
-                    num: 1
-                }
+                body: { room: "garden", nights: 3, price: 400 }
             };
         };
+
+api::invoke("/quote").body;
 ```
 
-Calling `api::invoke("/custom_response")` returns the body you would expect:
-
-```surql
+```surql title="Output"
 {
-	body: {
-		num: 1
-	},
-	context: {},
-	headers: {},
-	status: 200
-};
+	nights: 3,
+	price: 400,
+	room: 'garden'
+}
 ```
 
 ## Adding a function that adjusts the response
 
-This middleware calls `$next($req)` to obtain the handler's result, then bumps `body.num` by one before returning:
+This middleware calls `$next($req)` to obtain the handler's result, then adds the VAT and the total to the body before returning it. Adding two objects with `+` replaces their top-level fields, so the function builds the new body from `$res.body` first, and the price and the other fields of the body survive:
 
 ```surql
-DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ nights: 3, price: 400, room: 'garden', total: 480, vat: 80 }"
+
+*/
+DEFINE FUNCTION fn::add_vat($req: object, $next: function) -> object {
     LET $res = $next($req);
-    $res + { body: { num: $res.body.num + 1 } }
+    LET $vat = $res.body.price / 5;
+    $res + { body: $res.body + { vat: $vat, total: $res.body.price + $vat } }
 };
 
-DEFINE API "/custom_response"
+DEFINE API "/quote"
     FOR get
         MIDDLEWARE
-            fn::increment_num()
+            fn::add_vat()
         THEN {
             {
                 status: 200,
-                body: {
-                    num: 1
-                }
+                body: { room: "garden", nights: 3, price: 400 }
             };
         };
+
+api::invoke("/quote").body;
 ```
 
-Now `api::invoke("/custom_response")` yields `num: 2`, showing that the outer middleware has reshaped what the caller sees.
+The handler is unchanged, but the caller now sees the quote with VAT at 20 percent:
 
-```surql
+```surql title="Output"
 {
-	body: {
-		num: 2
-	},
-	context: {},
-	headers: {},
-	status: 200
-};
+	nights: 3,
+	price: 400,
+	room: 'garden',
+	total: 480,
+	vat: 80
+}
 ```
 
 ## Stacking two pieces of middleware
 
-Order matters when adding middleware, so be sure to list outer effects first if they should wrap everything that follows. Here a timer middleware adds a timestamp into `context`, and increment still adjusts the body:
+A second function, `fn::discount`, takes an extra parameter for the percentage and lowers the price. The value `10` in `fn::discount(10)` is passed to that parameter.
+
+Order matters when adding middleware. The first function in the list is the outermost one: it runs first, and it receives the response last, after every function listed below it has changed it. Here VAT must be worked out on the discounted price, so `fn::add_vat()` comes first and wraps `fn::discount(10)`:
 
 ```surql
-DEFINE FUNCTION fn::start_timer($req: object, $next: function, $called_at: datetime) -> object {
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ nights: 3, price: 360, room: 'garden', total: 432, vat: 72 }"
+
+*/
+-- Setup from the example above
+DEFINE FUNCTION fn::add_vat($req: object, $next: function) -> object {
     LET $res = $next($req);
-    $res + { context: { called_at: $called_at }}
+    LET $vat = $res.body.price / 5;
+    $res + { body: $res.body + { vat: $vat, total: $res.body.price + $vat } }
 };
 
-DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+DEFINE FUNCTION fn::discount($req: object, $next: function, $percent: int) -> object {
     LET $res = $next($req);
-    $res + { body: { num: $res.body.num + 1 } }
+    $res + { body: $res.body + { price: $res.body.price * (100 - $percent) / 100 } }
 };
 
-DEFINE API "/custom_response"
+DEFINE API "/quote"
     FOR get
         MIDDLEWARE
-            fn::start_timer(time::now()),
-            fn::increment_num()
+            fn::add_vat(),
+            fn::discount(10)
         THEN {
             {
                 status: 200,
-                body: {
-                    num: 1
-                }
+                body: { room: "garden", nights: 3, price: 400 }
             };
         };
 
-api::invoke("/custom_response");
+api::invoke("/quote").body;
 ```
 
-Possible output:
-
-```surql
+```surql title="Output"
 {
-	body: {
-		num: 2
-	},
-	context: {
-		called_at: d'2026-01-16T01:49:44.115351Z'
-	},
-	headers: {},
-	status: 200
-};
+	nights: 3,
+	price: 360,
+	room: 'garden',
+	total: 432,
+	vat: 72
+}
 ```
+
+With the two functions the other way round, `fn::add_vat()` works out the VAT on the full price of `400` before the discount applies, and the response has a price of `360` with a total of `480`.
 
 ## See also
 

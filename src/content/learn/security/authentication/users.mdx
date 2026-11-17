@@ -29,12 +29,33 @@ Root-level users have visibility into all namespaces and databases, which means 
 In this example we will create a root-level user `john` with a password and the `OWNER` role:
 
 ```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+*/
 DEFINE USER john ON ROOT PASSWORD "VerySecurePassword!" ROLES OWNER;
 ```
 
 Note that even a root-level user can be given a limited role such as `VIEWER`. This can be useful for automated services that need to monitor each namespace and database, or colleagues who need to see data but should not change it.
 
 ```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 DEFINE USER birthday_bot ON ROOT PASSWORD "botpassword9!" ROLES VIEWER;
 DEFINE USER clumsy_ceo ON ROOT PASSWORD "password" ROLES VIEWER COMMENT "Don't let the CEO have more than VIEWER access";
 ```
@@ -78,6 +99,12 @@ Database-level users have visibility into all resources that belong to the datab
 In this example we will create a database-level user `mary` with a password and the `EDITOR` role:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE USER mary ON DATABASE PASSWORD "VerySecurePassword!" ROLES EDITOR;
 ```
 
@@ -147,6 +174,24 @@ In the following code snippet we will define the `user` table and a few `fields`
 - Forbid users to use an email that is already in use by another user. We do this by creating a unique index for the email field.
 
 ```surql title="Define tables and fields"
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
 DEFINE TABLE user SCHEMAFULL
 	PERMISSIONS
 		FOR select, update, delete WHERE id = $auth.id;
@@ -168,6 +213,12 @@ We will configure the record access like this:
 - The signup logic needs the `name`, `email` and `password` parameters to be provided by the user. In the query, we can use them as `$name`, `$email` and `$password`.
 
 ```surql title="Scope definition"
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE ACCESS user ON DATABASE TYPE RECORD
 	SIGNIN (
 		SELECT * FROM user WHERE email = $email
@@ -223,7 +274,7 @@ curl -X POST \
 
 ### Sign in as a record user
 
-Once a user has signed up, it can now sign in when needed.
+Once a user has signed up, it can now sign in when needed. A sign-in authenticates the session it is made on. To sign in several users over one WebSocket connection, the JavaScript SDK can open a separate session for each user with `db.newSession()`, on SurrealDB 3.0 and later. See [Multiple sessions](/docs/reference/javascript/concepts/multiple-sessions).
 
 Examples using the JavaScript SDK or a raw HTTP request.
 
@@ -367,9 +418,15 @@ The `$auth` parameter points to the record belonging to the current authenticate
 
 When the `$auth` parameter is set, you can access any of the fields of the record corresponding to the authenticated user (e.g. `$auth.name` or `$auth.email`) via that parameter.
 
-`$auth` itself is the user's record ID, such as `user:o57nbpz66v6a2l0l9kog`. Reading a field through it, including `$auth.id`, fetches the user record, and so needs the user to be allowed to select that record. On a table with no permissions for record users, which includes a table created implicitly on the first write, `$auth.email` and `$auth.id` are `NONE`. Use `$auth` itself wherever the record ID is enough, and give the user table a `select` permission where the fields are needed:
+`$auth` itself is the user's record ID, such as `user:o57nbpz66v6a2l0l9kog`, and `$auth.id` gives the same record ID without reading the record, even after the record is deleted. Reading any other field through `$auth`, such as `$auth.email`, fetches the user record. In a query, a function, or a field's `VALUE`, `DEFAULT`, `ASSERT` or `COMPUTED` clause, this needs the user to be allowed to select that record. Table and field permission clauses, events and `DEFINE API` handlers read the record without checking the user's permissions, so `$auth.email` resolves there. In a query on a table with no permissions for record users, which includes a table created implicitly on the first write, `$auth.email` is `NONE`. Give the user table a `select` permission where the other fields are needed:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE TABLE user SCHEMALESS
     PERMISSIONS FOR select WHERE id = $auth;
 ```
@@ -377,6 +434,12 @@ DEFINE TABLE user SCHEMALESS
 A common use is to store the user who created a record. A field with `VALUE $auth READONLY` sets it to the signed-in user on creation and refuses any later change:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE FIELD author ON post VALUE $auth READONLY;
 ```
 
@@ -385,6 +448,19 @@ A record user who runs `CREATE post SET title = 'Hi'` gets a post whose `author`
 ### Expiration
 
 Authenticated sessions remain valid for a certain duration. This duration is `NONE` by default, meaning that sessions will not expire unless otherwise specified. This duration can be customised on both the `DEFINE USER` and `DEFINE ACCESS` statements to any specific value defining the maximum duration of an authenticated session associated with that user or access method. After the defined duration, the authenticated session will expire. For example, the `DEFINE USER example DURATION FOR SESSION 1d` clause will ensure that any authenticated sessions for the `example` user will expire after a day.
+
+How a session was established decides which durations apply to it:
+
+| Session established with | Expires |
+| --- | --- |
+| Credentials: `signin`, `signup`, or HTTP Basic authentication | After the session duration. The token that the sign-in returns does not shorten the session, so a connection that signed in keeps working after that token expires. |
+| A token: the RPC `authenticate` method, an HTTP `Authorization: Bearer` header, or a token sent as the password over the Postgres wire protocol | After the session duration or when the token expires, whichever comes first. |
+
+With no session duration, or with `FOR SESSION NONE`, a session established with credentials does not expire. One established with a token still ends when the token expires.
+
+The figure below shows the four cases over two hours, with the default durations.
+
+<img src="~/assets/img/diagrams/light/conn-token-session-light.webp" darkSrc="~/assets/img/diagrams/conn-token-session.webp" alt="A timeline over two hours shows which duration ends a session when the token duration is the default of one hour. A WebSocket connection that signed in with credentials keeps one session, and with the default session duration of NONE it keeps working after the token that signin returned has expired. A WebSocket connection that authenticated with a token has its session end when the token expires, and later queries fail with 'The session has expired'. Over HTTP, requests that send the token in an Authorization Bearer header succeed until the token expires and then fail with 401, while requests that send Basic credentials sign in again each time and keep succeeding. Over HTTP, the JavaScript, Python and Go SDKs send the token; the Rust, Java and .NET SDKs send a system user's username and password with every request, and a token for record users." />
 
 Expired sessions can no longer be used to call authenticated methods and doing so will result in a specific error indicating that the session has expired. SurrealQL can be used to check the expiration of the active session by running `SELECT exp FROM $session`, which shows the Unix time when the session will expire or `NONE` in the case that the session does not expire.
 

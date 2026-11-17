@@ -27,7 +27,10 @@ The sequence implementation avoids contention by having each node reserve a rang
   <TabItem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
-DEFINE SEQUENCE [ OVERWRITE | IF NOT EXISTS ] @name [ BATCH @batch ] [ START @start ] [ TIMEOUT @duration ]
+DEFINE SEQUENCE [ OVERWRITE | IF NOT EXISTS ] @name
+	[ BATCH @batch ]
+	[ START @start ]
+	[ TIMEOUT @duration ]
 ```
 
   </TabItem>
@@ -57,6 +60,21 @@ DEFINE SEQUENCE mySeq;
 The `BATCH`, `START`, and `TIMEOUT` clauses can be included to configure the sequence.
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "100"
+
+[[test.results]]
+error = false
+
+[[test.results]]
+match = "$result = 'The query was not executed because it exceeded the timeout: 0ns' OR $error = 'The query was not executed because it exceeded the timeout: 0ns'"
+
+*/
 DEFINE SEQUENCE mySeq2 BATCH 1000 START 100 TIMEOUT 5s;
 sequence::nextval('mySeq2');
 //- 100
@@ -64,19 +82,53 @@ sequence::nextval('mySeq2');
 DEFINE SEQUENCE mySeq3 BATCH 1000 START 100 TIMEOUT 0ns;
 -- Possible output, since the timeout may or may not be exceeded
 sequence::nextval('mySeq3');
-//- 'The query was not executed because it exceeded the timeout'
+//- 'The query was not executed because it exceeded the timeout: 0ns'
 ```
 
 Sequences are never rolled back, even in a failed transaction. This differs from an approach like a single record with a manually incrementing value.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: my:counter, val: 0 }]"
+
+[[test.results]]
+value = "0"
+
+[[test.results]]
+value = "0"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The query was not executed due to a cancelled transaction"
+
+[[test.results]]
+error = "The query was not executed due to a cancelled transaction"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "2"
+
+[[test.results]]
+value = "[{ id: my:counter, val: 1 }]"
+
+*/
+
 DEFINE SEQUENCE seq;
 CREATE my:counter SET val = 0;
 sequence::nextval("seq");        -- 0
 my:counter.val;                  -- 0
 
 BEGIN TRANSACTION;
-sequence::nextval("seq");        -- 0
+sequence::nextval("seq");        -- 1
 UPDATE my:counter SET val += 1;  -- my:counter.val = 1
 CANCEL TRANSACTION;
 -- my:counter.val now rolled back to 0
@@ -84,6 +136,97 @@ CANCEL TRANSACTION;
 sequence::nextval("seq");        -- 2
 UPDATE my:counter SET val += 1;  -- 1
 ```
+
+The largest value that a sequence issues is `9223372036854775806`, one below the largest `int`. After it, `sequence::nextval()` fails with an error instead of overflowing, so a sequence defined with `START 9223372036854775807` cannot issue any value.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "9223372036854775805"
+
+[[test.results]]
+value = "9223372036854775806"
+
+[[test.results]]
+match = "$result = 'The sequence has no values left to issue: its values cannot exceed 9223372036854775806' OR $error = 'The sequence has no values left to issue: its values cannot exceed 9223372036854775806'"
+
+*/
+DEFINE SEQUENCE big START 9223372036854775805;
+sequence::nextval('big');
+//- 9223372036854775805
+sequence::nextval('big');
+//- 9223372036854775806
+sequence::nextval('big');
+//- 'The sequence has no values left to issue: its values cannot exceed 9223372036854775806'
+```
+
+Every later call fails in the same way. Defining the sequence again with `OVERWRITE` and a lower `START` lets it issue values again, from the new `START`.
+
+## Sequence position and exports
+
+<Since v="v3.2.5" />
+
+For each sequence, `INFO FOR DB STRUCTURE` shows a `start` and a `resume` value. `start` is the value that the definition declares. `resume` is the lowest value that no node has reserved yet. A node reserves values in batches of the sequence's `BATCH` size, so `resume` moves past a whole batch when a node reserves it.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+[
+	{
+		batch: '1',
+		name: 'seq',
+		resume: '13',
+		start: '10',
+		timeout: NONE
+	}
+]'''
+
+*/
+DEFINE SEQUENCE seq BATCH 1 START 10;
+sequence::nextval('seq');
+sequence::nextval('seq');
+sequence::nextval('seq');
+
+LET $info = INFO FOR DB STRUCTURE;
+RETURN $info.sequences;
+```
+
+```surql title="Output"
+[
+	{
+		batch: '1',
+		name: 'seq',
+		resume: '13',
+		start: '10',
+		timeout: NONE
+	}
+]
+```
+
+An export writes each sequence with its `resume` value as `START`. After an import, the sequence continues from where it was and does not issue a value that the imported records already hold. Before 3.2.5 and 3.3.0, an export wrote the declared `START`, so the first `sequence::nextval()` after an import could repeat a value.
+
+`resume` is not always the next value that `sequence::nextval()` returns. A node that still holds a batch it reserved earlier issues values from that batch, and those values are lower than `resume`. `resume` is the value that a sequence can safely restart from.
 
 ## See also
 

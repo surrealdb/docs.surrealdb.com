@@ -10,12 +10,6 @@ The `DEFINE FUNCTION` statement allows you to define custom functions that can b
 
 Functions can be used to encapsulate logic that you want to reuse in multiple queries. They can also be used to simplify complex queries by breaking them down into smaller, more manageable pieces. They are particularly useful when you have a complex query that you need to run multiple times with different arguments.
 
-## Stored procedures
-
-A defined function is what SurrealDB has in place of a stored procedure. Its body can read and write records, it is stored in the database schema, and it runs as [one transaction](#transactional-behaviour), so a failure part way through leaves no partial writes. Where a relational database would use `CALL place_order(...)`, SurrealQL calls `fn::place_order(...)`, as a statement of its own or inside any other statement.
-
-Function bodies are written in SurrealQL. To write the logic in Rust instead, compile it into a [Surrealism](/docs/learn/extensions/plugins/overview) module, which SurrealDB loads with [`DEFINE MODULE`](/docs/reference/query-language/statements/define/module) and calls with a `mod::` path. Surrealism is experimental, so the server has to be started with `--allow-experimental=files,surrealism`, or the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable set to the same value. Loading a module file also needs the experimental `files` feature, which is why both are listed.
-
 ## Requirements
 
 - You must be authenticated as a root owner or editor, namespace owner or editor, or database owner or editor before you can use the `DEFINE FUNCTION` statement.
@@ -29,6 +23,7 @@ DEFINE FUNCTION [ OVERWRITE | IF NOT EXISTS ] fn::@name
 	[ @query ... ]
 	[ RETURN @returned ]
 } [ COMMENT @string ] [ PERMISSIONS [ NONE | FULL | WHERE @condition]]
+  [ GRAPHQL_ALIAS @string ] [ GRAPHQL_DEPRECATED @string ]
 ```
 
 ## Example usage
@@ -78,6 +73,38 @@ DEFINE FUNCTION fn::relation_exists(
 };
 ```
 
+## Stored procedures
+
+A defined function is what SurrealDB has in place of a stored procedure. Its body can read and write records, it is stored in the database schema, and it runs as [one transaction](#transactional-behaviour), so a failure part way through leaves no partial writes. Where a relational database would use `CALL place_order(...)`, SurrealQL calls `fn::place_order(...)`, as a statement of its own or inside any other statement.
+
+Function bodies are written in SurrealQL. To write the logic in Rust instead, compile it into a [SurrealDB extension](/docs/learn/extensions/plugins/overview), which SurrealDB loads with [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension) and calls with an `ext::` path. Extensions are experimental, so the server has to be started with `--allow-experimental=surrealism`, or the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable set to the same value. On SurrealDB 3.x, loading an extension archive from a bucket also needs the experimental `files` feature, so 3.x takes `--allow-experimental=files,surrealism`. From 4.0, buckets are no longer experimental and the server refuses to start if `files` is listed.
+
+## GraphQL names and deprecation
+
+<Since v="v3.1.0" />
+
+A custom function is exposed to [GraphQL](/docs/learn/querying/graphql/overview) as a root query field when the database's `DEFINE CONFIG GRAPHQL` includes functions. `GRAPHQL_ALIAS` sets the name of that field in place of one derived from the function name, and must match `[_A-Za-z][_0-9A-Za-z]*`. `GRAPHQL_DEPRECATED` adds `[Deprecated: reason]` to the start of the field's description.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
+DEFINE FUNCTION fn::get_user($n: string) -> string { "hi " + $n }
+	GRAPHQL_ALIAS "getUser"
+	GRAPHQL_DEPRECATED "Use fn::greet instead";
+```
+
+```graphql title="Query"
+{ getUser(n: "x") }
+```
+
+```json title="Output"
+{"data":{"getUser":"hi x"}}
+```
+
 ## Optional arguments
 If one or more ending arguments have the `option<T>` type, they can be omitted when you invoke the function.
 
@@ -103,10 +130,10 @@ DEFINE FUNCTION fn::last_option($required: number, $optional: option<number>) {
 };
 
 RETURN fn::last_option(1, 2);
-//- { required_present: true, optional_present: true }
+//- { optional_present: true, required_present: true }
 
 RETURN fn::last_option(1);
-//- { required_present: true, optional_present: false };
+//- { optional_present: false, required_present: true }
 ```
 
 ## Adding a return value
@@ -122,7 +149,6 @@ For a function that is infallible, a return value is mostly for the sake of read
 value = "NONE"
 
 */
-
 
 DEFINE FUNCTION fn::greet($name: string) -> string {
 	"Hello, " + $name + "!"
@@ -141,7 +167,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Expected `number` but found `'one'`"
+error = "Incorrect arguments for function fn::combine(). Failed to coerce argument `$one`: Expected `number` but found `'one'`"
 
 [[test.results]]
 error = "Couldn't coerce return value from function `fn::combine_any`: Expected `number` but found `'onetwo'`"
@@ -175,7 +201,23 @@ While both of these return an error, the output of the second function happens o
 The return value of a function can even be a [literal type](/docs/reference/query-language/language-primitives/data-types/literals). The following function returns such a type by either returning an object of a certain structure, or a string. In this case this output is used in case an application prefers to return an error as a simple string instead of [throwing](/docs/reference/query-language/statements/throw) an error or returning a NONE value.
 
 ```surql
-DEFINE FUNCTION fn::age_and_name($user_num: int) -> { age: int, name: string } | string {
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "{ age: 15, name: 'Billy' }"
+
+[[test.results]]
+match = "$result = \"Couldn't find user number 2!\" OR $error = \"Couldn't find user number 2!\""
+
+*/
+DEFINE FUNCTION fn::age_and_name($user_num: int)
+    -> { age: int, name: string } | string {
     LET $user = type::record("user", $user_num);
     IF $user.exists() {
         $user.{ name, age }
@@ -187,26 +229,141 @@ DEFINE FUNCTION fn::age_and_name($user_num: int) -> { age: int, name: string } |
 CREATE user:1 SET name = "Billy", age = 15;
 
 fn::age_and_name(1);
+//- { age: 15, name: 'Billy' }
 fn::age_and_name(2);
+//- "Couldn't find user number 2!"
 ```
 
-```surql title="Output"
--------- Query 1 --------
+## Permissions
 
-{ age: 15, name: 'Billy' }
+You can set the permissions for a custom function using the `PERMISSIONS` clause. The `PERMISSIONS` clause restricts who can call a function. It can be set to `NONE`, `FULL`, or `WHERE @condition`.
 
--------- Query 2 --------
+- `FULL`: When Full permissions are granted [record](/docs/learn/security/authentication/users#record-users) users have access to the function. This is the default permission when not specified.
+- `NONE`: When this permission is granted, [record](/docs/learn/security/authentication/users#record-users) users have no access to the defined function.
+- `WHERE @condition`: Permissions are granted to the function based on the specified condition.
 
-"Couldn't find user number 2!"
+The `PERMISSIONS` clause decides who may call the function. It does not change what the body can do: the body runs with the permissions of the caller, so a record user's call can read and write only what that user could read and write directly. A query the user is not allowed to run returns no records rather than an error, in the same way as when the user runs it directly:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE secret_note PERMISSIONS NONE;
+DEFINE FUNCTION fn::read_notes() -> array {
+	SELECT * FROM secret_note
+} PERMISSIONS FULL;
+
+-- As a record user, both return [], however many notes exist
+SELECT * FROM secret_note;
+fn::read_notes();
+```
+
+To let users change data they cannot reach directly, use an [event](/docs/reference/query-language/statements/define/event#events-and-permissions) or a [`DEFINE API`](/docs/reference/query-language/statements/define/api#permissions) endpoint, whose bodies run without table permission checks, or a table permission clause that allows the change.
+
+> [!NOTE]
+> The examples below use the [`Surreal Deal Store`](/docs/explore/tutorials/demos/surreal-deal-store) dataset.
+
+### Using the `FULL` permission
+
+The `FULL` permission grants all users access to the function. The following example defines a function that fetches all products from the `product` table and grants the function full permissions to access the data to all users.
+
+<SurrealistMini dataset="surreal-deal-store" orientation="horizontal" query="-- Define a function to fetch all products. All users can access this function
+DEFINE FUNCTION fn::fetchAllProducts() {
+	RETURN (SELECT * FROM product LIMIT 10);
+} PERMISSIONS FULL;
+-- Returns: The first 10 products in the product table
+RETURN fn::fetchAllProducts();" />
+
+### Using the `NONE` permission
+
+The `NONE` permission denies all [record](/docs/learn/security/authentication/users#record-users) users access to the function. The following example defines a function that fetches all products from the `product` table
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[{ id: payment_details:1, stored_cards: { expiry_year: 2028 } }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ stored_cards: { expiry_year: 2028 } }]"
+
+*/
+
+CREATE payment_details:1 SET stored_cards = { expiry_year: 2028 };
+
+-- Define a function that fetches all expiration years from the payment_details table and denies access to all non-admin users
+DEFINE FUNCTION fn::fetchAllPaymentDetails() -> array {
+	SELECT stored_cards.expiry_year FROM payment_details LIMIT 5
+} PERMISSIONS NONE;
+
+RETURN fn::fetchAllPaymentDetails();
+```
+
+### Using the `WHERE` clause
+
+The `WHERE` clause allows you to specify a condition that determines the permissions granted to the function. The condition must evaluate to a boolean value. If the condition evaluates to `true`, the function is granted permissions. If the condition evaluates to `false`, the function is not granted permissions.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Define a function that fetches all products with the condition that only admin users can access it
+DEFINE FUNCTION fn::fetchAllProducts() -> array {
+	 SELECT * FROM product LIMIT 10
+} PERMISSIONS WHERE $auth.admin = true;
 ```
 
 ## Transactional behaviour
 
 A function body runs as a single transaction, without `BEGIN` or `COMMIT` appearing in the definition. It commits when the body finishes, and rolls back if anything inside it fails.
 
+> [!WARNING]
+> `BEGIN`, `COMMIT` and `CANCEL` inside a function body are accepted but have no effect. A `CANCEL` does not undo the body's changes, and a `COMMIT` does not keep them if the function fails afterwards. Use `THROW` to roll back from inside a function.
+
 An error rolls the whole body back, whether it is a [`THROW`](/docs/reference/query-language/statements/throw) or a statement that fails on its own:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Setup
+DEFINE TABLE order;
+CREATE product:keyboard SET stock = 20;
+
 DEFINE FUNCTION fn::place_order($item: record<product>, $quantity: int) -> record<order> {
     LET $order = CREATE ONLY order SET item = $item, quantity = $quantity;
     IF $item.stock < $quantity {
@@ -226,6 +383,12 @@ SELECT VALUE id FROM order;
 An early `RETURN` is not a failure, so the body commits and the work already done is kept:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+*/
 DEFINE FUNCTION fn::ship_order($order: record<order>) -> record<shipment> {
     LET $shipment = CREATE ONLY shipment SET order = $order, carrier = 'DHL';
     RETURN $shipment.id;                          -- the caller only wants the id
@@ -250,13 +413,13 @@ This can be done in a recursive function by creating all the relations between t
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:1 }, { id: person:2 }, { id: person:3 }, { id: person:4 }, { id: person:5 }, { id: person:6 }]"
+value = "[{ id: person:1 }, { id: person:2 }, { id: person:3 }, { id: person:4 }, { id: person:5 }, { id: person:6 }, { id: person:7 }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ "->to": { "->?": [person:3, person:4, person:6, person:5, person:2] }, id: person:1 }, { "->to": { "->?": [person:6, person:3, person:5, person:4] }, id: person:2 }, { "->to": { "->?": [person:6, person:5, person:4] }, id: person:3 }, { "->to": { "->?": [person:5, person:6] }, id: person:4 }, { "->to": { "->?": [person:6] }, id: person:5 }, { "->to": { "->?": [] }, id: person:6 }]"
+match = '''$result.map(|$row| $row["->to"]["->?"].len()) = [6, 5, 4, 3, 2, 1, 0]'''
 
 */
 
@@ -284,88 +447,48 @@ The last query [can be viewed graphically](/blog/whats-new-in-surrealist-3-2#gra
 
 <img src="~/assets/img/image/light/recursive_star.png" darkSrc="~/assets/img/image/dark/recursive_star.png" alt="An image of a seven-pointed star created visually by relating seven records to each other and displayed inside SurrealDB Studio's graph view." />
 
-## Permissions
+## Functions called from schema clauses
 
-You can set the permissions for a custom function using the `PERMISSIONS` clause. The `PERMISSIONS` clause is mostly used to restrict who can access a function and what data they can access. It can be set to `NONE`, `FULL`, or `WHERE @condition`.
+<Since v="v4.0.0" />
 
-- `FULL`: When Full permissions are granted [record](/docs/learn/security/authentication/users#record-users) users have access to the function. This is the default permission when not specified.
-- `NONE`: When this permission is granted, [record](/docs/learn/security/authentication/users#record-users) users have no access to the defined function.
-- `WHERE @condition`: Permissions are granted to the function based on the specified condition.
-
-
-> [!NOTE]
-> The examples below use the [`Surreal Deal Store`](/docs/explore/tutorials/demos/surreal-deal-store) dataset.
-
-### Using the `FULL` permission
-
-The `FULL` permission grants all users access to the function. The following example defines a function that fetches all products from the `product` table and grants the function full permissions to access the data to all users.
-
-<SurrealistMini dataset="surreal-deal-store" orientation="horizontal" query="-- Define a function to fetch all products. All users can access this function
-DEFINE FUNCTION fn::fetchAllProducts() {
-	RETURN (SELECT * FROM product LIMIT 10);
-} PERMISSIONS FULL;
--- Returns: The first 10 products in the product table
-RETURN fn::fetchAllProducts();" />
-
-### Using the `NONE` permission
-
-The `NONE` permission denies all [record](/docs/learn/security/authentication/users#record-users) users access to the function. The following example defines a function that fetches all products from the `product` table
+A custom function called from a `COMPUTED`, `ASSERT`, `VALUE` or `DEFAULT` clause, or from a `PERMISSIONS` clause, is held to the rules of that clause: it may not write data, change the schema or `SLEEP`, and outside `VALUE` and `DEFAULT` it may not call `sequence::nextval()`. The rules are listed in [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects). The clause is checked when it is defined, and the check follows each function into the functions it calls:
 
 ```surql
 /**[test]
 
 [[test.results]]
-value = "NONE"
+error = false
 
 [[test.results]]
-value = "[]"
+error = true
 
 */
-
--- Define a function that fetches all expiration years from the payment_details table and denies access to all none-admin users
-DEFINE FUNCTION fn::fetchAllPaymentDetails() -> array {
-	SELECT stored_cards.expiry_year FROM payment_details LIMIT 5
-} PERMISSIONS NONE;
-
-RETURN fn::fetchAllPaymentDetails();
-```
-
-### Using the `WHERE` clause
-
-The `WHERE` clause allows you to specify a condition that determines the permissions granted to the function. The condition must evaluate to a boolean value. If the condition evaluates to `true`, the function is granted permissions. If the condition evaluates to `false`, the function is not granted permissions.
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-*/
-
--- Define a function that fetches all products with the condition that only admin users can access it
-DEFINE FUNCTION fn::fetchAllProducts() -> array {
-	 SELECT * FROM product LIMIT 10
-} PERMISSIONS WHERE $auth.admin = true;
-```
-
-## Functions that other definitions require to stay read-only
-
-<Since v="v3.3.0" />
-
-Two places in the schema evaluate an expression that must not modify data: a [`COMPUTED` field](/docs/reference/query-language/statements/define/field#restrictions-on-computed-fields) body, and a `PERMISSIONS FOR select` clause. A custom function called from either is held to the same rule. The rule is enforced when the write is reached, not when the field, the clause or the function is defined, so a definition that calls a writing function is stored without complaint and fails when it is evaluated.
-
-A `FOR select` clause that calls a function which writes is accepted, and each read that evaluates the clause fails with `A PERMISSIONS clause cannot contain a statement that modifies data`. The `FOR create`, `FOR update` and `FOR delete` clauses may call a function that writes, as described in [Writes inside a permission clause](/docs/reference/query-language/statements/define/table#writes-inside-a-permission-clause).
-
-```surql
 DEFINE FUNCTION fn::log_access() -> bool { CREATE access_log SET at = time::now(); RETURN true; };
-
--- Accepted, but a read that evaluates this clause now fails
 DEFINE TABLE product PERMISSIONS FOR select WHERE fn::log_access();
 ```
 
-The same applies when the function changes rather than the caller. `DEFINE FUNCTION OVERWRITE` and [`ALTER FUNCTION`](/docs/reference/query-language/statements/alter/function) accept a body that starts to write while a computed field or a `FOR select` clause still calls the function. The field or clause then fails the next time it is evaluated - a computed field with `A COMPUTED clause cannot contain a statement that modifies data` - so check which definitions call a function before changing its body to write.
+```surql title="Error output"
+'The PERMISSIONS clause must not have effects: it calls `fn::log_access`, in whose body `CREATE` writes data'
+```
+
+A function can change after the clause that calls it was defined. `DEFINE FUNCTION OVERWRITE` and [`ALTER FUNCTION`](/docs/reference/query-language/statements/alter/function) accept a body that starts to write, and the clause then fails each time it is evaluated, so check which definitions call a function before changing its body:
 
 ```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = true
+
+*/
 DEFINE FUNCTION fn::price_with_tax($price: number) -> number { RETURN $price * 1.2; };
 DEFINE FIELD gross_price ON product COMPUTED fn::price_with_tax(price);
 
@@ -374,9 +497,13 @@ DEFINE FUNCTION OVERWRITE fn::price_with_tax($price: number) -> number {
 	CREATE price_change SET price = $price, at = time::now();
 	RETURN $price * 1.2;
 };
+
+CREATE product:1 SET price = 10;
 ```
 
-The check runs where the write is reached, so it applies in the same way to a write several functions deep and to one reached through [`eval::surql()`](/docs/reference/query-language/functions/database-functions/eval#evalsurql), a JavaScript function, or a closure that arrives as data.
+```surql title="Error output"
+'The COMPUTED clause must not have effects: `CREATE` writes data'
+```
 
 ## Using `IF NOT EXISTS` clause
 

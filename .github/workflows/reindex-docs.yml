@@ -62,3 +62,66 @@ jobs:
           # request.
           REINDEX_ENVIRONMENT: ${{ github.event.inputs.environment }}
         run: bun run search:reindex
+
+  # The index behind `/docs/api/search`, which the docs site's search box calls.
+  # The job above re-indexes the API's separate copy. Vercel's production build
+  # used to keep this one current through `postbuild`; the Cloudflare build does
+  # not run that step, so this job does instead. It reads `src/content/`
+  # directly, so it needs no build.
+  #
+  # The indexer is incremental: it embeds only pages whose content hash changed
+  # and deletes records for pages that no longer exist. A run with nothing new
+  # costs no OpenAI calls.
+  index:
+    name: Index site search
+    # A dispatch for staging re-indexes the staging API only; this index has no
+    # staging copy.
+    if: github.event_name == 'push' || github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One run at a time. A second push waits rather than cancelling the first,
+    # so no run is cut off between its upserts and its deletes.
+    concurrency:
+      group: site-search-index
+      cancel-in-progress: false
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - name: Checkout sourcecode
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Index
+        env:
+          # Opts in past the script's skip for GitHub Actions, which exists for
+          # the CI build job's `postbuild`.
+          SEARCH_INDEX: "true"
+          SURREAL_ENDPOINT: ${{ secrets.SURREAL_ENDPOINT }}
+          SURREAL_NAMESPACE: ${{ secrets.SURREAL_NAMESPACE }}
+          SURREAL_DATABASE: ${{ secrets.SURREAL_DATABASE }}
+          SURREAL_USERNAME: ${{ secrets.SURREAL_USERNAME }}
+          SURREAL_PASSWORD: ${{ secrets.SURREAL_PASSWORD }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        # Without the secrets the indexer would fall back to its local defaults
+        # (`ws://localhost:8000`, root/root) and fail slowly and obscurely, so a
+        # missing one fails here and says which.
+        run: |
+          missing=""
+          for name in SURREAL_ENDPOINT SURREAL_NAMESPACE SURREAL_DATABASE SURREAL_USERNAME SURREAL_PASSWORD OPENAI_API_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            exit 1
+          fi
+          bun run search:index

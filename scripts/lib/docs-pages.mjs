@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 export const CONTENT_DIR = "src/content";
 export const PAGES_DIR = "src/pages";
@@ -116,6 +116,33 @@ export function byDepthThenUrl(a, b) {
     return a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
 }
 
+/**
+ * Whether a folder, or any folder above it up to `root`, is hidden by
+ * `"hidden": true` on its `__category.json`.
+ *
+ * Mirrors `isHidden` in `src/utils/navigation.ts`, where a hidden folder takes
+ * its whole subtree out of the sidebar. The collection root counts too, so a
+ * collection whose root category is hidden is left out. This keeps a page that
+ * no navigation reaches out of the generated lists as well.
+ */
+function inHiddenFolder(root, file) {
+    const folders = relative(root, dirname(file)).split("/").filter(Boolean);
+
+    for (let depth = 0; depth <= folders.length; depth++) {
+        const category = join(root, ...folders.slice(0, depth), "__category.json");
+
+        if (!existsSync(category)) continue;
+
+        try {
+            if (JSON.parse(readFileSync(category, "utf8")).hidden === true) return true;
+        } catch {
+            // A malformed category is the build's problem to report, not this one's.
+        }
+    }
+
+    return false;
+}
+
 export function pagesFor(id, prefix) {
     const root = join(CONTENT_DIR, id);
 
@@ -135,6 +162,7 @@ export function pagesFor(id, prefix) {
         const meta = frontmatter(file);
 
         if (meta.hidden === "true") continue;
+        if (inHiddenFolder(root, file)) continue;
         if (!meta.title) continue;
 
         const path = [prefix, ...segments].filter(Boolean).join("/");

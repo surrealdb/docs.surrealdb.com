@@ -1,0 +1,133 @@
+---
+position: 3
+title: Caching and invalidation
+description: "How the semantic response cache works. Managing the memory lifecycle in SurrealDB Agent Memory."
+---
+
+# Caching and invalidation
+
+SurrealDB Agent Memory applies several complementary mechanisms to control what stays in memory, for how long, and at what quality. The semantic response cache removes repeated LLM calls for similar chat questions. Importance scoring weights facts during retrieval. Lifecycle sweeps enforce time-based expiry and scheduled decay.
+
+## Semantic response cache
+
+The semantic response cache serves **`/chat`**. When a chat message arrives, SurrealDB Agent Memory embeds the query text and searches earlier retrieval traces in the same Context using HNSW approximate nearest-neighbour search (cosine similarity). If an earlier query matches with a similarity at or above the Context's threshold (default **0.92**), and its answer is still valid, SurrealDB Agent Memory returns the earlier answer directly without invoking the LLM. `/query`, `/context`, `/reflect`, and the MCP `recall` and `context` tools always skip the cache, because they return fresh retrieval rather than a synthesised answer.
+
+There is no separate cache table and no entry cap. The cache is the trace graph itself: each earlier answer is a `response_trace` linked to the `retrieval_trace` it was built from, so the cache holds as much as [trace retention](#retention-policies) keeps.
+
+The cache is **tier 2** of the query resolution pipeline, and it is checked first. On a miss, structured lookups (tier 1) seed the hybrid retrieval and response generation path (tier 3). For workloads where many users ask semantically similar questions - "what is my current plan?", "which plan am I on?", "tell me my subscription tier?" - this removes most of the response-generation tokens.
+
+A cache hit is recorded as a retrieval trace with `tier_entered` set to `2`.
+
+The cache settings are per Context, under `response_cache` in the Context config:
+
+| Field | Default | What it controls |
+| --- | --- | --- |
+| `response_cache.enabled` | `true` | Whether `/chat` consults the cache at all |
+| `response_cache.similarity_threshold` | `0.92` | Minimum cosine similarity between the new query and an earlier one |
+| `response_cache.freshness_window_seconds` | `3600` | Maximum age of an earlier answer that can be reused |
+
+A cached answer is only reused for a caller who can see exactly the same records as the caller it was made for, so an answer built for one user is never returned to another.
+
+**Per-call bypass:** pass `bypassCache: true` on a `/chat` call to skip the cache and generate a fresh reply for that call only.
+
+**Sessions with history:** when a session already has prior turns, `/chat` skips tier-2 reuse and always synthesises a fresh reply - the transcript window makes the answer session-dependent even when the semantic query matches a cached entry. Windowed turns are also withheld from seeding the cache. First-turn `/chat` calls remain cache-eligible. A call with a per-call `model` is not served from the cache or stored in it.
+
+### Cache invalidation
+
+Invalidation is checked when an earlier answer is a candidate for reuse. The answer is reused only if every fact it cited is still current: the fact still exists, has not been superseded, has no `valid_until` in the past, and has no newer competing value at the same address. The answer is also refused if a new fact or a new `uncertainty` has been written about any entity it cited since the answer was made. When a check fails, the candidate is skipped and the next one is tried. Invalidation is automatic and does not require explicit intervention.
+
+There is no manual flush verb. To take the cache out of the path for a Context, set `response_cache.enabled` to `false` in its config; to skip it for one call, use `bypassCache`.
+
+## Importance scoring
+
+Every fact in SurrealDB Agent Memory carries an importance score between 0.0 and 2.0. The score governs how prominently the fact is weighted during retrieval. Initial scores are assigned by memory category:
+
+| Category | Initial importance |
+|---|---|
+| Identity | 1.0 |
+| Knowledge | 0.8 |
+| Context | 0.5 |
+
+**Identity** facts - user preferences, persistent attributes, long-term profile information - are assigned the highest initial score and never decay (see below). **Knowledge** facts - extracted from documents or structured ingestion - start high because they represent deliberate, curated information. **Context** facts - extracted from ephemeral conversation turns - start lower, reflecting that most conversational detail is transient.
+
+### Reinforcement on recall
+
+Recall does not currently change a fact's importance score. Each retrieval records the access on the retrieved attributes (`access_count` and `last_accessed_at`), and the score itself changes only through decay.
+
+## Importance decay
+
+Importance scores decay on a per-category schedule. Decay runs as a background sweep once a day.
+
+| Category | Decay factor per day | Notes |
+|---|---|---|
+| Context | × 0.95 | Aggressive - most conversational facts become negligible within a few weeks |
+| Knowledge | × 0.995 | Slow - curated knowledge remains relevant for much longer |
+| Identity | No decay | Identity facts persist indefinitely unless explicitly deleted |
+
+A context-category fact starting at importance 0.5 decays to about 0.35 after 7 days, 0.11 after 30 days and 0.02 after 60 days. Decay stops once a score reaches 0.01. The auto-expiry TTL closes the fact at 7 days, long before it reaches the lower values.
+
+The figure below plots those rates over 60 days.
+
+<img src="~/assets/img/diagrams/light/am-importance-decay-light.webp" darkSrc="~/assets/img/diagrams/am-importance-decay.webp" alt="Importance over 60 days with one decay pass a day. Identity facts start at 1.0 and do not decay. Knowledge facts start at 0.8 and are multiplied by 0.995 a day, reaching 0.59 at day 60. Context facts start at 0.5 and are multiplied by 0.95 a day: 0.35 at day 7, when the fact expires and gets a valid_until, then 0.11 at day 30 and 0.02 at day 60. Decay changes importance only and never ends a fact." />
+
+## Auto-expiry TTL
+
+SurrealDB Agent Memory applies a default time-to-live (TTL) of **7 days** to context-category facts. After the TTL elapses, the next expiry sweep (which runs every hour) sets the fact's `valid_until` to the current time. The fact is not deleted: it drops out of current-state reads and stays available for history and point-in-time reads.
+
+The TTL applies to context-category attributes and actions that have no `valid_until` of their own. Knowledge and identity facts are not subject to it.
+
+## Retention policies
+
+There are no declarative per-scope retention rules. Expiry is driven by the **lifecycle sweeps** instead - `lifecycle.expire()` closes facts whose validity has lapsed, and `lifecycle.decay()` ages importance scores. Run them on your own schedule, or leave them to the background scheduler.
+
+Trace records are the one thing with a configurable retention window, set per Context rather than per scope:
+
+| Field | Default | What it bounds |
+| --- | --- | --- |
+| `trace_retention.decision_trace_days` | Unbounded | Reconciliation decision traces |
+| `trace_retention.retrieval_trace_days` | 90 days | Retrieval traces |
+| `trace_retention.response_trace_days` | 90 days | `/chat` and `/reflect` response traces |
+
+An hourly background job deletes traces older than their window. Facts have no retention setting: they stay until they are expired, superseded, or forgotten.
+
+## Lifecycle sweeps
+
+Two background sweeps manage memory lifecycle:
+
+### Expiry sweep
+
+The expiry sweep closes context-category facts that have exceeded their TTL by setting `valid_until`. It runs every hour as a background job. You can trigger it explicitly:
+
+```python
+await memory.lifecycle.expire()
+```
+
+```javascript
+await memory.lifecycle.expire();
+```
+
+### Decay sweep
+
+The decay sweep applies the per-category importance multipliers to all facts in the Context. It runs once a day as a background job. To trigger manually:
+
+```python
+await memory.lifecycle.decay()
+```
+
+```javascript
+await memory.lifecycle.decay();
+```
+
+Manual triggering is useful during testing, or when you want to fast-forward the decay state of a Context.
+
+## Querying lifecycle state
+
+To inspect the importance score and TTL of a specific fact:
+
+```python
+entity = await memory.entities.get("person", "alice")
+for attr in entity.attributes:
+    print(attr.key, attr.importance, attr.valid_until)
+```
+
+There is no endpoint that lists facts by upcoming expiry. Read the entities you care about and filter on each attribute's `valid_until` yourself, or inspect the whole Context state with `memory.state()`.

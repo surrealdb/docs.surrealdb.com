@@ -1,0 +1,164 @@
+---
+position: 17
+title: Tracing queries
+description: Use the trace() method of the JavaScript SDK to ask SurrealDB which graph edges, references, record links, variables and live queries a query walked, and read the trace from responses, statements and stream frames.
+---
+
+<Since v="v4.0.0" />
+
+# Tracing queries
+
+A trace reports the graph that a query walked. When a query returns `->tagged->tag` or `author.name`, the result holds the values but not the edges and links that led to them. Call `.trace()` on a query to ask SurrealDB for those edges and links as well, so you can draw the real graph of a result instead of guessing which records connect.
+
+A trace needs SurrealDB 4.0.0 or later. It only describes what your session was allowed to read.
+
+## Asking for a trace
+
+Call `.trace()` on a query and name the kinds of trace you want. Awaiting the query and `.collect()` return the rows as before, so read the trace from [`.responses()` or `.statements()`](#reading-the-trace-from-responses-and-statements), or from [`.stream()`](#reading-the-trace-from-a-stream).
+
+```ts
+import { dedupeTrace } from 'surrealdb';
+
+const [response] = await db
+    .query('SELECT title, author.name, ->tagged->tag AS tags FROM post')
+    .trace('relations', 'links')
+    .responses();
+
+if (response.success) {
+    const trace = dedupeTrace(response.trace ?? {});
+
+    for (const { in: from, edge, out } of trace.relations ?? []) {
+        console.log(`${from} -[${edge}]-> ${out}`);
+    }
+}
+```
+
+```text title="Output"
+post:1 -[tagged:a]-> tag:rust
+post:1 -[tagged:b]-> tag:db
+post:2 -[tagged:c]-> tag:rust
+```
+
+The order of entries in a trace is not defined. With no arguments, `.trace()` asks for every kind.
+
+## Kinds of trace
+
+| Kind | Entry | Reported when |
+|------|-------|---------------|
+| `relations` | `{ in, edge, out }` | A graph lookup, such as `->tagged->tag`, in a field the query returns |
+| `references` | `{ referrer, referenced }` | A `<~` reference lookup in a field the query returns |
+| `links` | `{ record, field, target }` | A returned field reads through a record link, such as `author` in `author.name` |
+| `variables` | `{ name: value }` | A `LET` statement at the top level of the query |
+| `subscriptions` | `Uuid[]` | A `LIVE SELECT` statement starts a live query |
+
+For `relations`, `in` and `out` are the records at the two ends of the edge, and `edge` is the record of the edge table. For `references`, the referrer is the record that holds the field, and the referenced record is the one it points at.
+
+A lookup in a `WHERE` clause is not traced.
+
+## The shape of a trace
+
+A trace is a plain object with one array per kind that has entries. A kind with no entries is left out, so check for `undefined` before you read it.
+
+```ts
+interface QueryTrace {
+    relations?: { in?: RecordId; edge: RecordId; out?: RecordId }[];
+    references?: { referrer: RecordId; referenced: RecordId }[];
+    links?: { record: RecordId; field: string; target: RecordId }[];
+    variables?: Record<string, unknown>;
+    subscriptions?: Uuid[];
+    partial?: true;
+    truncated?: TraceKind[];
+}
+```
+
+Two more properties describe how complete the trace is:
+
+- **`partial`:** Set to `true` when a lookup fed the result through a function, operator or aggregate. The trace is correct, but it may not show everything that contributed to the value.
+- **`truncated`:** Lists the kinds for which the server stopped recording at a limit.
+
+### Permissions
+
+A trace holds only what your session can read. An edge table that your session cannot read adds no entries. If your session cannot read the field that names the record at one end of an edge, that end is `undefined`.
+
+## Reading the trace from responses and statements
+
+`.responses()` and `.statements()` collect the trace for each statement, so you receive one trace per statement.
+
+```ts
+const [people] = await db
+    .query('SELECT ->knows->person AS friends FROM person')
+    .trace('relations')
+    .responses();
+
+if (people.success) {
+    people.trace?.relations;
+}
+```
+
+```ts
+for await (const statement of db.query('SELECT ->knows->person FROM person').trace('relations').statements()) {
+    statement.index;
+    statement.trace?.relations;
+}
+```
+
+A statement that fails has no trace, and a statement that reports nothing has no `trace` property.
+
+## Reading the trace from a stream
+
+`.stream()` passes on the trace as the server sends it. The server attaches a trace to a frame that it already sends, so a trace does not add frames of its own.
+
+```ts
+for await (const frame of db.query('SELECT ->tagged->tag FROM post').trace('relations').stream()) {
+    if (frame.isValue()) {
+        frame.value;
+        frame.trace;
+    } else if (frame.isDone()) {
+        frame.trace;
+    } else if (frame.isError()) {
+        frame.error;
+    }
+}
+```
+
+A frame holds its trace in these places:
+
+- **A batch of rows:** The trace is on the first value frame of the batch. The other value frames of the batch have no trace.
+- **A single value:** The trace is on the value frame, for a statement such as `SELECT ... FROM ONLY` that returns one value.
+- **The end of a statement:** The trace is on the done frame. It holds the parts that belong to the statement as a whole, such as `variables`, and any entries that no earlier frame carried.
+
+A trace belongs to its statement and not to the rows of the frame it arrived with. It is also provisional, as the rows are: when a statement fails, its error frame cancels every value and trace that you received for that statement.
+
+## Removing repeated entries
+
+The server does not remove repeated entries across frames, and `.responses()` and `.statements()` join the frames of a statement as they are. The same edge can therefore appear more than once, for example when two returned records share a tag.
+
+Use `dedupeTrace()` to keep the first copy of each entry. It identifies entries by their record ids, and a link also by its field.
+
+```ts
+import { dedupeTrace } from 'surrealdb';
+
+const unique = dedupeTrace(response.trace ?? {});
+```
+
+When you stream, keep your own set of the entries that you have seen, or call `dedupeTrace()` on the trace that you gather.
+
+## Errors
+
+| Situation | Result |
+|-----------|--------|
+| The connected server is older than SurrealDB 4.0.0 | The call fails with an `UnavailableFeatureError` before it is sent |
+| A kind that does not exist, such as `trace('edges')` | `.trace()` throws a `TypeError` |
+| A query in a dialect other than SurrealQL | The call fails with a `TypeError` |
+
+## What a trace does not report
+
+- Edges that a `RELATE` statement writes. The result of that statement already holds them.
+- Links that `FETCH` resolves.
+
+## Learn more
+
+- [Executing queries](/docs/reference/javascript/concepts/executing-queries) for `.responses()`, `.stream()` and the other ways to read a query
+- [RELATE](/docs/reference/query-language/statements/relate) for creating the edges that a `relations` trace reports
+- [Utilities reference](/docs/reference/javascript/api/utilities/dedupe-trace) for `dedupeTrace()`
+- [Query reference](/docs/reference/javascript/api/queries/query#trace) for the signature of `.trace()`

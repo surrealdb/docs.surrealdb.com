@@ -1,6 +1,7 @@
 import {
     enum as _enum,
     boolean,
+    iso,
     literal,
     number,
     object,
@@ -9,7 +10,7 @@ import {
     string,
 } from "zod";
 import { SECTION_ICONS_NAMES } from "./icons";
-import { labCategories, labLanguages, labTopics } from "./labs";
+import { labFormats, labLanguages, labStages, labTopics } from "./labs";
 
 /**
  * The schema for a page in a content collection.
@@ -17,7 +18,11 @@ import { labCategories, labLanguages, labTopics } from "./labs";
 export const pageSchema = strictObject({
     title: string().optional(),
     description: string().optional(),
-    position: number().optional(),
+    /**
+     * Sort order among siblings. A whole number: to fit a page between two
+     * others, move the later siblings up by one rather than using a fraction.
+     */
+    position: number().int().optional(),
     /**
      * How early this page is offered a description in `llms.txt`.
      *
@@ -41,7 +46,7 @@ export const pageSchema = strictObject({
      * | `3` | Section landing pages that depth does not already reach | ~50 |
      *
      * "First hour" is per surface, not one funnel. A reader starting on
-     * SurrealDB itself wants install, `surreal start` and `SELECT`; one
+     * SurrealDB itself wants install, `surreal db start` and `SELECT`; one
      * starting from Python wants the Python SDK; one evaluating GraphQL wants
      * the GraphQL overview. Each surface earns one entry point, not a path
      * through the whole product.
@@ -72,17 +77,22 @@ export type PageSchema = output<typeof pageSchema>;
 
 export const labSchema = strictObject({
     title: string(),
+    /** Date the item was added, `YYYY-MM-DD`; the listing is newest first. */
+    date: iso.date(),
     description: string().optional(),
     url: string().optional(),
-    category: _enum(labCategories),
+    stage: _enum(labStages),
+    format: _enum(labFormats),
     author: literal("surrealdb").or(
         object({
             name: string(),
-            role: string(),
-            avatar: string(),
+            /** Shown under the name on the card. */
+            role: string().optional(),
+            /** File name of a photo in `src/assets/img/labs-authors`, without `.jpg`. */
+            avatar: string().optional(),
         }),
     ),
-    topics: _enum(labTopics).array().max(2).default([]),
+    topics: _enum(labTopics).array().default([]),
     languages: _enum(labLanguages).array().optional(),
 });
 

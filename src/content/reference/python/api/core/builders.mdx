@@ -1,0 +1,581 @@
+---
+position: 4
+title: Builders
+description: Reference for the Python SDK builders, SyncCrudBuilder and AsyncCrudBuilder data clauses and modifiers, SyncInsertBuilder and AsyncInsertBuilder, SyncQueryBuilder and AsyncQueryBuilder with execute(), first(), into(), rows(), statements() and stream(), AsyncQueryIntoBuilder, the batch from batch(), SyncRows and AsyncRows, StatementResult, ValueFrame, ErrorFrame and DoneFrame.
+---
+
+# Builders
+
+The query and CRUD methods of the Python SDK return builders. A builder holds one operation and sends nothing to the database until you run it. This page lists the methods of each builder, and the objects that the streaming methods return. For examples, see [Executing queries](/docs/reference/python/concepts/executing-queries), [Data manipulation](/docs/reference/python/concepts/data-manipulation) and [Streaming results](/docs/reference/python/concepts/streaming).
+
+| Builder | Returned by |
+| --- | --- |
+| [CRUD builder](#crud-builder) | `select()`, `create()`, `update()`, `upsert()`, `delete()` and `relate()` |
+| [Insert builder](#insert-builder) | `insert()` |
+| [Query builder](#query-builder) | `query()` |
+| [Into builder](#into-builder) | `.into()` on an asynchronous query builder |
+| [Batch](#batch) | `batch()` |
+
+Connections, sessions and transactions return the same builders. The blocking classes start with `Sync` and the asynchronous classes with `Async`. Every class on this page except the batch is exported from `surrealdb`, so you can use the names in type annotations.
+
+---
+
+## Running a builder {#running}
+
+| | Blocking connection | Asynchronous connection |
+| --- | --- | --- |
+| Run the builder | `.execute()`, a data clause such as `.merge(data)`, or iteration | `await builder`, `await builder.execute()`, or `async for` |
+| A write given its data | Runs at once and returns the result, not a builder | Returns a builder with the data set, to await |
+| Read the records one at a time | `for row in builder` or `.rows()` | `async for row in builder` or `.rows()` |
+
+These rules apply to every builder:
+
+- **A builder runs once.** Running it again returns the first result and sends no second request. That includes `.execute()` after a data clause, and awaiting one builder from two tasks.
+- **A builder that has run cannot change.** A data clause or a modifier after the builder has run raises `SurrealError: Cannot reconfigure a SyncCrudBuilder after it has executed`.
+- **A streamed builder cannot run again.** `.execute()` or `await` after `.rows()`, `.statements()` or `.stream()` raises `SurrealError`, because the operation has already run.
+- **A builder that is never run warns.** When Python discards a builder that never ran, the SDK emits a `RuntimeWarning` that names the call and the line it was made on.
+- **A blocking builder is not its result.** `len()` and indexing raise `TypeError`, and `bool()` is always `True`.
+- **A builder has one owner.** Running a blocking builder from several threads sends one request, but changing it from several threads at the same time is not safe.
+
+---
+
+## CRUD builder {#crud-builder}
+
+`SyncCrudBuilder[T]` on a blocking connection, `AsyncCrudBuilder[T]` on an asynchronous connection. `T` is the type of the result: a record as a `dict`, `None`, a list of records, or the class that `into=` names.
+
+### Data clauses {#data-clauses}
+
+A data clause sets the data of a write. On a blocking connection, it runs the statement and returns the result. On an asynchronous connection, it returns the builder, so you can add modifiers before `await`.
+
+| Clause | SurrealQL | Taken by |
+| --- | --- | --- |
+| [`.content(data)`](#content) | `CONTENT` | `create()`, `update()`, `upsert()`, `relate()` |
+| [`.replace(data)`](#replace) | `REPLACE` | `create()`, `update()`, `upsert()` |
+| [`.merge(data)`](#merge) | `MERGE` | `create()`, `update()`, `upsert()` |
+| [`.patch(data)`](#patch) | `PATCH` | `create()`, `update()`, `upsert()` |
+
+A clause on a builder that does not take it raises `SurrealError`.
+
+### `.content()` {#content}
+
+Sets the whole content of each record. `create(target, data)`, `update(target, data)`, `upsert(target, data)` and `relate(from_, edge, to, data)` use this clause.
+
+```python title="Syntax"
+builder.content(data)
+```
+
+**Returns:** the result of the statement on a blocking connection, or the builder on an asynchronous connection.
+
+### `.replace()` {#replace}
+
+Replaces the whole content of each record, with the SurrealQL [`REPLACE`](/docs/reference/query-language/statements/update#replace-clause) clause. Unlike `CONTENT`, it raises an error when `data` changes a `READONLY` field.
+
+```python title="Syntax"
+builder.replace(data)
+```
+
+**Returns:** the result of the statement on a blocking connection, or the builder on an asynchronous connection.
+
+### `.merge()` {#merge}
+
+Changes the fields that `data` names and keeps every other field. A nested object merges at every level, and an array replaces the stored array.
+
+```python title="Syntax"
+builder.merge(data)
+```
+
+**Returns:** the result of the statement on a blocking connection, or the builder on an asynchronous connection.
+
+### `.patch()` {#patch}
+
+Applies a list of [JSON Patch](https://jsonpatch.com/) operations. `data` is the list, and each operation is a dictionary such as `{"op": "replace", "path": "/age", "value": 36}`.
+
+```python title="Syntax"
+builder.patch(data)
+```
+
+**Returns:** the result of the statement on a blocking connection, or the builder on an asynchronous connection.
+
+### Modifiers {#modifiers}
+
+A modifier adds a clause to the statement and returns the builder, so you can chain modifiers. A modifier that the statement does not take raises `SurrealError` when you call it. On a blocking connection, call the modifiers before the data clause, because the data clause runs the statement.
+
+| Modifier | SurrealQL | `select` | `create` | `update` | `upsert` | `delete` | `relate` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [`.where()`](#where) | `WHERE` | Yes | | Yes | Yes | Yes | |
+| [`.fetch()`](#fetch) | `FETCH` | Yes | | | | | |
+| [`.limit()`](#limit) | `LIMIT` | Yes | | | | | |
+| [`.start()`](#start) | `START` | Yes | | | | | |
+| [`.version()`](#version) | `VERSION` | Yes | | | | | |
+| [`.output()`](#output) | `RETURN` | | Yes | Yes | Yes | Yes | Yes |
+| [`.timeout()`](#timeout) | `TIMEOUT` | Yes | Yes | Yes | Yes | Yes | Yes |
+
+### `.where()` {#where}
+
+Limits the statement to the records that match a condition.
+
+```python title="Syntax"
+builder.where(condition, variables=None)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>condition</code> <Label label="required" /></td>
+            <td><code>str</code></td>
+            <td>A SurrealQL expression, such as <code>"name = $name"</code>. An empty condition raises <code>ValueError</code>.</td>
+        </tr>
+        <tr>
+            <td><code>variables</code> <Label label="optional" /></td>
+            <td><code>Mapping[str, Value] | None</code></td>
+            <td>The values of the <code>$name</code> variables in <code>condition</code>. The names <code>_resource</code>, <code>_content</code>, <code>_data</code>, <code>_patches</code>, <code>_version</code>, <code>_from</code>, <code>_to</code> and <code>_edge</code> raise <code>ValueError</code>, because the builder uses them itself.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** the builder
+
+```python
+db.select(Table("person")).where("age > $min_age", {"min_age": 30}).execute()
+```
+
+### `.fetch()` {#fetch}
+
+Replaces each record link at the field paths that you name with the record that the link points to.
+
+```python title="Syntax"
+builder.fetch(*fields)
+```
+
+`fields` are one or more field paths, such as `"author"` or `"author.friends"`. A path that is not a field name, or field names separated by dots, raises `ValueError`.
+
+**Returns:** the builder
+
+### `.limit()` {#limit}
+
+Returns at most `count` records.
+
+```python title="Syntax"
+builder.limit(count)
+```
+
+`count` is a whole number of at least `0`, or the call raises `ValueError`.
+
+**Returns:** the builder
+
+### `.start()` {#start}
+
+Skips the first `offset` records.
+
+```python title="Syntax"
+builder.start(offset)
+```
+
+`offset` is a whole number of at least `0`, or the call raises `ValueError`.
+
+**Returns:** the builder
+
+### `.version()` {#version}
+
+Reads the records as they were at a point in time. Needs a datastore that keeps versions, such as SurrealKV with versioning (`surrealkv+versioned://`). Other datastores raise `ConfigurationError`.
+
+```python title="Syntax"
+builder.version(at)
+```
+
+`at` is a `datetime.datetime` or a [`Datetime`](/docs/reference/python/api/values/datetime). A `datetime` without a time zone is read as UTC.
+
+**Returns:** the builder
+
+### `.output()` {#output}
+
+Sets what the statement returns, with the SurrealQL `RETURN` clause.
+
+```python title="Syntax"
+builder.output(mode)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>mode</code> <Label label="required" /></td>
+            <td><code>str | Sequence[str]</code></td>
+            <td><code>"after"</code> for each record after the change, the default for every write except <code>delete()</code>. <code>"before"</code> for each record before the change, the default for <code>delete()</code>. <code>"diff"</code> for the change as JSON Patch operations, <code>"none"</code> for nothing, <code>"null"</code> for <code>Null</code>, or a list of field paths for only those fields. Another string raises <code>ValueError</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** the builder
+
+```python
+db.update(RecordID("person", "tobie")).output("diff").merge({"age": 37})
+```
+
+### `.timeout()` {#timeout}
+
+Makes the server stop the statement when it takes longer than `duration`, with the SurrealQL `TIMEOUT` clause. A statement that takes too long raises `QueryError`, with `is_timed_out` set to `True`. How long the client waits for a reply is a separate setting: see [`db.timeout()`](/docs/reference/python/api/core/surreal#timeout).
+
+```python title="Syntax"
+builder.timeout(duration)
+```
+
+`duration` is a [`Duration`](/docs/reference/python/api/values/duration), a `datetime.timedelta`, a duration string such as `"5s"`, or a whole number of seconds as an `int`. A duration of zero or less raises `ValueError`, and a `float` raises `TypeError`.
+
+**Returns:** the builder
+
+### `.execute()` {#crud-execute}
+
+Runs the statement, with the data clause and modifiers that you set, and returns its result.
+
+```python title="Syntax"
+builder.execute()
+```
+
+**Returns:** `T`, the result of the statement. On an asynchronous connection, await it: `await builder.execute()` is the same as `await builder`.
+
+### `.rows()` {#crud-rows}
+
+Reads the records that the statement returns, one at a time, as the server produces them. Nothing is sent until the iteration starts. See [Streaming results](/docs/reference/python/concepts/streaming).
+
+```python title="Syntax"
+builder.rows(*, into=None, require_streaming=False)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>into</code> <Label label="optional" /></td>
+            <td><code>type | None</code></td>
+            <td>A class to map each record onto. Defaults to the <code>into=</code> of the method that made the builder.</td>
+        </tr>
+        <tr>
+            <td><code>require_streaming</code> <Label label="optional" /></td>
+            <td><code>bool</code></td>
+            <td><code>True</code> raises <code>UnsupportedFeatureError</code> where the records cannot be streamed, instead of reading them the buffered way. Defaults to <code>False</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** [`SyncRows[T]`](#rows), or `AsyncRows[T]` on an asynchronous connection
+
+### Iterating and awaiting {#crud-iterating}
+
+Iterating a CRUD builder is the same as iterating `builder.rows()`: `for row in builder` on a blocking connection, and `async for row in builder` on an asynchronous connection. Awaiting an asynchronous CRUD builder is the same as `await builder.execute()`.
+
+---
+
+## Insert builder {#insert-builder}
+
+`SyncInsertBuilder[T]` on a blocking connection, `AsyncInsertBuilder[T]` on an asynchronous connection. `insert(table, data)` on a blocking connection runs at once, so you get this builder from `insert(table)` without data, or from any `insert()` on an asynchronous connection.
+
+### `.content()` {#insert-content}
+
+Sets the records to insert: a `dict` for one record, or a list of them.
+
+```python title="Syntax"
+builder.content(data)
+```
+
+**Returns:** the inserted records as a list on a blocking connection, or the builder on an asynchronous connection
+
+### `.relation()` {#relation}
+
+Makes the statement `INSERT RELATION`, so each record is an edge record with an `in` and an `out` field. `insert(table, data, relation=True)` does the same.
+
+```python title="Syntax"
+builder.relation()
+```
+
+**Returns:** the builder, also on a blocking connection
+
+### `.output()` and `.timeout()` {#insert-modifiers}
+
+The insert builder takes [`.output()`](#output) and [`.timeout()`](#timeout), which work as on the CRUD builder. It takes no other modifier.
+
+### `.execute()` {#insert-execute}
+
+Runs the `INSERT` statement. A builder without data raises `SurrealError`.
+
+```python title="Syntax"
+builder.execute()
+```
+
+**Returns:** `list[T]`, the inserted records, also for one record
+
+### `.rows()` {#insert-rows}
+
+Reads the inserted records one at a time. It takes the same arguments as the [`.rows()`](#crud-rows) of the CRUD builder, and iterating the builder is the same as iterating `.rows()`.
+
+```python title="Syntax"
+builder.rows(*, into=None, require_streaming=False)
+```
+
+**Returns:** [`SyncRows[T]`](#rows), or `AsyncRows[T]` on an asynchronous connection
+
+---
+
+## Query builder {#query-builder}
+
+`SyncQueryBuilder` on a blocking connection, `AsyncQueryBuilder` on an asynchronous connection, which `query()` returns.
+
+### `.execute()` {#query-execute}
+
+Runs the query and returns one result for each statement. When a statement fails, it raises the error of the first statement that failed, after the server has run the whole query.
+
+```python title="Syntax"
+builder.execute()
+```
+
+**Returns:** `list[Value]`, one entry for each statement, also for one statement. On an asynchronous connection, `await builder` is the same as `await builder.execute()`.
+
+### `.first()` {#first}
+
+Runs the query and returns the result of the first statement.
+
+```python title="Syntax"
+builder.first()
+```
+
+**Returns:** `Value`, or `None` when the query has no statements
+
+### `.into()` {#into}
+
+Maps the results of the query onto a class: a dataclass, a pydantic `BaseModel`, or any class that takes keyword arguments.
+
+```python title="Syntax"
+builder.into(cls, *, rows=False)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>cls</code> <Label label="required" /></td>
+            <td><code>type</code></td>
+            <td>The class to map onto. A value that is not a class raises <code>TypeError</code>.</td>
+        </tr>
+        <tr>
+            <td><code>rows</code> <Label label="optional" /></td>
+            <td><code>bool</code></td>
+            <td><code>False</code> maps the results of the statements, in order, onto the fields of <code>cls</code>, so <code>cls</code> needs one field for each statement. <code>True</code> maps each record of the first statement's result onto <code>cls</code>. Defaults to <code>False</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** on a blocking connection, the query runs and the call returns one `cls`, or a `list[cls]` with `rows=True`. On an asynchronous connection, an [into builder](#into-builder) to await. A result that does not match the class raises `UnexpectedResponseError`.
+
+### `.rows()` {#query-rows}
+
+Reads the rows of every statement of the query, one statement after the other, as the server produces them. A statement with one value gives that value as one row, and a statement whose result is `NONE` gives no row.
+
+```python title="Syntax"
+builder.rows(*, into=None, require_streaming=False)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>into</code> <Label label="optional" /></td>
+            <td><code>type | None</code></td>
+            <td>A class to map each row onto. Each row must then be a record. Defaults to <code>None</code>.</td>
+        </tr>
+        <tr>
+            <td><code>require_streaming</code> <Label label="optional" /></td>
+            <td><code>bool</code></td>
+            <td><code>True</code> raises <code>UnsupportedFeatureError</code> where the rows cannot be streamed. Defaults to <code>False</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** [`SyncRows`](#rows), or `AsyncRows` on an asynchronous connection
+
+### `.statements()` {#statements}
+
+Reads one complete result for each statement, as each statement finishes. The loop raises the error of the first statement that fails.
+
+```python title="Syntax"
+builder.statements(*, require_streaming=False)
+```
+
+**Returns:** a stream of [`StatementResult`](#statement-result) values: a `QueryStream`, or an `AsyncQueryStream` on an asynchronous connection. You use it in the same way as [`SyncRows`](#rows).
+
+### `.stream()` {#stream}
+
+Reads every value, error and completion of the query as a [frame](#frames). A statement that fails gives an `ErrorFrame` and does not stop the loop. A query that cannot finish at all still raises.
+
+```python title="Syntax"
+builder.stream(*, require_streaming=False)
+```
+
+**Returns:** a stream of `ValueFrame`, `ErrorFrame` and `DoneFrame` values: a `QueryStream`, or an `AsyncQueryStream` on an asynchronous connection
+
+### Iterating and awaiting {#query-iterating}
+
+Iterating a query builder is the same as iterating `builder.rows()`. Awaiting an asynchronous query builder is the same as `await builder.execute()`.
+
+---
+
+## Into builder {#into-builder}
+
+`AsyncQueryIntoBuilder[T]`, which `.into()` returns on an asynchronous query builder. It shares the request of its query builder, so awaiting the query builder and its into builder sends one request.
+
+```python title="Syntax"
+await builder.into(cls, rows=False)
+await builder.into(cls, rows=False).execute()
+```
+
+**Returns:** when awaited, one `cls`, or a `list[cls]` with `rows=True`
+
+---
+
+## Batch {#batch}
+
+The object that `batch()` returns on a connection or a session. It collects statements and sends them in one request, as one transaction. See [Executing queries](/docs/reference/python/concepts/executing-queries#sending-statements-as-one-transaction) for the rules.
+
+### `.query()` {#batch-query}
+
+Adds statements to the batch.
+
+```python title="Syntax"
+batch.query(query, vars=None)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>query</code> <Label label="required" /></td>
+            <td><code>str</code></td>
+            <td>One or more SurrealQL statements. A statement that begins, commits or cancels a transaction raises <code>ValueError</code>.</td>
+        </tr>
+        <tr>
+            <td><code>vars</code> <Label label="optional" /></td>
+            <td><code>Mapping[str, Value] | None</code></td>
+            <td>Variables for the statements. Every statement of the batch can use them, and a name that the batch already holds with another value raises <code>ValueError</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** the batch, so you can chain calls
+
+### `.execute()` {#batch-execute}
+
+Sends the statements, wrapped in `BEGIN TRANSACTION` and `COMMIT TRANSACTION`. When a statement fails, it raises the error of that statement, and none of the statements are applied. An empty batch, or a `RETURN` that is not the last statement, raises `ValueError`.
+
+```python title="Syntax"
+batch.execute()
+```
+
+**Returns:** `list[Value]`, one result for each statement that you added. On an asynchronous connection, await it: the batch itself is not awaitable.
+
+---
+
+## Rows {#rows}
+
+`SyncRows[T]` on a blocking connection, `AsyncRows[T]` on an asynchronous connection, which `.rows()` returns. A row is one item of the result of a statement: usually a record, or a value such as a name from `SELECT VALUE`. Both classes are exported for type annotations. The streams that `.statements()` and `.stream()` return, `QueryStream` and `AsyncQueryStream`, work in the same way.
+
+| Use | Blocking | Asynchronous |
+| --- | --- | --- |
+| Read the rows | `for row in rows:` | `async for row in rows:` |
+| Stop the query when the block ends | `with rows as stream:` | `async with rows as stream:` |
+| Stop the query | `rows.close()` | `await rows.aclose()` |
+
+A stream is read once: a second loop raises `SurrealError`. The query starts when the loop starts. Rows are provisional until the loop ends without an exception, because a statement that fails raises from the loop after its rows have arrived.
+
+---
+
+## `StatementResult` {#statement-result}
+
+One complete result of a statement, which `.statements()` yields and `DoneFrame` holds. It is a frozen dataclass.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | `int` | The position of the statement in the query, from `0` |
+| `value` | `Value` | The result of the statement: a list of rows, or one value when `single` is `True` |
+| `time` | `str` | The time that the server took, as text such as `"1.5ms"` |
+| `query_type` | `str \| None` | `"live"` for a `LIVE SELECT`, `"kill"` for a `KILL`, otherwise `None` |
+| `single` | `bool` | `True` when `value` is one value, such as the result of `RETURN 1` or `SELECT ... FROM ONLY` |
+
+---
+
+## Frames {#frames}
+
+The values that `.stream()` yields. Each one is a frozen dataclass with the `index` of the statement that it belongs to.
+
+### `ValueFrame` {#value-frame}
+
+One row of a statement, or the whole value of a statement with one value. The value is provisional until the `DoneFrame` of the same statement.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | `int` | The position of the statement in the query |
+| `value` | `Value` | The row or the value |
+
+### `ErrorFrame` {#error-frame}
+
+A statement that failed. It takes back every `ValueFrame` of the same statement. The statements after it still run.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | `int` | The position of the statement in the query |
+| `error` | `ServerError` | The error of the statement, such as a `ThrownError` |
+| `time` | `str` | The time that the server took |
+| `query_type` | `str \| None` | `"live"`, `"kill"` or `None`, as for `StatementResult` |
+
+### `DoneFrame` {#done-frame}
+
+A statement that is complete.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | `int` | The position of the statement in the query |
+| `result` | `StatementResult` | The complete result of the statement |
+
+---
+
+## See also
+
+- [Surreal](/docs/reference/python/api/core/surreal) for the methods that return these builders
+- [SurrealTransaction](/docs/reference/python/api/core/surreal-transaction) for builders inside a transaction
+- [Streaming results](/docs/reference/python/concepts/streaming) for `.rows()`, `.statements()` and `.stream()`
+- [Errors](/docs/reference/python/api/errors) for the errors that a builder raises

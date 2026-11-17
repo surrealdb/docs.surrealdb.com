@@ -1,0 +1,329 @@
+---
+position: 11
+title: Streaming results
+description: Stream query results with the Python SDK from SurrealDB 3.3.0 and later over a WebSocket, read records as they arrive with rows() or by iterating a builder, statements(), stream() with ValueFrame, ErrorFrame and DoneFrame, rows(into=), stopping early, the buffered fallback, streaming=False and require_streaming=True.
+---
+
+# Streaming results
+
+This page explains how the Python SDK streams the results of a query from SurrealDB 3.3.0 and later, and how to read records one at a time as the server produces them. Use it when a query returns more records than you want to hold in memory, or when your code can act on the first records before the query finishes.
+
+## API references
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Method</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/builders#query-rows"><code>builder.rows(into?, require_streaming?)</code></a></td>
+			<td scope="row" data-label="Description">Gives the records of a query or a CRUD builder one at a time, as they arrive</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/builders#statements"><code>builder.statements(require_streaming?)</code></a></td>
+			<td scope="row" data-label="Description">Gives the complete result of each statement of a query, as each statement finishes</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/builders#stream"><code>builder.stream(require_streaming?)</code></a></td>
+			<td scope="row" data-label="Description">Gives every value, error and completion of a query as a frame</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/builders#rows"><code>SyncRows</code> / <code>AsyncRows</code></a></td>
+			<td scope="row" data-label="Description">What <code>.rows()</code> returns: the records, and a context manager that stops the query</td>
+		</tr>
+	</tbody>
+</table>
+
+## When results are streamed
+
+Against SurrealDB 3.3.0 or later over a WebSocket connection, the SDK asks for the answer to a query as a stream of frames, and builds the same answer from them. `query()`, `select()` and every other builder do this, so your code needs no change. The answer is identical to the one a buffered query gives. What changes is that the server can send the first records before it has finished the query, and that the SDK never decodes the whole answer as one large message.
+
+To act on each record as it arrives instead of waiting for the whole answer, read the stream yourself, as the sections below show.
+
+## Reading records as they arrive
+
+Iterate a builder to get its records one at a time. `.rows()` does the same and returns the stream as an object, which you need for the options and for stopping early. Nothing is sent to the server until the iteration starts.
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		from surrealdb import Surreal, Table
+
+		with Surreal("ws://localhost:8000") as db:
+		    db.signin({"username": "root", "password": "secret"})
+		    db.use("surrealdb", "docs")
+
+		    db.query("""
+		        CREATE person:tobie SET name = 'Tobie', age = 35;
+		        CREATE person:jaime SET name = 'Jaime', age = 28;
+		    """).execute()
+
+		    for person in db.select(Table("person")):
+		        print(person["name"])
+
+		    for name in db.query("SELECT VALUE name FROM person").rows():
+		        print(name)
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		from surrealdb import AsyncSurreal, Table
+
+		async with AsyncSurreal("ws://localhost:8000") as db:
+		    await db.signin({"username": "root", "password": "secret"})
+		    await db.use("surrealdb", "docs")
+
+		    await db.query("""
+		        CREATE person:tobie SET name = 'Tobie', age = 35;
+		        CREATE person:jaime SET name = 'Jaime', age = 28;
+		    """)
+
+		    async for person in db.select(Table("person")):
+		        print(person["name"])
+
+		    async for name in db.query("SELECT VALUE name FROM person").rows():
+		        print(name)
+		```
+	</TabItem>
+</Tabs>
+
+```text title="Output"
+Jaime
+Tobie
+Jaime
+Tobie
+```
+
+A row is one item of the result of a statement: usually a record, or a value such as a name from `SELECT VALUE`. The rows of a query come from all of its statements, one statement after the other. A statement whose result is a single value, such as `RETURN 1`, gives that value as one row. A statement whose result is `NONE`, such as `LET`, gives no row. A stream is read once, so a second loop over the same object raises `SurrealError`, and so does `.execute()` on a builder that has already been streamed.
+
+## Rows are provisional until iteration ends
+
+A row arrives before the query has finished. When a statement fails, the loop raises its error, even after rows from that statement or from earlier statements have arrived. Treat the rows as final only when the loop ends without an exception:
+
+```python
+from surrealdb import SurrealError
+
+rows = []
+try:
+    for name in db.query("SELECT VALUE name FROM person; THROW 'nope'").rows():
+        rows.append(name)
+except SurrealError as e:
+    print(rows, e)
+    rows.clear()
+```
+
+```text title="Output"
+['Jaime', 'Tobie'] An error occurred: nope
+```
+
+When the whole query must succeed or fail as one, use `query().execute()`, which gives the answer only when every statement has finished, or put the statements in a transaction.
+
+## Mapping rows onto a model
+
+`.rows(into=Model)` maps each row onto a class as it arrives: a dataclass, a pydantic `BaseModel`, or any class that takes the fields as keyword arguments. This is how to read a large table one model at a time.
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		from dataclasses import dataclass
+
+		@dataclass
+		class Person:
+		    name: str
+		    age: int
+
+		for person in db.query("SELECT name, age FROM person").rows(into=Person):
+		    print(person)
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		from dataclasses import dataclass
+
+		@dataclass
+		class Person:
+		    name: str
+		    age: int
+
+		async for person in db.query("SELECT name, age FROM person").rows(into=Person):
+		    print(person)
+		```
+	</TabItem>
+</Tabs>
+
+```python title="Output"
+Person(name='Jaime', age=28)
+Person(name='Tobie', age=35)
+```
+
+A CRUD builder takes `into=` in the same way, for example `db.select(Table("person"), fields=["name", "age"]).rows(into=Person)`. When you passed `into=` to the CRUD method itself, iterating its builder maps the rows as well.
+
+## Stopping early
+
+The object that `.rows()` returns is a context manager. Leaving the `with` block, also with `break`, asks the server to stop the query:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		with db.query("SELECT * FROM person").rows() as stream:
+		    for person in stream:
+		        if person["name"] == "Jaime":
+		            break
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		async with db.query("SELECT * FROM person").rows() as stream:
+		    async for person in stream:
+		        if person["name"] == "Jaime":
+		            break
+		```
+	</TabItem>
+</Tabs>
+
+`stream.close()`, or `await stream.aclose()` on an asynchronous connection, does the same outside a `with` block. A stream that you stop without either of them goes on running on the server until Python discards the iterator. Until then, the query uses one of the stream slots of the connection, so close a stream that you do not read to the end.
+
+## Reading one result per statement
+
+`.statements()` gives one `StatementResult` for each statement of a query, when the server reports that the statement is complete. This is the shape that `query().execute()` returns, delivered one statement at a time:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		query = db.query("RETURN 1; SELECT VALUE name FROM person")
+
+		for statement in query.statements():
+		    print(statement.index, statement.value, statement.single)
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		query = db.query("RETURN 1; SELECT VALUE name FROM person")
+
+		async for statement in query.statements():
+		    print(statement.index, statement.value, statement.single)
+		```
+	</TabItem>
+</Tabs>
+
+```text title="Output"
+0 1 True
+1 ['Jaime', 'Tobie'] False
+```
+
+A `StatementResult` has these fields:
+
+| Field | Value |
+| --- | --- |
+| `index` | The position of the statement in the query, from `0` |
+| `value` | The result of the statement: a list of rows, or one value when `single` is `True` |
+| `time` | The time that the server took, as text such as `"1.5ms"` |
+| `query_type` | `"live"` for a `LIVE SELECT`, `"kill"` for a `KILL`, otherwise `None` |
+| `single` | `True` when `value` is one value, such as the result of `RETURN 1` or of `SELECT ... FROM ONLY` |
+
+A statement that you receive is complete, and the SDK never takes it back. A later statement can still fail, and the loop then raises its error. `.statements()` exists only on a query builder, because a CRUD builder runs one statement.
+
+## Reading every frame
+
+`.stream()` gives every value, error and completion of a query as a frame. Use it when you need to see one statement fail while the statements after it go on, which `.rows()` and `.statements()` cannot show, because they raise at the first failure.
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		from surrealdb import DoneFrame, ErrorFrame, ValueFrame
+
+		for frame in db.query("RETURN 1; THROW 'nope'; RETURN 42").stream():
+		    if isinstance(frame, ValueFrame):
+		        print(frame.index, "value", frame.value)
+		    elif isinstance(frame, ErrorFrame):
+		        print(frame.index, "error", frame.error)
+		    elif isinstance(frame, DoneFrame):
+		        print(frame.index, "done")
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		from surrealdb import DoneFrame, ErrorFrame, ValueFrame
+
+		async for frame in db.query("RETURN 1; THROW 'nope'; RETURN 42").stream():
+		    if isinstance(frame, ValueFrame):
+		        print(frame.index, "value", frame.value)
+		    elif isinstance(frame, ErrorFrame):
+		        print(frame.index, "error", frame.error)
+		    elif isinstance(frame, DoneFrame):
+		        print(frame.index, "done")
+		```
+	</TabItem>
+</Tabs>
+
+```text title="Output"
+0 value 1
+0 done
+1 error An error occurred: nope
+2 value 42
+2 done
+```
+
+Each frame has the `index` of the statement that it belongs to:
+
+- **`ValueFrame(index, value)`** holds one row, or the whole value of a statement with one value. The value is provisional until the `DoneFrame` of the same statement.
+- **`ErrorFrame(index, error, time, query_type)`** says that the statement failed, with the error as a [`ServerError`](/docs/reference/python/api/errors#servererror). It takes back every value of that statement that you already have. The statements after it still run.
+- **`DoneFrame(index, result)`** says that the statement is complete, with its `StatementResult`.
+
+A query that cannot finish at all, for example because the connection closes, still raises from the loop.
+
+## Streaming on the blocking client
+
+The blocking client works the same way, with `for` and `with` in place of `async for` and `async with`. Frames arrive only while a thread reads the socket, so the thread that iterates a stream also reads the socket for it. That thread holds the lock of the connection only for short periods, so other threads can use the same connection while a stream is open.
+
+## Where results are not streamed
+
+Where a stream is not available, the SDK runs the query the buffered way, and the same code works. `.rows()`, `.statements()` and `.stream()` then give the complete answer in the same pieces, but the first record does not arrive early, and the whole answer is in memory.
+
+| Connection and server | Behaviour |
+| --- | --- |
+| WebSocket, SurrealDB 3.3.0 or later | Streams. Records arrive as the server produces them. |
+| WebSocket, an older server | Buffered. The connection learns this from its first request for a stream and remembers it. |
+| WebSocket, a server whose capabilities deny the [`query_stream`](/docs/reference/rest-api/rpc-protocol#query_stream) method | Buffered, as for an older server. |
+| WebSocket, at the limit of concurrent streams | `query()` runs this one query buffered. An explicit `.rows()` raises an error. |
+| Inside a client-side transaction | `query()` is buffered. An explicit `.rows()` still streams. |
+| HTTP | Buffered, because HTTP carries one response for each request. |
+| Embedded | Buffered. |
+
+## Turning streaming off or requiring it
+
+`streaming=False` on [`Surreal()`](/docs/reference/python/api/core/surreal#options) or `AsyncSurreal()` makes `query()` and the CRUD methods use the buffered path on that connection. An explicit `.rows()`, `.statements()` or `.stream()`, and iterating a builder, still stream when the server can, because a request for a stream is taken to mean that you want one.
+
+```python
+from surrealdb import AsyncSurreal
+
+db = AsyncSurreal("ws://localhost:8000", streaming=False)
+```
+
+`require_streaming=True` on `.rows()`, `.statements()` or `.stream()` raises `UnsupportedFeatureError` where the SDK would use the buffered path. Use it when a query is too large to hold in memory, so that you learn about the fallback instead of running out of memory. The error says why the stream is not available, for example against SurrealDB 2.x:
+
+```python
+for person in db.query("SELECT * FROM person").rows(require_streaming=True):
+    print(person["name"])
+```
+
+```text title="Error output"
+UnsupportedFeatureError: this SurrealDB server does not support streaming queries, which need v3.3.0 or later. Upgrade the server, or await the builder (execute() when blocking) for the buffered answer, or drop require_streaming=True to let stream() fall back to a buffered query.
+```
+
+## Caveats
+
+- **One task or thread for each stream.** The task or thread that iterates a stream drives it, and Python lets only one do that at a time. To stop a stream that another task is reading, cancel that task and await it before you close the stream.
+- **Concurrent streams are limited.** A connection runs at most 32 streams at the same time by default, which the server sets with [`SURREAL_WEBSOCKET_MAX_CONCURRENT_STREAMS`](/docs/reference/cli/db/environment-variables). The server refuses a stream over the limit with a `ValidationError`.
+- **A failed statement stops the rest of the query.** When a statement fails, iteration raises and the SDK asks the server to stop the query, so the statements after the failure may never run. `query().execute()` runs the whole query before it raises. The difference also applies to writes: with `CREATE marker:a; THROW 'x'; SLEEP 2s; CREATE marker:b`, `query()` creates both records and `.rows()` creates only `marker:a`.
+- **Transactions.** Inside a [client-side transaction](/docs/reference/python/concepts/transactions), `query()` is never streamed, so a commit cannot arrive while the query still runs. `.rows()` still streams on the transaction, so read the stream to the end before you commit.
+
+## Learn more
+
+- [Builders](/docs/reference/python/api/core/builders) for `.rows()`, `.statements()`, `.stream()` and the frame classes
+- [Executing queries](/docs/reference/python/concepts/executing-queries) for `query()` and its results
+- [Data manipulation](/docs/reference/python/concepts/data-manipulation) for the CRUD builders
+- [RPC protocol](/docs/reference/rest-api/rpc-protocol#query_stream) for the `query_stream` method

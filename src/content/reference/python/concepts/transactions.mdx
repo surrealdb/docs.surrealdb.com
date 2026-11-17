@@ -1,17 +1,12 @@
 ---
 position: 7
 title: Transactions
-description: The Python SDK supports client-side transactions for executing multiple operations atomically over WebSocket connections.
+description: Run several operations atomically with the Python SDK using begin_transaction() on a connection or session, the with and async with context manager, commit() and cancel(), transaction conflicts and retries with QueryError.is_transaction_conflict, batch() for HTTP and SurrealDB 2.x, BEGIN and COMMIT in one query(), and begin(), commit() and cancel() with transaction ids.
 ---
 
 # Transactions
 
-The Python SDK supports client-side transactions that group multiple operations into a single atomic unit. All operations within a transaction either succeed together when committed or are rolled back entirely when cancelled. Transactions are scoped to a session and execute over a WebSocket connection.
-
-This page covers how to create, execute, commit, cancel, and handle errors within transactions.
-
-> [!NOTE]
-> Transactions require a WebSocket connection (`ws://` or `wss://`) and must be created from a session. HTTP and embedded connections do not support transactions.
+This page shows how to run several operations as one transaction from the Python SDK, so that all of them are applied or none of them are. A client-side transaction stays open on the server while your code runs operations in it, and it needs a WebSocket connection (`ws://` or `wss://`) and SurrealDB 3.0 or later. For other connections and servers, `batch()` sends the statements as one transaction in one request.
 
 ## API references
 
@@ -24,190 +19,280 @@ This page covers how to create, execute, commit, cancel, and handle errors withi
 	</thead>
 	<tbody>
 		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal#begin-transaction"><code>db.begin_transaction()</code></a></td>
+			<td scope="row" data-label="Description">Begins a transaction on the session of the connection</td>
+		</tr>
+		<tr>
 			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal-session#begin-transaction"><code>session.begin_transaction()</code></a></td>
-			<td scope="row" data-label="Description">Begins a new transaction within the session</td>
+			<td scope="row" data-label="Description">Begins a transaction on a session from <code>new_session()</code></td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal-transaction#commit"><code>txn.commit()</code></a></td>
-			<td scope="row" data-label="Description">Commits all operations in the transaction, making changes permanent</td>
+			<td scope="row" data-label="Description">Applies the changes of the transaction and ends it</td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal-transaction#cancel"><code>txn.cancel()</code></a></td>
-			<td scope="row" data-label="Description">Cancels the transaction and rolls back all changes</td>
+			<td scope="row" data-label="Description">Discards the changes of the transaction and ends it</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal#batch"><code>db.batch()</code></a></td>
+			<td scope="row" data-label="Description">Sends statements as one transaction in one request, on every connection type</td>
 		</tr>
 	</tbody>
 </table>
 
-## Creating a transaction
+Against SurrealDB 2.x, `begin_transaction()` raises `UnavailableFeatureError`. HTTP connections have no `begin_transaction()` method, and embedded connections raise `UnsupportedFeatureError`. Use [`batch()`](#sending-statements-in-one-request-with-batch) on those.
 
-To create a transaction, first open a session with `.new_session()` on the connection, then call `.begin_transaction()` on the session. The returned transaction object provides the same data manipulation methods as the main connection, but all operations are held until the transaction is committed or cancelled.
+## Running a transaction
+
+`db.begin_transaction()` begins a transaction and returns a [transaction object](/docs/reference/python/api/core/surreal-transaction). The object has the query and CRUD methods of the connection, and each operation that you run through it is part of the transaction. Use the object as a context manager: the transaction commits when the block finishes, and it is cancelled when an exception leaves the block.
 
 <Tabs syncKey="python-sync-async">
 	<TabItem value="sync" label="Synchronous" default>
 		```python
-		from surrealdb import Surreal
+		from surrealdb import RecordID, Surreal
 
 		with Surreal("ws://localhost:8000") as db:
-		    db.use("surrealdb", "docs")
 		    db.signin({"username": "root", "password": "secret"})
+		    db.use("surrealdb", "docs")
 
-		    session = db.new_session()
-		    session.use("surrealdb", "docs")
+		    db.create(RecordID("account", "tobie"), {"balance": 100})
+		    db.create(RecordID("account", "jaime"), {"balance": 50})
 
-		    txn = session.begin_transaction()
+		    with db.begin_transaction() as txn:
+		        txn.query("UPDATE account:tobie SET balance -= 20").execute()
+		        txn.query("UPDATE account:jaime SET balance += 20").execute()
+
+		    tobie = db.select(RecordID("account", "tobie")).execute()
+		    jaime = db.select(RecordID("account", "jaime")).execute()
+		    print(tobie["balance"], jaime["balance"])
 		```
 	</TabItem>
 	<TabItem value="async" label="Asynchronous">
 		```python
-		from surrealdb import AsyncSurreal
+		from surrealdb import AsyncSurreal, RecordID
 
 		async with AsyncSurreal("ws://localhost:8000") as db:
-		    await db.use("surrealdb", "docs")
 		    await db.signin({"username": "root", "password": "secret"})
+		    await db.use("surrealdb", "docs")
 
-		    session = await db.new_session()
-		    await session.use("surrealdb", "docs")
+		    await db.create(RecordID("account", "tobie"), {"balance": 100})
+		    await db.create(RecordID("account", "jaime"), {"balance": 50})
 
-		    txn = await session.begin_transaction()
+		    async with await db.begin_transaction() as txn:
+		        await txn.query("UPDATE account:tobie SET balance -= 20")
+		        await txn.query("UPDATE account:jaime SET balance += 20")
+
+		    tobie = await db.select(RecordID("account", "tobie"))
+		    jaime = await db.select(RecordID("account", "jaime"))
+		    print(tobie["balance"], jaime["balance"])
 		```
 	</TabItem>
 </Tabs>
 
-## Executing operations within a transaction
+```text title="Output"
+80 70
+```
 
-Once a transaction is created, use its methods - such as `.query()`, `.create()`, `.select()`, `.update()`, and `.delete()` - to perform operations. `.query()` returns a lazy builder, so remember to finish it with `.execute()` or `.first()`; nothing is sent to the server until you do. These operations are buffered within the transaction scope and are not visible to other connections or sessions until the transaction is committed.
+On an asynchronous connection, `begin_transaction()` is a coroutine, so the block starts with `async with await`. Until the transaction commits, its changes are visible to the operations of the transaction and not to any other operation, also not to the connection that began it.
 
-<Tabs syncKey="python-sync-async">
-	<TabItem value="sync" label="Synchronous" default>
-		```python
-		txn.create("users", {
-		    "name": "Alice",
-		    "email": "alice@example.com",
-		    "age": 30,
-		})
+## Handling errors
 
-		txn.create("users", {
-		    "name": "Bob",
-		    "email": "bob@example.com",
-		    "age": 25,
-		})
+When an exception leaves the block, the transaction is cancelled and the exception continues to your code. None of the changes in the block are applied:
 
-		users = txn.query("SELECT * FROM users").first()
-		```
-	</TabItem>
-	<TabItem value="async" label="Asynchronous">
-		```python
-		await txn.create("users", {
-		    "name": "Alice",
-		    "email": "alice@example.com",
-		    "age": 30,
-		})
+```python
+from surrealdb import RecordID, ServerError
 
-		await txn.create("users", {
-		    "name": "Bob",
-		    "email": "bob@example.com",
-		    "age": 25,
-		})
+try:
+    with db.begin_transaction() as txn:
+        txn.query("UPDATE account:tobie SET balance -= 500").execute()
+        txn.query(
+            "IF account:tobie.balance < 0 { THROW 'Insufficient funds' }"
+        ).execute()
+except ServerError as e:
+    print(e)
 
-		users = await txn.query("SELECT * FROM users").first()
-		```
-	</TabItem>
-</Tabs>
+print(db.select(RecordID("account", "tobie")).execute()["balance"])
+```
 
-Refer to the [SurrealTransaction API reference](/docs/reference/python/api/core/surreal-transaction) for the full list of methods available on the transaction object.
+```text title="Output"
+An error occurred: Insufficient funds
+80
+```
 
-## Committing a transaction
+> [!IMPORTANT]
+> A statement that fails raises its error, but it does not end the transaction. If you catch the error inside the block, the transaction stays open and commits when the block finishes, with the changes of the statements that succeeded. To discard them, let the exception leave the block, or call `txn.cancel()`.
 
-Calling `.commit()` makes all operations in the transaction permanent. After committing, the changes become visible to other connections and sessions.
+## Committing and cancelling yourself
+
+Without a `with` block, call `commit()` to apply the changes, or `cancel()` to discard them. Cancel in an `except` block, so that an error does not leave the transaction open, and commit after the `try` block:
 
 <Tabs syncKey="python-sync-async">
 	<TabItem value="sync" label="Synchronous" default>
 		```python
+		txn = db.begin_transaction()
+		try:
+		    txn.query("UPDATE account:tobie SET balance -= 20").execute()
+		    txn.query("UPDATE account:jaime SET balance += 20").execute()
+		except Exception:
+		    txn.cancel()
+		    raise
 		txn.commit()
 		```
 	</TabItem>
 	<TabItem value="async" label="Asynchronous">
 		```python
+		txn = await db.begin_transaction()
+		try:
+		    await txn.query("UPDATE account:tobie SET balance -= 20")
+		    await txn.query("UPDATE account:jaime SET balance += 20")
+		except Exception:
+		    await txn.cancel()
+		    raise
 		await txn.commit()
 		```
 	</TabItem>
 </Tabs>
 
-A transaction can only be committed once. After committing, the transaction object should not be reused.
+Keep `commit()` out of the `try` block. A commit that fails has already ended the transaction, so a `cancel()` after it raises `ValidationError: Transaction not found`, and that error then hides the error of the commit.
 
-## Cancelling a transaction
+After `commit()` or `cancel()`, the transaction has ended on the server, and every operation on the object raises `ValidationError`. Inside a `with` block, a call to `commit()` or `cancel()` ends the transaction, and the end of the block then does nothing more.
 
-Calling `.cancel()` discards all operations in the transaction and rolls back any changes. The database state is restored to what it was before the transaction began.
+## Retrying after a transaction conflict
 
-<Tabs syncKey="python-sync-async">
-	<TabItem value="sync" label="Synchronous" default>
-		```python
-		txn.cancel()
-		```
-	</TabItem>
-	<TabItem value="async" label="Asynchronous">
-		```python
-		await txn.cancel()
-		```
-	</TabItem>
-</Tabs>
-
-## Handling errors in transactions
-
-Use a `try`/`except` block to ensure that a transaction is cancelled if any operation fails. This prevents partial changes from being committed to the database.
+Two transactions that change the same record conflict. The server applies the one that commits first, and the commit of the other raises [`QueryError`](/docs/reference/python/api/errors#queryerror) with its `is_transaction_conflict` property set to `True`. The transaction that failed changed nothing, so you can run it again. This function reads a balance and writes a new one, which conflicts when another client changes the same account at the same time:
 
 <Tabs syncKey="python-sync-async">
 	<TabItem value="sync" label="Synchronous" default>
 		```python
-		from surrealdb import Surreal
+		from surrealdb import QueryError, RecordID
 
-		with Surreal("ws://localhost:8000") as db:
-		    db.use("surrealdb", "docs")
-		    db.signin({"username": "root", "password": "secret"})
-
-		    session = db.new_session()
-		    session.use("surrealdb", "docs")
-
-		    txn = session.begin_transaction()
-
-		    try:
-		        txn.create("users", {"name": "Alice", "age": 30})
-		        txn.create("users", {"name": "Bob", "age": 25})
-		        txn.commit()
-		    except Exception:
-		        txn.cancel()
-		        raise
+		def withdraw(db, amount, attempts=3):
+		    account = RecordID("account", "tobie")
+		    for _ in range(attempts):
+		        try:
+		            with db.begin_transaction() as txn:
+		                balance = txn.select(account).execute()["balance"] - amount
+		                txn.update(account).merge({"balance": balance})
+		            return balance
+		        except QueryError as e:
+		            if not e.is_transaction_conflict:
+		                raise
+		    raise RuntimeError(f"withdraw failed after {attempts} attempts")
 		```
 	</TabItem>
 	<TabItem value="async" label="Asynchronous">
 		```python
-		from surrealdb import AsyncSurreal
+		from surrealdb import QueryError, RecordID
 
-		async with AsyncSurreal("ws://localhost:8000") as db:
-		    await db.use("surrealdb", "docs")
-		    await db.signin({"username": "root", "password": "secret"})
-
-		    session = await db.new_session()
-		    await session.use("surrealdb", "docs")
-
-		    txn = await session.begin_transaction()
-
-		    try:
-		        await txn.create("users", {"name": "Alice", "age": 30})
-		        await txn.create("users", {"name": "Bob", "age": 25})
-		        await txn.commit()
-		    except Exception:
-		        await txn.cancel()
-		        raise
+		async def withdraw(db, amount, attempts=3):
+		    account = RecordID("account", "tobie")
+		    for _ in range(attempts):
+		        try:
+		            async with await db.begin_transaction() as txn:
+		                balance = (await txn.select(account))["balance"] - amount
+		                await txn.update(account).merge({"balance": balance})
+		            return balance
+		        except QueryError as e:
+		            if not e.is_transaction_conflict:
+		                raise
+		    raise RuntimeError(f"withdraw failed after {attempts} attempts")
 		```
 	</TabItem>
 </Tabs>
 
-The `raise` at the end re-raises the original exception after cancelling the transaction, so the error is still visible to the caller.
+The `try` block holds the whole `with` block, because the commit at the end of the block is where the conflict is raised. The error message also says that the transaction can be retried:
+
+```text title="Error output"
+QueryError: There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried
+```
+
+## Transactions in a session
+
+`session.begin_transaction()` begins a transaction on a [session](/docs/reference/python/concepts/multiple-sessions) instead of the session of the connection. The transaction uses the namespace, the database and the authentication of that session:
+
+```python
+session = db.new_session()
+session.use("surrealdb", "docs")
+
+with session.begin_transaction() as txn:
+    txn.update(RecordID("account", "jaime")).merge({"active": True})
+```
+
+## Sending statements in one request with `batch()`
+
+`db.batch()` collects statements and sends them in one request, wrapped in `BEGIN TRANSACTION` and `COMMIT TRANSACTION`. Nothing stays open on the server between requests, so it works where a client-side transaction does not: over HTTP, on embedded connections and against SurrealDB 2.x. When a statement fails, `.execute()` raises the error of that statement, and none of the statements are applied:
+
+```python
+from surrealdb import ServerError
+
+try:
+    (
+        db.batch()
+        .query("UPDATE account:tobie SET balance -= 500")
+        .query("IF account:tobie.balance < 0 { THROW 'Insufficient funds' }")
+        .execute()
+    )
+except ServerError as e:
+    print(e)
+```
+
+```text title="Output"
+An error occurred: Insufficient funds
+```
+
+Against SurrealDB 2.x, every server error is an `InternalError`, so catch `ServerError` in code that supports both versions. [Executing queries](/docs/reference/python/concepts/executing-queries#sending-statements-as-one-transaction) describes the rules for the statements of a batch. The two kinds of transaction compare as follows:
+
+| | Client-side transaction | `batch()` |
+| --- | --- | --- |
+| Connection | WebSocket | Every connection type |
+| Server | SurrealDB 3.0 or later | Every supported version |
+| Code between operations | Yes: your code can read a result and then choose the next operation | No: you write every statement before the batch is sent |
+| Requests | One for each operation, and one to commit | One |
+
+## Writing BEGIN and COMMIT in one query
+
+A single `query()` can hold its own `BEGIN TRANSACTION` and `COMMIT TRANSACTION` statements, on every connection type. Against SurrealDB 3.0 or later, `BEGIN` and `COMMIT` have results of their own, `None`, so the list from `.execute()` has an entry for each of them as well. Against SurrealDB 2.x, the list holds only the results of the statements between them.
+
+```python
+results = db.query("""
+    BEGIN TRANSACTION;
+    UPDATE account:tobie SET balance -= 20;
+    UPDATE account:jaime SET balance += 20;
+    COMMIT TRANSACTION;
+""").execute()
+
+print(len(results))
+```
+
+```text title="Output"
+4
+```
+
+When a statement in such a query fails, the error that `.execute()` raises belongs to the first statement that the failure stopped, `QueryError: The query was not executed due to a failed transaction`, and not to the statement that caused the failure. `batch()` raises the error of the statement that failed, and returns results only for the statements that you added, so it is the simpler choice.
+
+## What a transaction does not cover
+
+- **Files.** `txn.files.put()` and the other [file](/docs/reference/python/concepts/files) helpers of a transaction write at once. The file stays when the transaction is cancelled.
+- **Session variables.** `txn.let()` defines a variable on the session of the transaction. The variable stays after the transaction ends, also after `cancel()`.
+- **Streams.** Inside a transaction, `query()` is never streamed. `.rows()` and iterating a builder still [stream](/docs/reference/python/concepts/streaming), so read the stream to the end before you commit.
+
+## Low-level transaction ids
+
+`db.begin()` begins a transaction and returns its id, a `uuid.UUID`. Pass the id as the `txn_id=` keyword argument of a connection method to run it in the transaction, and end the transaction with `db.commit(txn_id)` or `db.cancel(txn_id)`. Each of these methods also takes a `session_id=` keyword argument for a transaction on a session.
+
+```python
+txn_id = db.begin()
+db.query("UPDATE account:tobie SET balance -= 20", txn_id=txn_id).execute()
+db.commit(txn_id)
+```
+
+The object from `begin_transaction()` passes these ids for you. Use the ids directly only where your code keeps the id instead of the object.
 
 ## Learn more
 
-- [SurrealTransaction API reference](/docs/reference/python/api/core/surreal-transaction) for transaction method signatures
-- [SurrealSession API reference](/docs/reference/python/api/core/surreal-session) for session management
-- [Multiple sessions](/docs/reference/python/concepts/multiple-sessions) for session setup
-- [Error handling](/docs/reference/python/concepts/error-handling) for error recovery patterns
+- [SurrealTransaction API reference](/docs/reference/python/api/core/surreal-transaction) for every method of a transaction
+- [Executing queries](/docs/reference/python/concepts/executing-queries) for `batch()` and `query()`
+- [Multiple sessions](/docs/reference/python/concepts/multiple-sessions) for sessions
+- [Error handling](/docs/reference/python/concepts/error-handling) for the errors that a transaction raises
+- [Transactions in SurrealQL](/docs/reference/query-language/statements/begin) for `BEGIN`, `COMMIT` and `CANCEL`
