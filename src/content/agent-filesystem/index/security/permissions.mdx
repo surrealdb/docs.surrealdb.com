@@ -1,0 +1,274 @@
+---
+position: 0
+title: Permissions
+description: "Owner, mode, group and gate rules for Agent Filesystem files, which clients enforce them, and which operations skip them."
+---
+
+# Permissions
+
+Every file and folder in Agent Filesystem has an owner and a mode, in the same form as on a Unix system. These fields decide which user may read, change, list and delete it, and the Python library and record access keep a folder at `/home/<user>` private to the user it is named after. This page describes the rules, how a client identifies itself, and which clients enforce the rules in this release.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, and each limitation that applies is listed where it matters.
+
+> [!IMPORTANT]
+> Whether the rules are enforced depends on how a client connects. The Python library enforces them for most file operations, with the exceptions listed at the end of this page, and the database enforces them when users sign in with [record access](/docs/agent-filesystem/security/record-access). The Rust command-line tool, the WebDAV and S3 servers and the TypeScript SDK check some reads and almost no writes. The next section lists the differences.
+
+## How permissions are enforced
+
+The permission rules live in the schema, as SurrealQL functions and `PERMISSIONS` clauses. The Python library mirrors the bit arithmetic in client code, so that it can give exact errors and work under a system credential. The mirror does not cover groups.
+
+A SurrealDB root, namespace or database user is a *system credential*, and SurrealDB does not apply table or field permissions to a system credential. Almost every client in this release signs in with a system credential, so the database cannot tell which agent is asking. The client has to say, and who enforces the rules depends on the client:
+
+| Connection | Who enforces the rules | Where the identity comes from |
+| --- | --- | --- |
+| Python library with a system credential | The `SurrealFs` class checks file operations before it sends a query | The required `user` argument |
+| Rust command-line tool (`surrealfs-rs`), WebDAV and S3 servers, TypeScript SDK, and direct calls to the `fn::sfs_*` functions, all with a system credential | The database functions, some of which check the caller | A caller name that the client states, such as `--caller` |
+| Python library with record access (opt-in) | The database, through `PERMISSIONS` clauses on the `file` table and its fields | The signed-in `user` record |
+
+The caller name in the second row is a label. Nothing authenticates it, and any process that holds the system credential can state any name, including `root`.
+
+The practical differences are the following:
+
+| Situation | Python library | Rust tool | TypeScript SDK | Record access |
+| --- | --- | --- | --- | --- |
+| Reading another user's private file | Refused | `cat`, `chunk`, `detect`, `symbols -i`, `table-load`, `decrypt`, `export` and `backup` refuse. `cp` copies the file | `readText` refuses | Refused by the database |
+| Searching another user's private file with `grep` | The file is left out | The file is searched | The file is left out | The file is left out |
+| Listing another user's private folder | Refused | Allowed | Allowed | The database hides the folder |
+| Overwriting or appending to another user's file whose mode does not allow it | Refused | Allowed | Allowed | Refused by the database |
+| Moving or deleting another user's file | Allowed when the caller can write and traverse the containing folder, whatever the file's own mode | Allowed | Allowed | The same rule, and only for a file the caller can read. A file that is hidden from the caller cannot be deleted |
+| Changing the mode of another user's file | Refused | Allowed | Fails for every caller | Refused by the database |
+| A new `/home/<user>` is private | Yes | No | No | Yes |
+
+With `--caller bob` against files owned by `alice`, the Rust tool refuses `cat`, `chunk`, `detect`, `symbols -i`, `table-load`, `decrypt`, `export` and `backup` with `sfs:denied`, and it refuses `digest` of a folder that the caller cannot read with `sfs:denied_or_missing`. The commands `ls`, `grep`, `history`, `cp`, `mv`, `rm`, `write` and `chmod` all succeed, and `history` returns the metadata of every version.
+
+The TypeScript SDK sends its `user` option as the caller name to the same database functions. It refuses `readText` of a private file, refuses `diff` with two generations, and its `grep` leaves private files out, because those functions apply the read check. Its `history` and `ls` apply no check. Against the schema that the Python package and `surrealfs-rs init` apply, its `chmod` method fails for every caller, because it sends three arguments to a function that takes two. Its `chown` method fails because the schema defines no such function. Its `applySchema` function installs an older, embedded copy of the schema, in which `fn::sfs_read` does not check the caller and which has no groups, shares or legal hold. Apply the schema with the Python package or with `surrealfs-rs init` instead.
+
+The WebDAV and S3 servers handle every request as one identity, the `--caller` of the server process. [Protocol credentials](/docs/agent-filesystem/security/credentials) describes what a login grants.
+
+> [!WARNING]
+> Mode bits separate users only when the Python library or record access enforces them. If several agents with different levels of trust share one database, sign each one in as a record user and keep the system credential out of their reach. Anyone who holds a system credential can read and change every file in every mode.
+
+## Owner, mode, group and gate
+
+Each `file` record carries four fields that take part in permission checks:
+
+| Field | Type | Meaning | Who can change it |
+| --- | --- | --- | --- |
+| `owner` | string | The user that created the file. Defaults to `root` when a record is created without one | Nobody. Under record access the field cannot be updated, and no working client has a `chown` operation. The TypeScript `chown` method fails, because it calls a function that does not exist |
+| `mode` | integer | The permission bits, stored as the decimal value of an octal mode. The mode `0o644` is stored as `420` | The owner, and `root`. The Python library and record access enforce this. The Rust `chmod` command does not check the caller |
+| `group` | optional string | The name of a group whose members use the middle digit of `mode`. See [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing) | The owner and `root`, in every client that can set it |
+| `gate` | optional string | A computed, read-only field that says who may traverse every folder above the file | Nobody. It is derived from the ancestors |
+
+In Python, `format_mode()` turns the integer into the familiar form, and `stat()` returns the mode as an integer. The Rust `chmod` command reads a number without a leading `0` or `0o` as decimal, so write `0600` or `0o600` and not `600`. The command does not check the range either. The page on [groups and sharing](/docs/agent-filesystem/security/groups-and-sharing#set-the-mode-and-the-group) shows the effect.
+
+### Mode bits
+
+The mode has three octal digits, for the owner, the group and everyone else. Each digit adds the values 4 for read, 2 for write and 1 for execute. For a folder, read lists the names inside it, write adds, removes and renames entries, and execute allows a user to pass through it to reach what is below.
+
+| Mode | Symbolic form | Who may do what |
+| --- | --- | --- |
+| `0o700` | `rwx------` | The owner only |
+| `0o750` | `rwxr-x---` | The owner has full access, group members read and traverse, others have nothing |
+| `0o644` | `rw-r--r--` | The owner reads and writes, everyone else reads |
+| `0o666` | `rw-rw-rw-` | Everyone reads and writes |
+| `0o777` | `rwxrwxrwx` | Everyone has full access |
+
+One digit applies to a given user, chosen in this order:
+
+1. The owner digit, when the user is the owner.
+2. The group digit, when the file has a `group` and the user is a member of it. The database functions and the Rust tool use this step. The Python library does not, because it has no group support.
+3. The other digit, in every remaining case.
+
+### Default modes
+
+The client that creates a file decides its default mode and owner:
+
+| Created by | File | Folder | Folder directly under `/home` |
+| --- | --- | --- | --- |
+| Python library | `0o666` | `0o777` | `0o700`, owned by the user named in the path |
+| Rust tool, TypeScript SDK and `fn::sfs_*` functions | `0o644` | `0o755`, owned by the caller | `0o755`, owned by the caller |
+
+Everything outside `/home` is therefore shared and writable by default when the Python library creates it, and a user tightens a file with `chmod`. Binary content that the Rust library writes carries no owner or mode, so it takes the schema defaults of owner `root` and mode `0o666`, whichever caller wrote it.
+
+## What each operation needs
+
+This table describes the Python library. Every operation first needs each folder above the target to be traversable by the caller, as described in the next section.
+
+| Operation | Bits it needs |
+| --- | --- |
+| Read a file (`read_text`, `read_bytes`, `head`, `tail`, `read_range`) | Read on the file |
+| Overwrite or append to a file | Write on the file |
+| Edit a file with `edit` | Read and write on the file |
+| List a folder | Read and execute on the folder |
+| Create a file or folder | Write and execute on the containing folder |
+| Remove a file or empty folder | Write and execute on the containing folder, and nothing on the file itself |
+| Remove a folder and its contents (`recursive=True`) | Read, write and execute on every folder in the subtree. The call deletes everything or nothing |
+| Rename or move | Write and execute on the source folder and on the destination folder. Nothing on the file itself. The destination must not exist |
+| Copy | Read on the source, and write and execute on the destination folder. A recursive copy fails if any part of the source is unreadable |
+| Change the mode (`chmod`) | Ownership of the file. A recursive `chmod` skips the files the caller does not own |
+| `stat`, `exists` | Nothing beyond reaching the file |
+| `glob`, `grep` and search | Results include only files the caller can read |
+
+A few details apply to listings and to moves. `ls` names every child of a folder the caller may list, whatever the child's own bits are, and it omits the content hash of a file the caller cannot read. `glob`, `grep` and the search calls leave out the files that the caller cannot read. A recursive listing does not descend into a folder the caller may not enter. Removal and moving are keyed on the containing folder, as on Unix, so a read-only file in a folder the caller can write may be deleted or moved.
+
+## Reachability and the gate
+
+A file is reachable only when every folder above it is traversable by the caller. On Unix this check walks up the tree. In Agent Filesystem the schema collapses it into the computed `gate` field, so a permission check reads one value and no query has to walk the ancestors:
+
+- `gate` is empty when every folder above the file has the other-execute bit set.
+- Otherwise `gate` lists the users that may pass through the closed folders: the owner's name, plus `group:<name>` when the folder has a group and its group-execute bit is set. For example `alice` or `alice,group:docs`.
+- When two closed folders are on the same path, `gate` keeps only the tokens that both folders list. If the folders have different owners and share no group, nothing is left and `gate` is `!closed`. No user name can equal that value in the Python library, so only `root` reaches the file.
+
+For example, `/a` is closed, owned by `alice` and has the group `docs`, so its children have the gate `alice,group:docs`. If `/a/b` is closed, owned by `bob` and also has the group `docs`, the files in `/a/b` have the gate `group:docs`, which the two lists share. If `/c` is closed and owned by `alice`, and `/c/d` is closed and owned by `bob`, the files in `/c/d` have the gate `!closed`.
+
+Only the other-execute bit closes a folder. A folder whose owner-execute bit is clear does not block its owner. The Python constructor and `users add` limit usernames to letters, digits, `_` and `-`, so a Python or record user can never be called `!closed` or contain the `,` and `:` separators. The Rust `--caller` label has no such check, so a caller named `group:docs` matches the gate token `group:docs` without being a member of the group.
+
+The effect is that a `0o666` file inside a `0o700` folder is unreachable for every user except the folder's owner:
+
+```text
+/home/alice                    owner alice, mode 0o700
+/home/alice/plan.md            owner alice, mode 0o666, gate alice
+```
+
+The gate cannot be indexed, so `glob`, `grep` and both search paths apply the read check as a filter after the index has selected candidate records.
+
+## Home directories
+
+The schema creates `/home` as a folder owned by `root` with mode `0o777`, so that every user can create a home beneath it. The Python library then applies four rules:
+
+- A folder directly under `/home` is created with mode `0o700`, and it belongs to the user whose name it carries, whoever runs the `mkdir`. When `root` creates `/home/alice`, `alice` owns it.
+- Creating, removing or moving `/home` is refused for every user except `root`.
+- A user may not create, remove or move another user's home. The error is `Permission denied: /home/dave is not your home directory`.
+- Moving a folder onto a `/home/<user>` path is refused, because a rename keeps the owner and mode of the source. A home is created with `mkdir`, and its contents are moved into it. The check covers folders only. A file that is moved onto `/home/<name>` is accepted and leaves a file where the home should be, and a later `mkdir` for that home fails with `Not a directory`.
+
+With a system credential, the first write below `/home/alice` creates the home, so it needs no provisioning step. The database applies the same rule to record users: a record user can create only the home that carries their own name. [Record access](/docs/agent-filesystem/security/record-access#provision-users) describes how users are provisioned.
+
+Private homes are a property of the Python library and of record access. A home created through the Rust tool is an ordinary folder with mode `0o755` that belongs to the caller. It needs an explicit `chmod 0700` before the Python library and the database treat it as private.
+
+## The root identity
+
+The name `root` bypasses the permission checks of the Python library, as user ID 0 does on a Unix system. The Python library, with `user="root"`, skips every client-side check. In the schema, the reachability, group-membership and file-read functions treat `root` as a user with full access, and so do the three search functions.
+
+One function does not. `fn::sfs_grep` applies the read check to `root` as it does to any other user. The Python `grep` as `root` therefore leaves out the files whose mode bits hide them from other users, although `root` can read the same files with `read_text` and find them with `search_text`.
+
+- **Names:** A record user cannot be called `root`. The `users add` command refuses the name, and the sign-in clause of the schema refuses it a second time. The `account` sign-in also refuses the names `indexer`, `projector` and `compactor`.
+- **Agent surfaces:** The agent surfaces, which include the `surrealfs` command, the MCP server and the Hermes plugin, refuse to act as `root`, because `root` is the default account in a container. They raise `no agent may act as 'root': it bypasses every SurrealFS permission check`.
+- **Gateway and file browser:** The gateway that serves the file browser acts as `root` for a request that names no user, so the page shows every private home. A request can name another user in the `X-SurrealFS-User` header, which the gateway accepts without proof. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication).
+- **Embeddings:** Only `root` may call `reindex_embeddings`, because it has to read every file to embed it.
+
+A username consists of letters, digits, `_` and `-`. The Python constructor raises `InvalidPath` for any other name.
+
+## How identity is established
+
+The database cannot tell the Python library who is asking when it uses a system credential, so each client states an identity:
+
+| Client | Identity |
+| --- | --- |
+| Python library | The `user` argument of `SurrealFs`. It is required and has no default |
+| `surrealfs` command, MCP server, Hermes plugin and memory provider | The result of `agent_user()` |
+| Gateway and file browser | The `X-SurrealFS-User` header, or `root` when the request has none |
+| Rust command-line tool | `--caller` or `SURREALFS_CALLER`. When neither is set, the database username, which is `root` by default |
+| TypeScript SDK | The `user` option, defaulting to `"root"` |
+| Record access | The signed-in `user` record. `SURREALDB_USER` supplies the name to the Python surfaces |
+
+The function `agent_user()` reads `SURREALFS_AGENT_USER` and falls back to the name of the machine account, then to `unknown`. It replaces every run of characters outside letters, digits, `_` and `-` with a single `-`, so `hermes alice/../x` becomes `hermes-alice-x`. It never returns `root`. Under record access it returns `SURREALDB_USER` unchanged, because the credential is the identity.
+
+An agent's identity decides which home it can use, so two agents that run under one machine account share a home unless `SURREALFS_AGENT_USER` gives each of them a name.
+
+## Example
+
+The script below runs against a SurrealDB 3 server with the root password `secret`, after the Python package is installed as the [Python quickstart](/docs/agent-filesystem/quickstarts/python) describes. It creates a private home, shows that a second user cannot use it, and then changes the mode of a shared file.
+
+```python
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import PermissionDenied, SurrealFs, apply_schema, format_mode
+
+
+async def main():
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "files")
+    await apply_schema(db)
+
+    alice = SurrealFs(db, user="alice")
+    bob = SurrealFs(db, user="bob")
+
+    # Alice's first write creates /home/alice, which is private to her
+    await alice.write_text("/home/alice/plan.md", "# Plan\nShip the beta.\n")
+    home = await alice.stat("/home/alice")
+    print(home.owner, format_mode(home.mode, is_folder=True))
+
+    # Bob can read, list and write nothing inside it
+    for attempt in (
+        lambda: bob.read_text("/home/alice/plan.md"),
+        lambda: bob.ls("/home/alice"),
+        lambda: bob.write_text("/home/alice/note.md", "hello"),
+    ):
+        try:
+            await attempt()
+        except PermissionDenied as error:
+            print(error)
+
+    # Outside /home, files are shared read-write until their owner changes the mode
+    await alice.write_text("/projects/launch.md", "- docs\n")
+    await bob.append_text("/projects/launch.md", "- blog\n")
+    await alice.chmod("/projects/launch.md", 0o644)
+    try:
+        await bob.append_text("/projects/launch.md", "- changelog\n")
+    except PermissionDenied as error:
+        print(error)
+
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+alice drwx------
+Permission denied: /home/alice/plan.md
+Permission denied: cannot list /home/alice
+Permission denied: cannot write to /home/alice
+Permission denied: cannot append to /projects/launch.md
+```
+
+## Errors
+
+The Python library reports a refusal as `PermissionDenied`, which is a subclass of the built-in `PermissionError`. The message names the operation or the reason:
+
+| Message | Cause |
+| --- | --- |
+| `Permission denied: cannot <verb> <path>` | The mode bits of the target do not allow the operation |
+| `Permission denied: <path>` | A folder above the path is closed to the caller. Under record access, it also appears when the database refuses a write without an error |
+| `Permission denied: <path> is owned by <owner>` | `chmod` by a user that does not own the file. The owner of `/home` is `root` |
+| `Permission denied: <path> is not your home directory` | An attempt to create, remove or move another user's home |
+| `Permission denied: <path> belongs to root` | An attempt to create, remove or move `/home` itself |
+| `Permission denied: <path> is a home directory. Create it with mkdir and move its contents instead.` | An attempt to move a folder onto a `/home/<user>` path |
+| `Permission denied: removed <n> of <m> entries under <path>` | A recursive removal in which the database refused part of the subtree |
+
+A mode outside `0o000` to `0o777` raises `ValueError`. Under record access, a path that the caller may not see is reported as `NotFound`, because the database does not return the record at all. See [Record access](/docs/agent-filesystem/security/record-access#differences-from-system-credentials).
+
+## Operations that do not apply the caller's permissions
+
+With a system credential, the Python library does not filter some operations by the caller:
+
+- **History and diff:** `history`, and `diff` with two generations, return the version metadata and the earlier content of a file that the caller cannot read. A `diff` of one generation against the current file is refused, because it reads the current content. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+- **Undelete:** `undelete` creates a new file, owned by the caller, from the last saved version of a deleted file. A user who can create the path can recover the text of a file that was private.
+- **Links:** `relate`, `backlinks` and `get_neighbors` show the paths of private files that link to a readable file, and `relate` creates links from files that the caller cannot read. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities).
+- **Leases:** `acquire_lock`, `release_lock` and `lease` act on a file that the caller cannot read. On a path that does not exist they raise `NotFound`, so the call shows whether the path exists. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+- **Watching:** `watch` delivers change events for every file that matches its pattern, including files inside another user's home.
+- **Workspaces:** `merge_workspace` writes the merged content into the original files without checking write permission. See [Workspaces](/docs/agent-filesystem/concepts/workspaces).
+
+Record access closes the last two. A watcher that is signed in as a record user receives only the changes that user may read. A workspace fork of a record user contains only the files that user may read, so a merge cannot change any other file.
+
+Record access also hides the paths of unreadable files from the link and lease calls. `relate`, `get_neighbors` and `acquire_lock` then report `NotFound`, and `backlinks` leaves those files out of its result. The old versions of a file keep the permissions they had when they were written, and `undelete` can use a version that was readable then. The [record access](/docs/agent-filesystem/security/record-access#what-the-database-does-not-isolate) page describes this.
+
+## Related pages
+
+- [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing) covers the group digit and share links.
+- [Record access](/docs/agent-filesystem/security/record-access) covers database-enforced permissions and user provisioning.
+- [Protocol credentials](/docs/agent-filesystem/security/credentials) covers the logins for the WebDAV and S3 servers.
+- [Encryption, legal hold and audit](/docs/agent-filesystem/security/encryption-and-legal-hold) covers content encryption, deletion holds and the history of changes.

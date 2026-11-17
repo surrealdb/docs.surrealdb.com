@@ -170,6 +170,7 @@ const ORDER = [
     "reference",
     "libraries",
     "agent-memory",
+    "agent-filesystem",
 ];
 
 /** Group collections by their first path segment, which is the top-level nav. */
@@ -233,6 +234,7 @@ const SECTION_TITLES = {
     reference: "Reference",
     libraries: "Libraries",
     "agent-memory": "Agent Memory",
+    "agent-filesystem": "Agent Filesystem",
 };
 
 /** Section list, deduplicated. */

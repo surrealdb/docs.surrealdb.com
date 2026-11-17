@@ -1,0 +1,77 @@
+---
+position: 3
+title: Webhooks
+description: "Register webhooks for file events with surrealfs-rs webhook create, list and delete. The beta stores registrations, but nothing sends the requests."
+---
+
+# Webhooks
+
+A webhook registration asks Agent Filesystem to send an HTTP request to a URL when a file event matches a path pattern. In this release you can create, list and delete registrations with `surrealfs-rs`, but nothing sends the requests, so a registered webhook never fires. This page describes the registration, the request that the sending code builds, and what to use to follow changes today.
+
+> [!WARNING]
+> Webhook delivery is not available in this release. No part of the release emits a file event or calls the code that sends the requests. A file written to a path that matches a registered pattern sends no request and adds no record to the `webhook_delivery` table.
+
+## Register a webhook
+
+`surrealfs-rs webhook create` takes four arguments. The `surrealfs-rs` command needs a running SurrealDB server, and [Command-line reference](/docs/agent-filesystem/interfaces/command-line#install) shows how to install it. Like every `surrealfs-rs` command, it reads the server, namespace, database and credentials from the variables in the [configuration reference](/docs/agent-filesystem/operations/configuration#the-surrealfs-rs-command), and the database must already hold the schema from `surrealfs-rs init`.
+
+| Argument | Meaning |
+| --- | --- |
+| `PATTERN` | A glob for the paths that the webhook covers. `*` matches one folder level, `**` matches any depth, and a pattern that is only `*` or `**` matches every path. |
+| `EVENTS` | A comma-separated list of event names, stored as text. The value `*` matches every event. |
+| `URL` | The URL that receives the request. |
+| `SECRET` | The key for the request signature. The registration stores it in plain text. |
+
+```bash
+surrealfs-rs webhook create '/notes/**' file_created,file_updated https://example.com/hooks/files whsec_example
+surrealfs-rs webhook list
+```
+
+```text title="Sample output"
+Created webhook webhook:ql7knr5lmvxzsv3wtx2t:
+  Pattern: /notes/**
+  URL:     https://example.com/hooks/files
+webhook:ql7knr5lmvxzsv3wtx2t /notes/**            https://example.com/hooks/files active=true
+```
+
+The release defines no event names and emits no events, so the names in `EVENTS` are free text. The example uses `file_created` and `file_updated`, the names that the tests of the sending code register. Another test in the project registers `create` and `update`, so a host application has to choose its names and use the same ones when it calls the sending code.
+
+The registration is a record in the `webhook` table with the fields `owner`, `path_pattern`, `events`, `url`, `secret`, `active` and `created_at`. The owner is the caller of the command, which is the database user (`root` by default) unless `--caller` names another user. `webhook list` shows the registrations that the caller owns, and it shows every registration to `root`. The [schema reference](/docs/agent-filesystem/reference/schema) lists the table. No command changes a registration, so a change to `active` needs SurrealQL.
+
+`surrealfs-rs webhook delete` takes the record key without the `webhook:` prefix:
+
+```bash
+surrealfs-rs webhook delete ql7knr5lmvxzsv3wtx2t
+```
+
+```text title="Sample output"
+Deleted webhook ql7knr5lmvxzsv3wtx2t
+```
+
+> [!WARNING]
+> `webhook delete` prints `Deleted webhook` whether or not a registration was deleted. When you pass the id as `list` prints it, with the `webhook:` prefix, or an id that does not exist, the command reports success and deletes nothing. Run `webhook list` to check. The command also does not check the owner of the registration, so any caller name can delete any registration, although `webhook list` shows a caller only its own.
+
+## What the sending code does
+
+The Rust library `surrealfs-core` contains a dispatcher that a host application can call. No command and no server in this release calls it. The caller supplies the event name and the JSON payload, and the release defines no payload schema. When the dispatcher is called for an event, it sends one request for each active registration whose pattern and events match:
+
+| Property | Value |
+| --- | --- |
+| Request | `POST` with the event payload as JSON and `Content-Type: application/json` |
+| Headers | `X-SurrealFS-Event`, `X-SurrealFS-Path` and `X-SurrealFS-Timestamp`, which holds an RFC 3339 time |
+| Signature | `X-SurrealFS-Signature: sha256=<hex>`, the HMAC-SHA256 of the body with the secret of the registration as the key. The headers are not signed. |
+| Success | Any `2xx` status |
+| Attempts | Up to 3, with a wait of 100 ms and then 200 ms between them. A status that is not `2xx` and a transport error each count as a failure. |
+| Timeout | 10 seconds for each attempt |
+| Record | One record in `webhook_delivery` with the `event`, `path`, `status_code`, `success`, `error` and `attempts` |
+
+The dispatcher posts to any URL that a registration holds, including loopback and private addresses. The dispatcher is library code, and the beta does not offer it as an interface.
+
+## Follow changes today
+
+The Python library's `watch` method streams changes to files as they happen, using a SurrealDB live query. See [Watch for changes](/docs/agent-filesystem/interfaces/python-sdk#watch-for-changes). The Rust command and the MCP tools have no equivalent.
+
+## Related pages
+
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats#webhooks-and-share-links) lists the other parts of the release that are stored but not wired.
+- [Schema reference](/docs/agent-filesystem/reference/schema) describes the `webhook` and `webhook_delivery` tables.

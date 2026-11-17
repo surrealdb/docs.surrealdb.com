@@ -5,7 +5,7 @@ import { useConfig } from "vike-react/useConfig";
 import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
-import { getProductFromPath } from "./product";
+import { getProductFromPath, getProductLabelOverride } from "./product";
 import { getRelated, type RelatedItem } from "./related";
 
 export interface PageData {
@@ -180,7 +180,12 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     }
 
     const title = entry.metadata.title
-        ? getSuffixedMetaTitle(entry.metadata.title, productId, resolveSection(breadcrumbs, id))
+        ? getSuffixedMetaTitle(
+              entry.metadata.title,
+              productId,
+              resolveSection(breadcrumbs, id),
+              getProductLabelOverride(context.urlPathname),
+          )
         : undefined;
 
     // A page sitting directly in a collection root has no ancestor folder, so

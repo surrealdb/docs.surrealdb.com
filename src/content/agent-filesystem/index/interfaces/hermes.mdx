@@ -1,0 +1,334 @@
+---
+position: 5
+title: Hermes plugins
+description: "The two Hermes integrations for Agent Filesystem: a tool plugin with 31 surrealfs_ tools and a notes skill, and a memory provider that files each turn and recalls context."
+---
+
+# Hermes plugins
+
+[Hermes](https://hermes-agent.nousresearch.com) is an agent runtime that loads plugins. Agent Filesystem provides two of them, and each works without the other:
+
+| Integration | Name in Hermes | What it does | How Hermes finds it |
+| --- | --- | --- | --- |
+| Tool plugin | `surrealfs` | Registers the 31 filesystem tools with a `surrealfs_` prefix, a bundled `notes` skill, and a first-turn hook that points the agent at that skill. | Through the `hermes_agent.plugins` entry point, once the package is importable by Hermes' interpreter. |
+| Memory provider | `surrealfs-memory` | Files every completed turn as a Markdown file, and recalls context by searching the filesystem before each turn. | By directory, see [Install and set up](#install-and-set-up). |
+
+The provider's recall finds the files that the tool plugin wrote. Both store their data in the SurrealDB database that `SURREALDB_URL` names. The `SURREALFS_SEMANTIC` setting does not change what either of them does in this release, see [Hybrid search under Hermes](#hybrid-search-under-hermes).
+
+> [!NOTE]
+> The examples that show output call the plugin's `register` function and the provider's methods against stand-ins for Hermes' plugin context. The `hermes` commands, the scheduled job and the behaviour of Hermes itself come from the project's README files. The package is in beta, and the plugins can change between releases.
+
+## Install the package into Hermes
+
+Hermes runs from its own virtual environment, and both plugins import the `surrealfs` package, so install it there and not into your project:
+
+```bash
+uv pip install --python ~/.hermes/hermes-agent/venv/bin/python \
+  "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+Replace `@next` with a release tag once the project publishes one. The command installs the core package. The plugins need no Hermes dependency, because the contract with Hermes is a `register` function and a manifest.
+
+Both plugins connect to SurrealDB with the same environment variables as the rest of the project. Unlike [`surrealfs-mcp`](/docs/agent-filesystem/interfaces/mcp-server#configure-the-server), which refuses to start without a URL, the Hermes plugins default to a local server, so set the variables for anything else:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SURREALDB_URL` | `ws://localhost:8000/rpc` | The SurrealDB server. |
+| `SURREALDB_USER`, `SURREALDB_PASS` | `root`, `root` | The credentials. |
+| `SURREALDB_NAMESPACE`, `SURREALDB_DATABASE` | `surrealfs`, `demo` | Where the `file` table lives. |
+| `SURREALDB_AUTH_LEVEL` | `root` | How to sign in: `root`, `namespace`, `database` or `record`. |
+| `SURREALFS_AGENT_USER` | The operating-system user name of the process, with characters other than letters, digits, `_` and `-` replaced by `-` | The identity of the agent and the name of its home under `/home`. |
+| `SURREALFS_SEMANTIC` | unset | A value of `1`, `true` or `yes` selects the hybrid version of the search tool. Nothing computes embeddings in this release, so search still matches words only. See [Hybrid search under Hermes](#hybrid-search-under-hermes). |
+
+Set `SURREALFS_AGENT_USER` whenever two agents would otherwise share a home, for example two Hermes installations that belong to different people and use one database, or an agent that runs under the same account as its user. A name such as `hermes-alice` next to the person's own `/home/alice` keeps the two apart. The name `root` is refused. For every variable on every surface, see [Configuration](/docs/agent-filesystem/operations/configuration).
+
+## The tool plugin
+
+Enable the plugin and start a session with its toolset:
+
+```bash
+hermes plugins enable surrealfs
+hermes chat --toolsets surrealfs
+```
+
+To run from a clone of the `next` branch of the repository instead, link the plugin directory into Hermes' plugin folder. The package must still be importable by Hermes' interpreter:
+
+```bash
+ln -s "$PWD/surrealfs/integrations/hermes" ~/.hermes/plugins/surrealfs
+```
+
+### The tools
+
+The plugin registers every tool in the [tool registry](/docs/agent-filesystem/interfaces/tool-schemas#tool-reference) under the name `surrealfs_` followed by the tool name: `surrealfs_ls`, `surrealfs_cat`, `surrealfs_write_file`, `surrealfs_search` and so on, 31 in all. The prefix exists because Hermes has one flat tool namespace and drops a tool whose name another toolset already claims. Its built-in file tools use the local disk, and its `write_file` would have replaced the registry's `write_file`. The prefix also tells the model which filesystem a tool addresses. The tool descriptions have their cross-references rewritten to match, so a description that says "use `edit`" reads "use `surrealfs_edit`".
+
+The arguments and result text of each tool are the same as on every other surface, and the plugin registers each tool with the toolset name `surrealfs` and as an asynchronous handler. With `SURREALFS_SEMANTIC` set, `surrealfs_search` becomes the hybrid version, which still searches by words in this release. The count stays at 31.
+
+Every call opens a fresh connection, applies the schema once per process, and acts as the agent user. The handler never raises an exception into Hermes. It returns JSON text: `{"result": "<tool text>"}` on success, including the tool's own `Error:` text, and `{"error": "<ExceptionName>: <message>"}` for an exception that the tool does not handle, such as a lost connection.
+
+You can see the registration without Hermes, by calling `register` with a stand-in that records what Hermes would receive. This script runs against a SurrealDB server on `localhost:8000`. The first handler call applies the schema, so a new database needs no preparation:
+
+```python title="hermes_tools_check.py"
+import asyncio
+import os
+
+os.environ.update(
+    {
+        "SURREALDB_URL": "ws://localhost:8000/rpc",
+        "SURREALDB_USER": "root",
+        "SURREALDB_PASS": "secret",
+        "SURREALDB_NAMESPACE": "agents",
+        "SURREALDB_DATABASE": "workspace",
+        "SURREALFS_AGENT_USER": "hermes-alice",
+    }
+)
+
+from surrealfs.integrations.hermes import register
+
+
+class StandIn:
+    """The parts of Hermes' plugin context that register() calls."""
+
+    def __init__(self):
+        self.tools = {}
+        self.hooks = {}
+
+    def register_tool(self, *, name, toolset, schema, handler, is_async):
+        self.tools[name] = handler
+
+    def register_skill(self, name, path, description=None):
+        print("skill:", name)
+
+    def register_hook(self, name, callback):
+        self.hooks[name] = callback
+
+
+async def main():
+    hermes = StandIn()
+    register(hermes)
+    print(len(hermes.tools), sorted(hermes.tools)[:3])
+
+    home = "/home/hermes-alice"
+    print(await hermes.tools["surrealfs_write_file"]({"path": f"{home}/todo.md", "content": "- Review the plan\n"}))
+    print(await hermes.tools["surrealfs_ls"]({"path": home}))
+    print(await hermes.tools["surrealfs_cat"]({"path": f"{home}/missing.md"}))
+    print(hermes.hooks["pre_llm_call"](is_first_turn=False))
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+skill: notes
+31 ['surrealfs_acquire_lease', 'surrealfs_append_file', 'surrealfs_backlinks']
+{"result": "Wrote 18 bytes to /home/hermes-alice/todo.md"}
+{"result": "      18  /home/hermes-alice/todo.md"}
+{"result": "Error: No such file or directory: /home/hermes-alice/missing.md"}
+None
+```
+
+### The notes skill and the first-turn hook
+
+The plugin bundles a skill named `notes`, addressed in Hermes as `surrealfs:notes`. It tells the agent that the `surrealfs_*` filesystem is not the local disk, that anything the agent needs in a later session belongs in it, and how to lay files out:
+
+| Path | Purpose |
+| --- | --- |
+| `/home/<agent>/` | The agent's own working files. The folder is private to the agent. |
+| `/home/<agent>/memories/` | Filed conversations from the memory provider. The skill tells the agent to read these and to write its own notes beside them. |
+| `/preferences/<user>/` | What the agent learns about the user, with one file per topic. |
+| `/projects/<name>/` | Notes, plans and the to-do list of one project. |
+
+Everything outside `/home/` is shared and writable by every user by default, which is how the agent hands work to its user and to other agents. The skill's working rules are to list `/` before assuming what exists, to search before creating a note, to use `surrealfs_edit` and not `surrealfs_write_file` to change part of a file, and to write as the agent learns.
+
+According to the plugin's source, Hermes does not list plugin skills, so the plugin also registers a `pre_llm_call` hook. On the first turn of each session the hook returns a short context message that says the agent has a filesystem in SurrealDB and names the skill. Later turns return nothing. Hermes appends the message to the user's message and does not store it, which keeps the system prompt unchanged.
+
+### Hybrid search under Hermes
+
+The plugin and the memory provider both read `SURREALFS_SEMANTIC`, and neither embeds anything in this release. Each builds its tool context with no embedding function, so with `SURREALFS_SEMANTIC=1` the `surrealfs_search` tool is offered in its hybrid form and then runs the full-text search alone. It raises no error and prints no message, and no text is sent to OpenAI. The memory provider's recall does the same: it asks for no vector, whatever the setting. The `semantic` question of `hermes memory setup surrealfs-memory` has no effect on recall either, although it still prints a hint to schedule an indexer.
+
+The package provides no embedder and no indexing command, so nothing here makes a file searchable by meaning. The Python library can store vectors that a function of your own computes, and the tool schemas can use such a function, see [Semantic search in the tools](/docs/agent-filesystem/interfaces/tool-schemas#semantic-search-in-the-tools). The plugin builds its own context for each call and offers no way to pass a function in. See [Search](/docs/agent-filesystem/concepts/search) for the model.
+
+> [!NOTE]
+> The repository's `docs/hermes-indexer.md` and the hint that `hermes memory setup` prints describe a cron job that runs `python -m surrealfs.embed --once`. That module does not exist in this release, and a scheduled run of it fails with `No module named surrealfs.embed`.
+
+## The memory provider
+
+The memory provider records every turn and recalls it later, which the tools alone do not do. Hermes hands every completed turn to the provider, which files it, and asks the provider for context before each turn, which it recalls by searching the filesystem.
+
+### Install and set up
+
+A memory provider is found by directory, and not through an entry point, so it takes two installs. The first puts the provider directory where Hermes scans for providers. The second installs the package that the provider imports, which is the command in [Install the package into Hermes](#install-the-package-into-hermes). According to the provider's README, Hermes does not install a plugin's Python dependencies for it, and the dependency declaration that Hermes would use cannot name a git URL while the package is unpublished, so the second install is yours to run. The `uv pip install` command installs the package from `next`, the branch that these pages describe. The hint that the provider prints for this step, and its declared dependency, leave out `@next`, so use the command below.
+
+The provider directory is not the same on the `main` and `next` branches. On `main`, the provider's recall imports `surrealfs.embed`, a module that the package from `next` no longer contains, so the `main` copy fails against a package installed from `next` with `ModuleNotFoundError: No module named 'surrealfs.embed'` each time it recalls. While the two branches differ, take the provider directory from a clone of `next`. The provider's README describes the symlink for working from a checkout:
+
+```bash title="Install the provider from the next branch"
+git clone --branch next https://github.com/surrealdb/surrealfs.git ~/surrealfs
+ln -s ~/surrealfs/surrealfs/integrations/hermes_memory \
+  "${HERMES_HOME:-$HOME/.hermes}/plugins/surrealfs-memory"
+uv pip install --python ~/.hermes/hermes-agent/venv/bin/python \
+  "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+hermes memory setup surrealfs-memory
+```
+
+The command in the README, `hermes plugins install surrealdb/surrealfs/surrealfs/integrations/hermes_memory`, names no branch, and the repository's default branch is `main`, so it can install the `main` copy. It gives a working provider only when the `main` copy matches the one on `next`. When it asks whether to enable the plugin now, answer **N**. That prompt belongs to the general plugin manager, and `hermes memory setup` is what activates a memory provider. The symlink above involves no prompt.
+
+`hermes memory setup surrealfs-memory` asks for each of the eight settings in the table below, offering the current value or the default. It writes the values you change to `$HERMES_HOME/.env`, activates the provider in `~/.hermes/config.yaml`, and then connects, so a wrong URL appears at setup and not as a warning on a later turn. Activating by hand takes this configuration:
+
+```yaml title="~/.hermes/config.yaml"
+memory:
+  provider: surrealfs-memory
+```
+
+Only one memory provider can be active at a time. `hermes memory` lists the discovered providers and whether each reports itself available, and `hermes surrealfs-memory status` repeats the connection check at any time:
+
+```text title="Sample output of the status command"
+surrealfs-memory
+────────────────────────────────────────
+  url:         ws://localhost:8000/rpc
+  namespace:   agents
+  database:    workspace
+  user:        root
+  agent_user:  hermes-alice
+  memory_dir:  /home/hermes-alice/memories
+  semantic:    0
+  turns in:    /home/hermes-alice/memories/default
+  filed:       7 turns
+```
+
+| Setting | Variable | Default |
+| --- | --- | --- |
+| `url` | `SURREALDB_URL` | `ws://localhost:8000/rpc` |
+| `namespace` | `SURREALDB_NAMESPACE` | `surrealfs` |
+| `database` | `SURREALDB_DATABASE` | `demo` |
+| `user` | `SURREALDB_USER` | `root` |
+| `password` | `SURREALDB_PASS` | none, and it is required |
+| `agent_user` | `SURREALFS_AGENT_USER` | The operating-system user name of the process |
+| `memory_dir` | `SURREALFS_MEMORY_DIR` | `/home/<agent>/memories` |
+| `semantic` | `SURREALFS_SEMANTIC` | `0` |
+
+To upgrade, run `hermes plugins update surrealfs-memory` for the directory and the `uv pip install` again for the package. Run the second command again whenever `hermes memory` reports the provider as unavailable, because a rebuilt environment removes the package.
+
+### What the provider files
+
+**Each turn becomes one file.** After a turn completes, the provider writes the exchange to `<memory dir>/<profile>/<date>/<session>-<time>.md`, for example `/home/hermes-alice/memories/default/2026-10-14/sess-123-224139237.md`. The name ends in a wall-clock stamp in the form `HHMMSSmmm`, and not in a turn number, so a resumed session cannot overwrite an earlier turn. A file holds the time, the session, the user's message, the assistant's reply, and a `## Tools` section with up to 10 of the turn's tool calls, each cut to 200 characters. A turn with no tool calls has no `## Tools` section.
+
+```markdown title="A filed turn"
+# 2026-10-14 22:41:39 UTC
+
+session: sess-123
+
+## User
+
+how do I get paid for the consulting work
+
+## Assistant
+
+You invoice monthly through the portal and payment lands within 30 days.
+
+## Tools
+
+→ surrealfs_search({"query": "invoice"})
+```
+
+A turn is skipped when both sides carry no signal: a trivial prompt such as "ok", "thanks" or a slash command, and a reply shorter than 400 characters. A trivial prompt with a long answer is still filed. The provider also files nothing unless the agent context is `primary`, so subagent, scheduled and flush turns are not recorded.
+
+**Profiles keep turns apart.** `<profile>` is `default` for `~/.hermes`, and the directory name for a profile under `<root>/profiles/<name>`. Two profiles on one machine therefore share a home and keep separate subtrees, and one profile does not recall the other's transcripts.
+
+**Hermes' own memory is mirrored.** When the built-in memory tool changes `MEMORY.md` or `USER.md`, the provider applies the same change to `<memory dir>/<profile>/builtin/memory.md` or `user.md`. An `add` appends the entry as a line, a `replace` swaps the text named by `old_text` for the new entry, and a `remove` deletes the entry. The files hold the current state and not a log of writes. A change to an entry that the mirror never saw is dropped.
+
+**Messages about to be compressed are kept.** Before Hermes compresses a long conversation, the provider writes the messages verbatim to `<memory dir>/<profile>/<date>/<session>-compressed-<time>.md`, and hands the compressor a note that names the file, so the detail survives at full fidelity.
+
+### How recall works
+
+Before each turn, the provider searches the whole filesystem as the agent user and returns the best matches:
+
+1. It cuts the prompt down to at most 12 content words, with stop words removed, because every word in a query is another branch of the search.
+2. It runs the same full-text search as the `surrealfs_search` tool. It asks for no vector, whatever `SURREALFS_SEMANTIC` is set to.
+3. It drops the current session's own turns, other profiles' turns, anything under the old `/memory/` folder, and anything the agent user cannot read, which includes other users' homes.
+4. It returns at most five results, and at most two of them can be filed turns, so the agent's own notes under `/preferences/` and `/projects/` are not crowded out by transcripts.
+
+The result is text for Hermes to add to the turn. A trivial prompt returns an empty string:
+
+```text
+Recalled from SurrealFS:
+/projects/atlas/payments.md
+    # Payments
+
+Invoices are paid monthly through the portal. Payment lands within 30 days.
+```
+
+Recall runs one turn behind, because Hermes warms it with the message of the finished turn and then asks for it with the new message. On a conversation that stays on one topic that costs nothing, and after a sudden change of topic the first turn still carries context for the old subject. The delay keeps the search off the critical path of the turn.
+
+The following script runs the provider outside Hermes against a SurrealDB server. It files one turn, writes a note under `/projects`, and recalls it. The methods call `asyncio.run` themselves, so the script calls them outside any running event loop, as Hermes does on its worker threads:
+
+```python title="hermes_memory_check.py"
+import asyncio
+import os
+
+os.environ.update(
+    {
+        "SURREALDB_URL": "ws://localhost:8000/rpc",
+        "SURREALDB_USER": "root",
+        "SURREALDB_PASS": "secret",
+        "SURREALDB_NAMESPACE": "agents",
+        "SURREALDB_DATABASE": "workspace",
+        "SURREALFS_AGENT_USER": "hermes-alice",
+    }
+)
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+from surrealfs.integrations.hermes_memory import SurrealFsMemory
+
+
+async def prepare():
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "secret"})
+        await db.use("agents", "workspace")
+        await apply_schema(db)
+        fs = SurrealFs(db, user="hermes-alice")
+        await fs.write_text(
+            "/projects/atlas/payments.md",
+            "# Payments\n\nInvoices are paid monthly through the portal. Payment lands within 30 days.\n",
+        )
+
+
+asyncio.run(prepare())
+
+memory = SurrealFsMemory()
+memory.initialize("sess-123", hermes_home="/home/alice/.hermes", agent_context="primary")
+print(memory.root())
+
+memory.sync_turn(
+    "How do I get paid for the consulting work?",
+    "You invoice monthly through the portal and payment lands within 30 days.",
+)
+memory.queue_prefetch("How do I get paid for the consulting work that we did last month?")
+print(memory.prefetch("What are the payment terms?"))
+```
+
+```text title="Output"
+/home/hermes-alice/memories/default
+Recalled from SurrealFS:
+/projects/atlas/payments.md
+    # Payments
+
+Invoices are paid monthly through the portal. Payment lands within 30 days.
+```
+
+## Known issues
+
+These behaviours apply to version 0.2.0:
+
+- **Three tools fail or misbehave.** `surrealfs_acquire_lease` and `surrealfs_fork_workspace` fail, and `surrealfs_tree` fails for its default path `/`. See [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas#known-issues). Through Hermes, a failed `surrealfs_acquire_lease` returns an `error` field with an `AttributeError`.
+- **The compression note names a tool that does not exist.** The note that the provider returns before compression tells the agent to read the filed messages back with a tool named `surrealfs_read`. The tool set has no such tool. The agent can use `surrealfs_cat`, `surrealfs_head`, `surrealfs_tail` or `surrealfs_read_range`.
+- **The notes skill says that `surrealfs_rm` cannot be undone.** A deleted file can be recovered with `surrealfs_undelete`, which restores the last stored version as generation 1.
+- **Backups.** `hermes backup` copies `HERMES_HOME` and does not capture the filed turns, because they are in SurrealDB. Use `surreal export` for the database.
+- **Privacy of the filed text.** The provider writes the user's message, the reply and part of the tool calls to your SurrealDB. Nothing leaves that database unless you point `SURREALDB_URL` at a remote server yourself, and `SURREALFS_SEMANTIC=1` sends no text to an embedding service in this release. The files are under the agent's private home by default.
+- **Earlier versions of the mirrored memory files.** `builtin/memory.md` and `builtin/user.md` are edited in place. On a database that several agents share and that you reach with system credentials, another agent can read their earlier versions through the `surrealfs_history` and `surrealfs_diff` tools, which do not check read permission, see the warning on [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas#how-the-registry-works). Use [record access](/docs/agent-filesystem/security/record-access) when agents must not see each other's files.
+
+## See also
+
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) for every tool the plugin registers
+- [Search](/docs/agent-filesystem/concepts/search) for full-text and hybrid ranking
+- [Permissions](/docs/agent-filesystem/security/permissions) for how homes stay private
+- [Configuration](/docs/agent-filesystem/operations/configuration) for every environment variable
