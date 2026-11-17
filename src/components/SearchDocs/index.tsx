@@ -159,8 +159,18 @@ export function SearchDocs(props: UnstyledButtonProps) {
                         gap={4}
                         ml="auto"
                     >
-                        <Kbd size="xs">{modKey}</Kbd>
-                        <Kbd size="xs">K</Kbd>
+                        <Kbd
+                            size="xs"
+                            className={classes.searchKey}
+                        >
+                            {modKey}
+                        </Kbd>
+                        <Kbd
+                            size="xs"
+                            className={classes.searchKey}
+                        >
+                            K
+                        </Kbd>
                     </Flex>
                 </Group>
             </UnstyledButton>

@@ -1,7 +1,7 @@
 /**
  * Writes `src/data/labs-blog.json`: the SurrealDB blog's tutorial and
  * engineering posts as Labs items, so the Labs listing shows them beside the
- * hand-written entries in `src/content/labs-items`.
+ * awesome-surreal entries in `src/data/labs.json`.
  *
  * The file is committed rather than fetched at build or request time, so the
  * docs never depend on the website API being up, and every new post shows in a

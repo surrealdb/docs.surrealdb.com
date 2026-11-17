@@ -218,8 +218,7 @@ export default function Page() {
                         id="main-content"
                     >
                         <ActionIcon
-                            variant="subtle"
-                            color="gray"
+                            variant="default"
                             hiddenFrom="lg"
                             onClick={toggleFilters}
                             aria-label="Toggle filters"
@@ -239,17 +238,17 @@ export default function Page() {
                             maw={832}
                         >
                             Find client SDKs, videos, development tools, and learning resources to
-                            help you build and scale your applications. Have something to share?
-                            Check out our{" "}
+                            help you build and scale your applications. To add your own, open a pull
+                            request to{" "}
                             <Anchor
-                                href="https://github.com/surrealdb/docs.surrealdb.com?tab=readme-ov-file#creating-a-new-lab"
+                                href="https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 variant="vibrant"
                             >
-                                guide on creating a new Lab
-                            </Anchor>{" "}
-                            to contribute your own.
+                                awesome-surreal
+                            </Anchor>
+                            , where these entries are maintained.
                         </Text>
 
                         <Group
@@ -272,21 +271,30 @@ export default function Page() {
                                 onChange={(e) => setSearch(e.currentTarget.value)}
                             />
                             <Switch
+                                variant="surreal"
+                                color="var(--docs-accent)"
+                                classNames={{
+                                    track: classes.switchTrack,
+                                    thumb: classes.switchThumb,
+                                }}
                                 label="Select labs"
                                 checked={selecting}
                                 onChange={(e) => setSelecting(e.currentTarget.checked)}
                             />
                             {selected.length > 0 && (
                                 <Button
-                                    variant="subtle"
-                                    color="gray"
+                                    variant="default"
+                                    // The height of the search input beside it (size md), so the row lines up.
+                                    h={42}
                                     onClick={() => setSelected([])}
                                 >
                                     Clear selection ({selected.length})
                                 </Button>
                             )}
                             <Button
-                                variant="light"
+                                variant="default"
+                                // The height of the search input beside it (size md), so the row lines up.
+                                h={42}
                                 onClick={() => clipboard.copy(window.location.href)}
                             >
                                 {clipboard.copied ? "Link copied" : "Copy share link"}

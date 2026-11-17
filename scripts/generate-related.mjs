@@ -72,8 +72,6 @@ const CURRENT_MAJOR_SINCE = "2026-02-17";
  */
 const FOOTER_MARKERS = ["Everything an application and its agents know", '```json\n{"@context"'];
 
-const SKIP_COLLECTIONS = new Set(["labs-items"]);
-
 const STOPWORDS = new Set(
     (
         "a about above after again against all also am an and any are as at be because been before being below " +
@@ -220,8 +218,6 @@ function docsPages() {
     const pages = [];
 
     for (const [id, prefix] of readCollections()) {
-        if (SKIP_COLLECTIONS.has(id)) continue;
-
         for (const page of pagesFor(id, prefix)) {
             pages.push({
                 path: page.url.slice(SITE.length),
