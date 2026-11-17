@@ -1294,8 +1294,16 @@ export default async function data(context: PageContext) {
    already points at. Every other miss throws a 404, so a page that has really
    moved belongs in `redirects.ts`, where the destination is stated rather than
    guessed at.
-3. Sets the page `title` and `description` through `useConfig`, suffixing the
-   title per product (`src/utils/product.ts`).
+3. Sets the page `title` and `description` through `useConfig`. The title is
+   `{page} | {SDK or section} | SurrealDB Docs`, built by `documentTitle` in
+   `src/utils/page-title.ts`. An SDK reference page always names its SDK
+   ("Table | JavaScript SDK | SurrealDB Docs"), because every SDK tree has the
+   same page names. Any other qualifier is dropped when the title would run
+   past 60 characters, unless that would give two pages one title, and two
+   pages that still share one add the folder they sit in. No two pages share
+   a title, and a new page needs nothing extra to keep it that way. The meta
+   description is cut back to whole sentences past 160 characters
+   (`metaDescription` in `src/utils/meta.ts`).
 4. Builds the sidebar with `buildNavigation(id, prefix)`.
 5. Parses the markdown with `resolveMarkdown(entry.content)`.
 6. Walks each path prefix looking for a `<prefix>/__category` entry to build

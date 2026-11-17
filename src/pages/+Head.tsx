@@ -13,7 +13,7 @@ import { usePageContext } from "vike-react/usePageContext";
 import FavIcon from "~/assets/img/favicon.svg";
 import { LLMS_TXT_URL } from "~/utils/agent-markdown";
 import type { PageData } from "~/utils/data";
-import { BASE_URL, buildBreadcrumbJsonLd, buildCanonicalUrl } from "~/utils/meta";
+import { BASE_URL, buildBreadcrumbJsonLd, buildCanonicalUrl, SITE_NAME } from "~/utils/meta";
 
 const DEFAULT_OG_IMAGE = `${BASE_URL}/thumbnail.jpg`;
 
@@ -73,6 +73,12 @@ export function Head() {
             <meta
                 property="og:url"
                 content={canonicalUrl}
+            />
+            {/* The same site name every other surrealdb.com page declares, since
+                the docs are a part of that site rather than a site of their own. */}
+            <meta
+                property="og:site_name"
+                content={SITE_NAME}
             />
             <meta
                 property="og:type"

@@ -40,7 +40,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
 
 /**
  * Resolve which product a given URL belongs to. Drives top nav,
- * wordmark, search filter, and meta title suffix. Vike's
+ * wordmark, search filter, and the qualifier in an Agent Memory page's title. Vike's
  * `urlPathname` does not include the `/docs` base, so this matches
  * against the in-app pathname (e.g. `/agent-memory/quickstarts/surrealist-dashboard`).
  */
