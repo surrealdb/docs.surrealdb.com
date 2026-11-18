@@ -32,7 +32,9 @@
  * The build does not catch these: a broken link renders, and a broken anchor
  * scrolls nowhere.
  *
- * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`.
+ * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`. And
+ * it checks that every page the product switch links in
+ * `src/utils/product-counterparts.ts` exists; see `checkCounterpartPages`.
  *
  * Usage: bun scripts/check-links.ts
  */
@@ -44,6 +46,7 @@ import { resolveRedirect } from "../redirects";
 import { SHORT_URL_FOLDERS, shortUrls } from "../short-urls";
 import { matchRedirect } from "../src/lib/edge-routes";
 import { isDocumentHref } from "../src/utils/document-links";
+import { COUNTERPART_PAGES } from "../src/utils/product-counterparts";
 import { CONTENT_DIR, PAGES_DIR, readCollections, slugify, walk } from "./lib/docs-pages.mjs";
 
 const PUBLIC_DIR = "public";
@@ -385,6 +388,24 @@ function checkShortUrls(): string[] {
 
 const shortUrlProblems = checkShortUrls();
 
+/**
+ * The pages in `COUNTERPART_PAGES`, where the product switch goes: each path
+ * must be a page of its own, because the switch links it directly.
+ */
+function checkCounterpartPages(): string[] {
+    const found: string[] = [];
+
+    for (const pair of COUNTERPART_PAGES) {
+        for (const path of [pair.surrealdb, pair["agent-memory"]]) {
+            if (!pages.has(`/docs${path}`)) found.push(`${path} is not a page`);
+        }
+    }
+
+    return found;
+}
+
+const counterpartProblems = checkCounterpartPages();
+
 for (const problem of problems) {
     console.error(`${problem.file}:${problem.line}  ${problem.link}\n    ${problem.reason}`);
 }
@@ -393,9 +414,18 @@ for (const problem of shortUrlProblems) {
     console.error(`short-urls.ts  ${problem}`);
 }
 
+for (const problem of counterpartProblems) {
+    console.error(`src/utils/product-counterparts.ts  ${problem}`);
+}
+
 console.log(
     `[links] ${checked} internal links checked across ${pages.size} pages, ${problems.length} broken`,
 );
 console.log(`[links] ${shortUrls.length} short URLs checked, ${shortUrlProblems.length} problems`);
+console.log(
+    `[links] ${COUNTERPART_PAGES.length} product switch pairs checked, ${counterpartProblems.length} problems`,
+);
 
-if (problems.length > 0 || shortUrlProblems.length > 0) process.exit(1);
+if (problems.length > 0 || shortUrlProblems.length > 0 || counterpartProblems.length > 0) {
+    process.exit(1);
+}

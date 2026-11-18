@@ -2,8 +2,23 @@ import { Anchor, Box, Group, Stack, Text } from "@mantine/core";
 import { Icon, iconCheck } from "@surrealdb/ui";
 import { type MouseEvent, useState } from "react";
 import { navigate } from "vike/client/router";
+import { usePageContext } from "vike-react/usePageContext";
+import { counterpartPath } from "~/utils/product-counterparts";
 import { PRODUCT_ORDER, PRODUCTS, type ProductId } from "./products";
 import classes from "./style.module.scss";
+
+/**
+ * Where switching to `id` goes from `pathname`: the page that covers the same
+ * thing in that product, if `COUNTERPART_PAGES` lists one, and its home
+ * otherwise. The current product links to its own home.
+ */
+function switchHref(id: ProductId, current: ProductId | undefined, pathname: string): string {
+    if (!current || id === current) return PRODUCTS[id].homeHref;
+
+    const path = counterpartPath(pathname, id);
+
+    return path ? `/docs${path}` : PRODUCTS[id].homeHref;
+}
 
 export interface ProductWordmarkProps {
     current: ProductId;
@@ -55,6 +70,7 @@ const SWITCH_DURATION = 280;
  * JavaScript the anchors still navigate on their own.
  */
 export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedProps) {
+    const { urlPathname } = usePageContext();
     const [pending, setPending] = useState<ProductId | null>(null);
     const shown = pending ?? current;
 
@@ -63,7 +79,7 @@ export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedPr
 
         event.preventDefault();
         setPending(id);
-        setTimeout(() => navigate(PRODUCTS[id].homeHref), SWITCH_DURATION);
+        setTimeout(() => navigate(switchHref(id, current, urlPathname)), SWITCH_DURATION);
     }
 
     return (
@@ -82,7 +98,7 @@ export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedPr
                 return (
                     <Anchor
                         key={id}
-                        href={product.homeHref}
+                        href={switchHref(id, current, urlPathname)}
                         onClick={(event) => handleSwitch(event, id)}
                         underline="never"
                         fz={15}
@@ -110,6 +126,8 @@ export interface ProductListProps {
  * the error page, where it doubles as a way out of a dead end.
  */
 export function ProductList({ current, label = "Switch documentation" }: ProductListProps) {
+    const { urlPathname } = usePageContext();
+
     return (
         <Box
             component="section"
@@ -123,7 +141,7 @@ export function ProductList({ current, label = "Switch documentation" }: Product
                     return (
                         <Anchor
                             key={id}
-                            href={product.homeHref}
+                            href={switchHref(id, current, urlPathname)}
                             underline="never"
                             className={classes.productListItem}
                             data-active={active || undefined}

@@ -80,7 +80,7 @@ The style guide, the conventions for SurrealQL examples, and how the site is put
 | `bun run qa` | Format and fix what Biome can fix safely. |
 | `bun run qc` | Check formatting and lint without changing anything. |
 | `bun run qts` | Type-check with TypeScript. |
-| `bun run check:links` | Check every internal link, anchor and short URL in `src/content`, including links that only reach their page through a redirect. |
+| `bun run check:links` | Check every internal link, anchor and short URL in `src/content`, including links that only reach their page through a redirect, and the pages the product switch links to. |
 | `bun run check:doc-tests` | Check that every SurrealQL example carries a test config that agrees with the result its page shows. `--fix` adds a config to each example without one. |
 | `bun run build` | Build the site. |
 | `bun run preview` | Build the site and serve the build. |
@@ -142,7 +142,7 @@ The CI workflow runs on every push, including pushes to a pull request's branch.
 | Code Quality | `bun run qau` | Biome finds a formatting or lint error that it cannot fix itself. | Run `bun run qa`, then `bun run qc`, and fix what remains. |
 | Build docs | `bun run build` | A page does not build: for example a frontmatter key that `src/utils/schema.ts` does not allow, an `icon` that does not exist, or a component used wrongly. | Run `bun run build` and read the first error. |
 | Route table | `bun run test:routes` | A rule in `redirects.ts` or `vercel.ts` compiles to a route that the Worker would serve differently from Vercel. | Run `bun run test:routes`. |
-| Internal links | `bun run check:links` | A link points at a page that does not exist, or at an address that redirects: a moved page, a short URL, a trailing slash, a `.html` file, or a folder with no page of its own. Also when a link is relative, an anchor names no heading on its page, or a short URL is broken or missing. | Link the address the message names. A renamed heading changes its anchor, so update every link to it. |
+| Internal links | `bun run check:links` | A link points at a page that does not exist, or at an address that redirects: a moved page, a short URL, a trailing slash, a `.html` file, or a folder with no page of its own. Also when a link is relative, an anchor names no heading on its page, a short URL is broken or missing, or a pair in `src/utils/product-counterparts.ts` names a page that does not exist. | Link the address the message names. A renamed heading changes its anchor, so update every link to it. A moved page in a product switch pair needs its new path in that file. |
 | Internal links | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
 
 A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
