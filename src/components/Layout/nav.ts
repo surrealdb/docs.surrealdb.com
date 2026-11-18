@@ -439,12 +439,12 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                     },
                     {
                         label: "Cookbooks",
-                        href: "/docs/agent-memory/cookbooks/build",
+                        href: "/docs/agent-memory/cookbooks#build",
                         description: "Step-by-step agent builds.",
                     },
                     {
                         label: "Patterns",
-                        href: "/docs/agent-memory/cookbooks/patterns",
+                        href: "/docs/agent-memory/cookbooks#patterns",
                         description: "Reusable memory patterns.",
                     },
                 ],
@@ -460,37 +460,37 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "SDKs",
-                        href: "/docs/agent-memory/integrations/sdks",
+                        href: "/docs/agent-memory/integrations#sdks",
                         description: "Client libraries for each language.",
                     },
                     {
                         label: "MCP server",
-                        href: "/docs/agent-memory/integrations/mcp-server",
+                        href: "/docs/agent-memory/integrations/mcp-server/install",
                         description: "Connect any MCP-capable agent.",
                     },
                     {
                         label: "Agent frameworks",
-                        href: "/docs/agent-memory/integrations/frameworks",
+                        href: "/docs/agent-memory/integrations#agent-frameworks",
                         description: "Memory for agent frameworks.",
                     },
                     {
                         label: "AI SDKs",
-                        href: "/docs/agent-memory/integrations/ai-sdks",
+                        href: "/docs/agent-memory/integrations#ai-sdks",
                         description: "Memory for AI SDK applications.",
                     },
                     {
                         label: "Voice & realtime",
-                        href: "/docs/agent-memory/integrations/voice",
+                        href: "/docs/agent-memory/integrations#voice--realtime",
                         description: "Memory for voice agents.",
                     },
                     {
                         label: "Automation",
-                        href: "/docs/agent-memory/integrations/automation",
+                        href: "/docs/agent-memory/integrations#automation",
                         description: "Workflow and automation tools.",
                     },
                     {
                         label: "Surfaces",
-                        href: "/docs/agent-memory/integrations/surfaces",
+                        href: "/docs/agent-memory/integrations/surfaces/rest",
                         description: "Other ways to reach memory.",
                     },
                 ],
@@ -500,7 +500,7 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "Migrating",
-                        href: "/docs/agent-memory/cookbooks/migrate",
+                        href: "/docs/agent-memory/cookbooks#migrate",
                         description: "Move from another memory layer.",
                     },
                 ],
@@ -536,7 +536,7 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                     },
                     {
                         label: "Observability",
-                        href: "/docs/agent-memory/integrations/observability",
+                        href: "/docs/agent-memory/integrations#observability",
                         description: "Trace and monitor memory calls.",
                     },
                 ],

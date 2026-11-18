@@ -13,7 +13,13 @@ import { usePageContext } from "vike-react/usePageContext";
 import FavIcon from "~/assets/img/favicon.svg";
 import { LLMS_TXT_URL } from "~/utils/agent-markdown";
 import type { PageData } from "~/utils/data";
-import { BASE_URL, buildBreadcrumbJsonLd, buildCanonicalUrl } from "~/utils/meta";
+import {
+    BASE_URL,
+    buildBreadcrumbJsonLd,
+    buildCanonicalUrl,
+    buildTechArticleJsonLd,
+    SITE_NAME,
+} from "~/utils/meta";
 
 const DEFAULT_OG_IMAGE = `${BASE_URL}/thumbnail.jpg`;
 
@@ -28,8 +34,18 @@ export function Head() {
         urlPathname === "/" ? "/index.md" : ".md"
     }`;
 
-    const breadcrumbItems = (pageContext.data as PageData)?.breadcrumbItems ?? [];
-    const breadcrumbJsonLd = buildBreadcrumbJsonLd(breadcrumbItems);
+    const data = pageContext.data as PageData | undefined;
+    const breadcrumbJsonLd = buildBreadcrumbJsonLd(data?.breadcrumbItems ?? []);
+
+    // Documentation pages only: Labs and the error page carry no page title.
+    const articleJsonLd = data?.title
+        ? buildTechArticleJsonLd({
+              headline: data.title,
+              description: data.description,
+              url: canonicalUrl,
+              dateModified: data.lastModified,
+          })
+        : null;
 
     return (
         <>
@@ -74,10 +90,22 @@ export function Head() {
                 property="og:url"
                 content={canonicalUrl}
             />
+            {/* The same site name every other surrealdb.com page declares, since
+                the docs are a part of that site rather than a site of their own. */}
+            <meta
+                property="og:site_name"
+                content={SITE_NAME}
+            />
             <meta
                 property="og:type"
                 content="article"
             />
+            {data?.lastModified && (
+                <meta
+                    property="article:modified_time"
+                    content={data.lastModified}
+                />
+            )}
             <meta
                 property="og:image"
                 content={DEFAULT_OG_IMAGE}
@@ -94,6 +122,15 @@ export function Head() {
                 src="/analytics.js"
                 defer
             />
+            {articleJsonLd && (
+                <script
+                    type="application/ld+json"
+                    // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD requires inline script content
+                    dangerouslySetInnerHTML={{
+                        __html: JSON.stringify(articleJsonLd),
+                    }}
+                />
+            )}
             {breadcrumbJsonLd && (
                 <script
                     type="application/ld+json"

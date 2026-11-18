@@ -2,10 +2,11 @@ import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
+import { lastModifiedFor } from "./last-modified";
 import { type DocHeading, resolveMarkdown } from "./markdown";
-import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
+import { BASE_URL, type BreadcrumbItem, metaDescription } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
-import { getProductFromPath } from "./product";
+import { categoryTrail, documentTitle } from "./page-title";
 import { getRelated, type RelatedItem } from "./related";
 import { sectionHubNavigation, withoutSectionHubs } from "./section-hubs";
 
@@ -19,95 +20,14 @@ export interface PageData {
     breadcrumbItems: BreadcrumbItem[];
     title: string;
     description: string;
+    /** When the page's source last changed, as an ISO 8601 date, if known. */
+    lastModified?: string;
     /** University lessons and blog posts on the same subject, if any. */
     related: RelatedItem[];
 }
 
 /** Base the docs are served from - `base` in `vite.config.ts`. */
 const DOCS_BASE = "/docs";
-
-/** One path segment up (e.g. `/a/b` → `/a`). */
-/**
- * Category titles that name a position in a tree rather than a subject. They are
- * accurate in a sidebar, where the surrounding tree supplies the context, but
- * useless in a document title.
- */
-const GENERIC_SECTION_TITLES = new Set([
-    "overview",
-    "index",
-    "introduction",
-    "getting started",
-    // The structural folders every SDK tree repeats. Left in a title they
-    // produce nine pages called "Authentication | Concepts | Database";
-    // skipping them lets the SDK-level crumb (or the collection name)
-    // qualify the title instead.
-    "concepts",
-    "methods",
-    "api",
-    "core",
-    "data types",
-    "engines",
-    "frameworks",
-    "libraries",
-    "advanced topics",
-]);
-
-/**
- * Collection segments whose casing is part of the name. Executables are written
- * as they are typed, so title-casing them would be wrong.
- */
-const LITERAL_SECTION_NAMES = new Map([
-    ["cli", "surreal CLI"],
-    ["surqlfmt", "surqlfmt"],
-]);
-
-/**
- * Picks the section that best identifies where a page sits, for use in its
- * document title.
- *
- * The deepest meaningful breadcrumb wins. When every crumb is a generic tree
- * label, the collection's own name is used instead, so a page one level inside a
- * collection is still qualified.
- */
-function resolveSection(breadcrumbs: string[], collectionId: string): string | undefined {
-    const meaningful = breadcrumbs.filter(
-        (crumb) => !GENERIC_SECTION_TITLES.has(crumb.trim().toLowerCase()),
-    );
-
-    if (meaningful.length) {
-        return meaningful.at(-1);
-    }
-
-    // The root collection is not a section, it is where the sections start, so
-    // there is nothing true to qualify its pages with. Every fallback below
-    // ends up prettifying the directory name, which is how the docs root came
-    // to be titled "Getting started | Index | Database" - a page named after a
-    // folder nobody navigates to, on the most linked-to page in the docs.
-    if (collectionId === "index") {
-        return undefined;
-    }
-
-    // The collection's own landing page already carries the proper name
-    // ("JavaScript SDK", "PHP SDK"), so prefer it to prettifying the
-    // directory name, which would title-case "Javascript".
-    const rootTitle = getCollectionEntry(collectionId as keyof CollectionMap, "")?.metadata?.title;
-
-    if (rootTitle && !GENERIC_SECTION_TITLES.has(rootTitle.trim().toLowerCase())) {
-        return rootTitle;
-    }
-
-    const segment = collectionId.split("/").at(-1);
-
-    if (!segment) return undefined;
-
-    return (
-        LITERAL_SECTION_NAMES.get(segment) ??
-        segment
-            .split("-")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" ")
-    );
-}
 
 /**
  * Build the data for a page in a content collection.
@@ -155,34 +75,21 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         throw render(404, "Not Found");
     }
 
-    const productId = getProductFromPath(context.urlPathname);
     const description = "description" in entry.metadata ? entry.metadata?.description : undefined;
 
-    const curPath: string[] = [];
     const breadcrumbs: string[] = [];
     const prefixSegments = prefix.split("/").filter(Boolean);
     const breadcrumbItems: BreadcrumbItem[] = [{ name: "Docs", item: BASE_URL }];
 
-    for (const part of path.split("/")) {
-        curPath.push(part);
-
-        const slug = [...curPath, `__category`].filter(Boolean).join("/");
-        const entry = getCollectionEntry(id, slug);
-
-        if (entry) {
-            const name = entry.metadata.title ?? part;
-
-            breadcrumbs.push(name);
-            breadcrumbItems.push({
-                name,
-                item: `${BASE_URL}/${[...prefixSegments, ...curPath].join("/")}`,
-            });
-        }
+    for (const crumb of categoryTrail(id, path)) {
+        breadcrumbs.push(crumb.name);
+        breadcrumbItems.push({
+            name: crumb.name,
+            item: `${BASE_URL}/${[...prefixSegments, crumb.path].filter(Boolean).join("/")}`,
+        });
     }
 
-    const title = entry.metadata.title
-        ? getSuffixedMetaTitle(entry.metadata.title, productId, resolveSection(breadcrumbs, id))
-        : undefined;
+    const title = documentTitle(id, prefix, path);
 
     // A page sitting directly in a collection root has no ancestor folder, so
     // the walk above finds nothing and the page loses its eyebrow. Fall back to
@@ -209,7 +116,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
 
     config({
         title,
-        description,
+        description: description ? metaDescription(description) : undefined,
     });
 
     // The hubs that sit in a product's root collection show the parts of their
@@ -233,6 +140,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         breadcrumbItems,
         title: entry.metadata.title ?? "",
         description: description ?? "",
+        lastModified: lastModifiedFor(context.urlPathname),
         related: getRelated(
             [DOCS_BASE, ...prefixSegments, ...path.split("/")].filter(Boolean).join("/"),
         ),

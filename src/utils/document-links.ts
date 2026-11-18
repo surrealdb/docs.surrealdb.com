@@ -14,13 +14,27 @@
  * own listener runs, so the browser loads the address itself.
  */
 
-/** Paths under these prefixes are answered by the server, not by a page. */
-const SERVER_PREFIXES = ["/docs/llms/"];
+/**
+ * Paths under these prefixes are not pages: the server answers `/docs/llms/`
+ * itself, and the rest are folders in `public/` holding HTML files. Those are
+ * linked without `.html`, the address production serves them at (`cleanUrls`
+ * in vercel.ts redirects the `.html` form), so they have no extension to be
+ * recognised by. `bun run check:links` fails on a link to an HTML file in
+ * `public/` that this list does not cover.
+ */
+export const DOCUMENT_PREFIXES = [
+    "/docs/llms/",
+    "/docs/cli-history/",
+    "/docs/engine-settings/",
+    "/docs/parentheses/",
+    "/docs/showcase/",
+    "/docs/start-builder/",
+];
 
 /**
  * Whether `href` names an address on `origin` that is not a documentation
- * page: a path whose last segment has a file extension, or one under a server
- * prefix. A page never has an extension, because a page's slug drops dots.
+ * page: a path whose last segment has a file extension, or one under
+ * `DOCUMENT_PREFIXES`. A page never has an extension, because a page's slug drops dots.
  */
 export function isDocumentHref(href: string, origin: string): boolean {
     let url: URL;
@@ -35,7 +49,7 @@ export function isDocumentHref(href: string, origin: string): boolean {
 
     const last = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
 
-    return /\.[a-z0-9]+$/i.test(last) || SERVER_PREFIXES.some((p) => url.pathname.startsWith(p));
+    return /\.[a-z0-9]+$/i.test(last) || DOCUMENT_PREFIXES.some((p) => url.pathname.startsWith(p));
 }
 
 /**
