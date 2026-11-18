@@ -29,11 +29,18 @@ function notify(key: string) {
 }
 
 /**
+ * Fired on `window` with the key as its `detail` when a reader picks a tab, so
+ * that a group showing a panel a link opened goes back to the reader's choice.
+ */
+export const SYNCED_TAB_SELECT_EVENT = "docs:synced-tab-select";
+
+/**
  * Selects `label` in every tab group that shares `key`, on this page and on
  * every later page, and in other browser tabs through the `storage` event.
  */
 export function selectSyncedTab(key: string, label: string) {
     selected.set(key, label);
+    window.dispatchEvent(new CustomEvent(SYNCED_TAB_SELECT_EVENT, { detail: key }));
 
     try {
         localStorage.setItem(STORAGE_PREFIX + key, label);
