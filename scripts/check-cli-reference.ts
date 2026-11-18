@@ -150,22 +150,26 @@ const page = readFileSync(join(ROOT, ENV_PAGE), "utf8");
 const rows = new Set<string>();
 
 for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
-    // The cell's text without its markup: the pieces between its tags, joined.
-    // The text is only compared and printed, never written into a page.
-    const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
-        m[1]
-            .split(/<[^>]*>/)
-            .join("")
-            .trim(),
+    // Each cell's text by its column label, without its markup: the pieces
+    // between its tags, joined. The text is only compared and printed, never
+    // written into a page.
+    const cells = new Map(
+        [...row[1].matchAll(/<td[^>]*data-label="([^"]*)"[^>]*>([\s\S]*?)<\/td>/g)].map((m) => [
+            m[1],
+            m[2]
+                .split(/<[^>]*>/)
+                .join("")
+                .trim(),
+        ]),
     );
-    if (cells.length === 0) continue;
+    if (cells.size === 0) continue;
 
     // The opening of the row's section: from its heading to its first table
     const before = page.slice(0, row.index);
     const heading = Math.max(before.lastIndexOf("\n## "), before.lastIndexOf("\n### "));
     const opening = before.slice(heading, before.indexOf("<table", heading));
 
-    for (const name of cells[0].match(/SURREAL_[A-Z0-9_]+/g) ?? []) {
+    for (const name of (cells.get("Env var") ?? "").match(/SURREAL_[A-Z0-9_]+/g) ?? []) {
         rows.add(name);
         const items = byVariable.get(name);
 
@@ -175,7 +179,11 @@ for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
         }
 
         if (!items.some(inRelease)) {
-            const versioned = /\b\d+\.\d+/;
+            // A `<Since>` badge, or a version named as one: `v3.2`, `3.x`, a
+            // release such as `3.3.0` (an address such as `127.0.0.1` has four
+            // parts), or "from", "before", "until" or "in" with a version
+            const versioned =
+                /<Since|\bv\d+\.\d+|\b\d+\.x\b|(?<![\d.])\d+\.\d+\.\d+(?![\d.])|\b(from|before|until|in|up to)( SurrealDB)? \d+\.\d+/i;
             if (!versioned.test(row[1]) && !versioned.test(opening)) {
                 problems.push(
                     `${name} is not in ${release}, and neither its row nor its section says which versions it applies to`,
@@ -185,10 +193,13 @@ for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
         }
 
         const expected = sourceDefault(items);
-        const documented = asNumber(cells[1] ?? "");
+        const documentedDefault = cells.get("Default") ?? "";
+        const documented = asNumber(documentedDefault);
         const actual = expected === undefined ? undefined : asNumber(expected);
         if (documented !== undefined && actual !== undefined && documented !== actual) {
-            problems.push(`${name} has the default ${cells[1]}, but ${release} has ${expected}`);
+            problems.push(
+                `${name} has the default ${documentedDefault}, but ${release} has ${expected}`,
+            );
         }
     }
 }

@@ -693,7 +693,7 @@ between 2 and 13 examples with their reference page.
 `bun run check:duplicates`, which CI runs on every pull request, warns when a
 change adds a page whose prose mostly appears on another page, or copies an
 example from another page. It reports only what the change made similar, so a
-pair of pages that is meant to match, such as the Actix and Axum guides, does
+pair of pages that is meant to match, such as the `ALTER DATABASE` and `ALTER NAMESPACE` pages, does
 not warn on every edit. It never fails the build: when it warns, link to the
 page that already covers the topic, or merge the two, unless the pair is
 deliberate. `--all` lists every similar pair in the docs, which is where to

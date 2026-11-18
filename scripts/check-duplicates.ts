@@ -14,10 +14,12 @@
  *   tokens after dropping test configs, comments and `//-` result lines. Two
  *   blocks on different pages are duplicates when 80% of their runs match.
  *
- * Pages that are meant to look alike, such as the Actix and Axum guides or the
- * `ALTER` statements, stay similar on every run. So by default the check only
+ * Pages that are meant to look alike, such as the `ALTER` statements for a
+ * database and a namespace, stay similar on every run. So by default the check only
  * reports a pair that the change made similar: one page of it is new or
- * edited, and the pair was not similar on the base branch. The base is
+ * edited, and the pair was not similar on the base branch. A pair of examples
+ * is old only when each of the two blocks matched an example on the other page
+ * there, so a new copy between two pages that already shared one is reported. The base is
  * `origin/<GITHUB_BASE_REF>` in a pull request and `origin/main` otherwise, or
  * the ref given with `--base`.
  *
@@ -233,21 +235,28 @@ for (const file of files) {
 }
 const fileOf = (key: string) => get(blockAt, key).file;
 
+const baseExamples = new Map<string, Runs[]>();
+/** Whether the example `key` matches an example `file` had on the base branch. */
+function matchesAtBase(key: string, file: string): boolean {
+    let runs = baseExamples.get(file);
+    if (!runs) {
+        const text = atBase(file);
+        runs = text === undefined ? [] : exampleRuns(text).map((x) => x.runs);
+        baseExamples.set(file, runs);
+    }
+    const own = get(examples, key);
+    return runs.some((x) => codeShare(own, x) >= CODE_SHARE);
+}
+
 for (const [a, b] of candidates(
     examples,
     (x, y) => fileOf(x) !== fileOf(y) && (changed.has(fileOf(x)) || changed.has(fileOf(y))),
 )) {
     const share = codeShare(get(examples, a), get(examples, b));
     if (share < CODE_SHARE) continue;
-    if (!all) {
-        // A copy the base branch already had is an old pair, not this change's
-        const [baseA, baseB] = [atBase(fileOf(a)), atBase(fileOf(b))];
-        if (baseA !== undefined && baseB !== undefined) {
-            const before = exampleRuns(baseA).map((x) => x.runs);
-            const other = exampleRuns(baseB).map((x) => x.runs);
-            if (before.some((x) => other.some((y) => codeShare(x, y) >= CODE_SHARE))) continue;
-        }
-    }
+    // A copy the base branch already had is an old pair, not this change's: each
+    // of the two blocks already had its match on the other page
+    if (!all && matchesAtBase(a, fileOf(b)) && matchesAtBase(b, fileOf(a))) continue;
     // A page already reported as a copy gets one warning, with the count of
     // its examples, rather than one for every example it repeats
     const pages = similarPages.get(pairKey(fileOf(a), fileOf(b)));
