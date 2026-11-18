@@ -995,6 +995,15 @@ of the part you are in. The hub pages live in the root `index` collection, so
 `buildNavigation` leaves them out of the Get started sidebar, and a hub page
 shows its section's parts as its sidebar instead.
 
+The product switch at the top of the sidebar goes to the other product's home,
+except on a page that `COUNTERPART_PAGES` in `src/utils/product-counterparts.ts`
+pairs with a page in the other product. There it goes to that page: from a
+section hub to the same hub, and from the JavaScript SDK reference, or any page
+under it, to the Agent Memory JavaScript SDK. Add a pair only where both pages
+cover the same thing, so that most pages still switch to the home page. When a
+paired page moves, update its path there; `bun run check:links` fails on a
+pair that names no page.
+
 ### Adding content
 
 1. Create a `.md` or `.mdx` file in the appropriate `src/content/<collection>/` folder.
