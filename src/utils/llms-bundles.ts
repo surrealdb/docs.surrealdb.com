@@ -66,9 +66,9 @@ export const LLMS_BUNDLES: LlmsBundle[] = [
     },
     {
         slug: "cli",
-        title: "Command-line tools",
-        description: "surreal db, surreal cloud, environment variables.",
-        prefixes: ["/reference/cli"],
+        title: "CLI and Studio",
+        description: "surreal db, surreal cloud, environment variables, Studio.",
+        prefixes: ["/reference/cli", "/reference/studio"],
     },
     ...SDKS.map(([slug, name]) => ({
         slug: `sdk-${slug}`,
@@ -79,26 +79,20 @@ export const LLMS_BUNDLES: LlmsBundle[] = [
     {
         slug: "learn",
         title: "Learn",
-        description: "Data models, querying, schemas, security.",
-        prefixes: ["/learn"],
+        description: "Data models, querying, schemas, security, tutorials, Labs.",
+        prefixes: ["/learn", "/labs"],
     },
     {
-        slug: "build",
-        title: "Build",
+        slug: "integrate",
+        title: "Integrate",
         description: "AI agents, embedding, integrations, migrating.",
-        prefixes: ["/build"],
+        prefixes: ["/integrate"],
     },
     {
-        slug: "manage",
-        title: "Manage",
-        description: "Cloud, self-hosting, enterprise, observability.",
-        prefixes: ["/manage"],
-    },
-    {
-        slug: "explore",
-        title: "Explore",
-        description: "Studio, the CLI, tutorials, showcases, Labs.",
-        prefixes: ["/explore", "/labs"],
+        slug: "operate",
+        title: "Operate",
+        description: "Cloud, Earth, self-hosting, enterprise, observability, upgrading.",
+        prefixes: ["/operate"],
     },
     {
         slug: "libraries",

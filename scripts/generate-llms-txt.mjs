@@ -74,7 +74,7 @@ const SIZE_BUDGET = 99_000;
  * Keyed by section so it lands under the right heading.
  */
 const EXTRA_PAGES = {
-    explore: [
+    learn: [
         {
             url: `${SITE}/docs/labs`,
             title: "SurrealDB Labs",
@@ -90,7 +90,7 @@ const EXTRA_PAGES = {
  */
 const PREAMBLE = `# SurrealDB Documentation
 
-SurrealDB is a [multi-model database](${SITE}/surrealdb/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, as a distributed cluster, or serverless on [SurrealDB Earth](${SITE}/docs/manage/instances/earth), and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
+SurrealDB is a [multi-model database](${SITE}/surrealdb/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, as a distributed cluster, or serverless on [SurrealDB Earth](${SITE}/docs/operate/instances/earth), and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
 
 > Markdown for agents: every documentation page is also available as markdown. Append ".md" to any page path to fetch it directly, for example "${SITE}/docs/reference/query-language/statements/select.md". The same document is served on the page's own URL to a request sending an "Accept: text/markdown" header, with "Content-Type: text/markdown" and an "x-markdown-tokens" estimate. HTML stays the default for browsers. Links inside a markdown page already point at the ".md" variants, so following them keeps an agent in markdown. The complete documentation is also available as markdown in bundles of one section or one SDK each, listed under "Documentation bundles" below, and as a single document at "${SITE}/docs/llms-full.txt".
 
@@ -128,7 +128,7 @@ function documentedMajors() {
     return [...source.matchAll(/\{\s*major:\s*(\d+)/g)].map((match) => Number(match[1]));
 }
 
-const UPGRADES = `${SITE}/docs/build/migrating/from-old-surrealdb-versions`;
+const UPGRADES = `${SITE}/docs/operate/upgrading`;
 const [LATEST_MAJOR, ...OLDER_MAJORS] = documentedMajors();
 
 /**
@@ -304,16 +304,7 @@ function byPriorityThenDepth(a, b) {
 }
 
 /** The sections, in the order they are written. */
-const ORDER = [
-    "index",
-    "learn",
-    "build",
-    "manage",
-    "explore",
-    "reference",
-    "libraries",
-    "agent-memory",
-];
+const ORDER = ["index", "learn", "integrate", "operate", "reference", "libraries", "agent-memory"];
 
 /** Group collections by their first path segment, which is the top-level nav. */
 function sectionOf(id) {
@@ -324,7 +315,7 @@ function sectionOf(id) {
  * The section a page is listed under.
  *
  * The collection id decides normally, but the five section hubs - `/docs/learn`,
- * `/docs/build` and the rest - live in the root `index` collection, because a
+ * `/docs/integrate` and the rest - live in the root `index` collection, because a
  * `+Content.ts` one level up would recurse into the collections beneath it and
  * index every page twice. Their id therefore says "Get started" while their URL
  * says otherwise, and an agent scanning `## Learn` for the Learn hub did not
@@ -370,9 +361,8 @@ for (const [key, pages] of Object.entries(EXTRA_PAGES)) {
 const SECTION_TITLES = {
     index: "Get started",
     learn: "Learn",
-    build: "Build",
-    manage: "Manage",
-    explore: "Explore",
+    integrate: "Integrate",
+    operate: "Operate",
     reference: "Reference",
     libraries: "Libraries",
     "agent-memory": "Agent Memory",

@@ -894,12 +894,12 @@ Content lives in `src/content`. Frontmatter schemas live in
 
 A collection is any directory under `src/content` holding a `+Content.ts`, and
 its id is that directory's path relative to `src/content`. So
-`src/content/manage/instances/+Content.ts` declares the collection
-`manage/instances`. Renaming a directory renames the collection id, which then
+`src/content/operate/instances/+Content.ts` declares the collection
+`operate/instances`. Renaming a directory renames the collection id, which then
 has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
-section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*`
+section under `integrate/*`, `learn/*`, `operate/*`, `reference/*`
 and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
 Labs entries are not a collection: see [Labs](#labs).
 
@@ -949,13 +949,13 @@ collection id:
 
 | Collection           | `+data.ts` call                                   | URL                             |
 | -------------------- | ------------------------------------------------- | ------------------------------- |
-| `manage/instances`   | `(context, "manage/instances")`                   | `/docs/manage/instances/<slug>` |
+| `operate/instances`  | `(context, "operate/instances")`                  | `/docs/operate/instances/<slug>` |
 | `index`              | `(context, "index", "")`                          | `/docs/<slug>`                  |
 | `agent-memory/index` | `(context, "agent-memory/index", "agent-memory")` | `/docs/agent-memory/<slug>`     |
 
 ### Section hubs
 
-`build`, `explore`, `learn`, `manage` and `reference` are directories full of
+`integrate`, `learn`, `operate` and `reference` are directories full of
 collections, not collections themselves - a `+Content.ts` at that level would
 recurse into the collections beneath it and index every page twice. So the hub
 page for each lives in the **root `index` collection**: `src/content/index/learn.mdx`
@@ -964,8 +964,36 @@ is what serves `/docs/learn`.
 Each is also the `href` on its `NavMenuGroup` in `src/components/Layout/nav.ts`,
 which is what makes the top-nav label a link rather than a menu opener. Adding a
 section means adding both, or the label goes back to naming a page that does not
-exist. All five 404'd until September 2026, which left the sections unlinkable,
+exist. The section hubs 404'd until September 2026, which left the sections unlinkable,
 unrankable, and unguessable by an agent constructing a path.
+
+### The same five sections in both products
+
+The database docs and Agent Memory have the same top bar, in the same order:
+**Get started, Learn, Integrate, Operate, Reference**. A reader who knows where
+something is in one product can find its counterpart in the other, so keep the
+two aligned when adding a section or moving a page:
+
+| Section     | Database                                                                  | Agent Memory                                                             |
+| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Get started | Overview, running SurrealDB, language quickstarts, agent setup            | Welcome, quickstarts                                                     |
+| Learn       | `learn/*`: database basics, querying, schema, data models, security, tutorials and demos | `agent-memory/learn`: mental model, ingest to tuning, architecture, plus the cookbooks and showcase in the menu |
+| Integrate   | `integrate/*`: integrations, AI agents, embedding, migrating              | Integrations and migration guides                                        |
+| Operate     | `operate/*`: Cloud instances, Earth, organisations, enterprises, observability, self-hosting, upgrading | `agent-memory/operate`: Enterprise deployments and configuration |
+| Reference   | SurrealQL, protocols, CLI, Studio, SDKs                                   | REST API, MCP tools, CLI, SDKs, configuration                            |
+
+A page goes in the section whose job it does in the other product too:
+concepts and examples under Learn, connecting to code and tools under
+Integrate, running and configuring under Operate. The names are chosen so that
+neither suggests a step towards the other. The Agent Memory Integrate hub is
+`agent-memory/index/integrate.mdx`, in its root collection like the database
+hubs, because its pages live in the `integrations` and `cookbooks` collections.
+
+Each level of navigation appears in one place. The top bar lists the sections,
+a section's menu and hub page list its parts, and the sidebar lists the pages
+of the part you are in. The hub pages live in the root `index` collection, so
+`buildNavigation` leaves them out of the Get started sidebar, and a hub page
+shows its section's parts as its sidebar instead.
 
 ### Adding content
 
@@ -1283,7 +1311,7 @@ A doc page group's `+data.ts` is a single call:
 
 ```ts
 export default async function data(context: PageContext) {
-    return resolveDataFromCollection(context, "manage/instances");
+    return resolveDataFromCollection(context, "operate/instances");
 }
 ```
 

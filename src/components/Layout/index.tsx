@@ -1,15 +1,12 @@
-import { ActionIcon, Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { Icon, iconSidebar } from "@surrealdb/ui";
-import { useEffect } from "react";
-import { usePageContext } from "vike-react/usePageContext";
+import { Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import { RelatedContent } from "~/components/RelatedContent";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
+import { useMobilePageNavigation } from "./mobile-menu";
 import { PageNavigation } from "./page-navigation";
-import { Shell, ShellContent, ShellDrawer } from "./shell";
+import { Shell, ShellContent } from "./shell";
 import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
@@ -26,29 +23,12 @@ export function DefaultLayout({
     showToc = true,
     versionSelector,
 }: DefaultLayoutProps) {
-    const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
-    const { urlPathname } = usePageContext();
-
-    // Scrolling is left to Vike's client router, which scrolls to the URL's hash
-    // or to the top after a navigation and restores the position on back and
-    // forward. Scrolling here as well would also run on the first render, where
-    // it cancels the browser's scroll to a linked heading.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
-    useEffect(() => {
-        closeSidebar();
-    }, [urlPathname]);
+    // Below `lg` the sidebar is reached from the header's menu, which shows
+    // this page's part of the docs above the list of sections.
+    useMobilePageNavigation(data.navigation);
 
     return (
         <>
-            <ShellDrawer
-                opened={sidebarOpened}
-                onClose={closeSidebar}
-            >
-                <Sidebar
-                    navigation={data.navigation}
-                    versionSelector={versionSelector}
-                />
-            </ShellDrawer>
             <Shell>
                 <Sidebar
                     navigation={data.navigation}
@@ -72,14 +52,6 @@ export function DefaultLayout({
                                 align="center"
                                 gap="sm"
                             >
-                                <ActionIcon
-                                    variant="default"
-                                    hiddenFrom="lg"
-                                    onClick={toggleSidebar}
-                                    aria-label="Toggle sidebar"
-                                >
-                                    <Icon path={iconSidebar} />
-                                </ActionIcon>
                                 <Box
                                     flex={1}
                                     miw={0}

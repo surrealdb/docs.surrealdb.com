@@ -139,7 +139,7 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
     );
 }
 
-function SidebarSection({ section }: { section: NavSection }) {
+export function SidebarSection({ section }: { section: NavSection }) {
     return (
         <Box component="section">
             <SidebarSectionHeading>{section.title}</SidebarSectionHeading>
