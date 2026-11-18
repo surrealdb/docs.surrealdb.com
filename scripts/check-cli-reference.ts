@@ -150,8 +150,13 @@ const page = readFileSync(join(ROOT, ENV_PAGE), "utf8");
 const rows = new Set<string>();
 
 for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
+    // The cell's text without its markup. Removing the tags can leave a `<` or
+    // `>` behind, so those go too, and no tag can survive into the text.
     const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
-        m[1].replace(/<[^>]+>/g, "").trim(),
+        m[1]
+            .replace(/<[^>]*>/g, "")
+            .replace(/[<>]/g, "")
+            .trim(),
     );
     if (cells.length === 0) continue;
 
