@@ -15,6 +15,7 @@ bun run screenshots:check # list screenshots whose UI has changed in Studio
 bun run check:links     # check every internal link and anchor in src/content
 bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
 bun run check:cli-reference # check the environment variables page and command pages against the release
+bun run check:duplicates # warn about pages and examples this branch made repeat another page
 ```
 
 Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
@@ -687,6 +688,15 @@ answers "how do I build this" where the reference answers "what does this
 clause do". Two pages that show the same examples compete for the same search
 and leave an agent to pick one at random. In November 2026, 11 guides shared
 between 2 and 13 examples with their reference page.
+
+`bun run check:duplicates`, which CI runs on every pull request, warns when a
+change adds a page whose prose mostly appears on another page, or copies an
+example from another page. It reports only what the change made similar, so a
+pair of pages that is meant to match, such as the Actix and Axum guides, does
+not warn on every edit. It never fails the build: when it warns, link to the
+page that already covers the topic, or merge the two, unless the pair is
+deliberate. `--all` lists every similar pair in the docs, which is where to
+start a clean-up.
 
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
