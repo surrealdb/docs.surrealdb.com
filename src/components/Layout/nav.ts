@@ -522,7 +522,7 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Enterprise",
                         href: "/docs/agent-memory/operate/enterprise",
-                        description: "Single-tenant and self-hosted deployments.",
+                        description: "Single-tenant deployments, and self-hosted ones to come.",
                     },
                 ],
             },
