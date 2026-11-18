@@ -84,6 +84,7 @@ The style guide, the conventions for SurrealQL examples, and how the site is put
 | `bun run check:doc-tests` | Check that every SurrealQL example carries a test config that agrees with the result its page shows. `--fix` adds a config to each example without one. |
 | `bun run check:cli-reference` | Check the environment variables page and the command pages against the newest stable release in the version history data: every setting has a row, every row names a real setting, and the defaults agree. |
 | `bun run check:duplicates` | List the pages and examples that this branch made repeat another page, compared with `main`. `--all` lists every similar pair in the docs, and `--base REF` compares with another branch. It only warns. |
+| `bun run check:search-text` | Check that the search crawler extracts the text of every page, so search matches what pages say and not only their titles. |
 | `bun run build` | Build the site. |
 | `bun run preview` | Build the site and serve the build. |
 
@@ -132,6 +133,7 @@ bun run check:links
 bun run check:doc-tests
 bun run check:cli-reference
 bun run check:duplicates
+bun run check:search-text
 bun run diagrams:check
 ```
 
@@ -150,6 +152,7 @@ The CI workflow runs on every push, including pushes to a pull request's branch.
 | Internal links | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
 | Internal links | `bun run check:cli-reference` | A `SURREAL_` variable or a flag in the newest stable release is not documented, a row names a variable no release has had, a row for a removed variable gives no version, or a documented default differs from the source. Also when an entry in one of the script's lists no longer applies. | Add the row or mention the flag. A variable or flag that is not a setting for users goes in `INTERNAL` or `HIDDEN_FLAGS` in `scripts/check-cli-reference.ts`, with the reason. |
 | Internal links | `bun run check:duplicates` | Never: it warns, as an annotation on the changed file, when the change adds a page whose prose mostly appears on another page, or copies an example from another page. | Link to the page that already covers it, or merge the two. Leave the warning where the two pages are meant to match, such as one guide for each framework. |
+| Internal links | `bun run check:search-text` | A fixed markdown sample no longer extracts to the expected text, or a page yields no text for the search index. | Fix the text extraction in `search/scripts/crawler.ts`. The message shows what the sample extracted to. |
 
 A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
 

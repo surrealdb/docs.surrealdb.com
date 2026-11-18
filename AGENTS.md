@@ -16,6 +16,7 @@ bun run check:links     # check every internal link and anchor in src/content
 bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
 bun run check:cli-reference # check the environment variables page and command pages against the release
 bun run check:duplicates # warn about pages and examples this branch made repeat another page
+bun run check:search-text # check that the search crawler extracts every page's text
 ```
 
 Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
@@ -889,6 +890,11 @@ bun run test:routes         # check the compiled route table
   `https://` URL, because Workers cannot open an outbound WebSocket.
 - Search indexing (`postbuild`) runs on Vercel production builds and the
   re-index workflow, never in the Workers build.
+- The index holds the text `search/scripts/crawler.ts` extracts from each
+  page and each `##` section. A section with no prose, such as one that holds
+  only a code block, gets no entry of its own, so give each section a
+  sentence that says what it shows. `bun run check:search-text` fails when
+  extraction stops working.
 
 ## Content collections
 
