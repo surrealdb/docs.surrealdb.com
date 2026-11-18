@@ -1,0 +1,86 @@
+---
+position: 14
+hidden: true
+title: How Earth keeps parallel reads consistent
+description: "How SurrealDB Earth keeps reads consistent when many cells read at once: a pinned snapshot held by a reader lease, fresh reads that ask for the latest commit, and a tree of gateways that batches and merges what the cells send."
+---
+
+# How Earth keeps parallel reads consistent
+
+On [SurrealDB Earth](/docs/operate/instances/earth), many cells read the same data at the same time, and every transaction reads one consistent snapshot, including a scan that is split into parts that run side by side. This page explains the three mechanisms that make that true: a pinned snapshot, a fresh read that asks for the latest commit, and a tree of gateways between the cells and the commit log.
+
+This page describes how consistency is kept. It does not say which queries Earth splits into parts, and for how a query runs on a cell, see [Cells](/docs/operate/instances/earth#cells).
+
+## What consistent means
+
+Earth gives these guarantees to every transaction, on any cell:
+
+- A transaction reads one snapshot. It does not see a commit that happens after the snapshot, and no read in the transaction sees a mix of two states.
+- Two transactions that write the same record conflict, and the later one fails at commit with a retryable error.
+- A client sees its own committed writes in its later transactions, even when a later transaction runs on another cell.
+- A read sees every commit that Earth acknowledged before the read began, except the commits that were acknowledged within a short freshness bound before the cell last asked for the latest commit. The bound is 250 milliseconds by default. A transaction that needs no such gap, such as a `SERIALIZABLE` transaction, asks for the latest commit itself and waits for the answer.
+
+## A pinned snapshot
+
+Every commit in an instance has a position in the instance's one commit order. When a transaction reads for the first time, its cell fixes a snapshot at one position. The snapshot contains every commit up to that position and nothing after it. All reads of the transaction use the snapshot, so a commit that arrives while the transaction runs does not change what the transaction sees.
+
+A transaction that starts and reads nothing, such as `RETURN 1`, does not fix a snapshot.
+
+### The reader lease
+
+Earth does not keep the history that a snapshot needs for ever. It removes old versions of records that no transaction can read any more. A cell holds a **reader lease** on its oldest open snapshot, so that the history of the snapshot stays until the transaction ends.
+
+- A cell reports its oldest open snapshot to the commit log, and repeats the report while the transaction stays open.
+- The lease ends when the cell reports that the snapshot is closed.
+- A transaction that stays open longer than the maximum lifetime of a transaction is ended by its cell, and its next request fails with a retryable error. It never reads data that has been removed.
+- A cell that stops holds history for at most that lifetime after its last report.
+
+When a scan is split into parts, the cell holds the lease on the scan's snapshot until every part has finished.
+
+## Fresh reads
+
+A fresh read must see every commit that was acknowledged before it began. The cell can only know that if it knows the position of the latest commit, which is the **head** of the commit log. It follows these steps:
+
+1. The cell asks its gateway for the head.
+2. The gateway collects the asks that arrive within a short interval into one ask, and sends it to the commit log.
+3. The commit log answers with the head, and the answer travels back down to the cells that asked.
+4. The cell serves the read when it has applied every commit up to the head.
+
+A commit is acknowledged only after the commit log holds it, so every acknowledged commit is at or before the head that the commit log answers.
+
+Two shortcuts keep most reads from waiting for an answer of their own:
+
+- **A busy cell reuses a recent answer.** A cell that has an answer within the freshness bound, and has applied every commit up to it, serves a read from its own state. Before it does, it checks the keys of the read against the commits that it knows of but has not applied yet. If one of them writes a key that the read needs, the cell applies or fetches that commit first.
+- **A quiet cell asks one question.** A cell without a recent answer asks its gateway once for each transaction which commits after the snapshot wrote the keys that the transaction reads. The gateway answers when it has seen the head that the question waited for.
+
+If an ask is not answered in time, the cell treats the link as broken, connects again and asks again. A wait of this kind changes how long a read takes and never what it returns. When the wait passes its limit, the read fails with a retryable error.
+
+A read-only transaction can choose to accept older data with `MAX STALENESS`. A cell serves such a transaction from its own applied state, without asking for the head, when that state is no older than the bound that the transaction gives. See [`BEGIN`](/docs/reference/query-language/statements/begin).
+
+## The gateway tree
+
+The cells of an instance do not all connect to the commit log. A tree of gateways sits between them, and its depth follows the load, so a quiet instance has no gateways connected and a busy one has more levels.
+
+- **Each gateway owns a fixed group of children.** A gateway at the lowest level owns a group of cells, and a gateway at a higher level owns a group of lower gateways. The name of a gateway comes from its position, so no cell has to choose a parent and nothing is reassigned when the instance grows.
+- **Head asks are batched at every level.** Each gateway sends at most one message upward in each short interval, however many cells ask, so the commit log receives a number of messages that does not grow with the number of cells.
+- **Commits are merged at every level.** A gateway merges the commits that its children send in one interval into one frame, and checks them against each other. When two of them write the same key, the gateway fails the later one early, as a retryable conflict. The commit log alone accepts a commit, and no gateway acknowledges one.
+- **Answers go back to the child that asked.** A gateway remembers which child sent each commit, and passes the answer to that child only.
+
+A commit can be sent again after a broken link. It carries the same identifier each time, and the commit log answers every copy in the same way, so a commit is never applied twice.
+
+## Splitting a scan
+
+When a scan that is too large for one cell is split into parts, called morsels, that run on separate workers, the same rules keep the result consistent:
+
+1. The cell fixes the snapshot of the scan, and holds a reader lease on it until every part has finished.
+2. The cell splits the key range into parts. It sends each part its range, the snapshot position, the list of stored runs of data at that position, and the recent commits for its range that are not yet part of a stored run.
+3. Each part reads its range at the snapshot and streams its rows back with a running count of rows and bytes. Every part sees exactly the data of the snapshot: the stored runs up to it, and the recent commits up to it.
+4. The cell checks the final count of every part. A part that returns fewer rows than it counted is run again, and a part that fails is run again.
+5. The parts are merged: aggregates are added together, and rows are passed on in the order that the statement asks for.
+
+A large scan can use a tree of workers, with a depth that follows the number of parts, so that no worker merges the results of more than a few others. A worker that is slow can be run a second time on an idle sibling, and only the first copy to finish sends its rows.
+
+## See also
+
+- [SurrealDB Earth](/docs/operate/instances/earth)
+- [Transactions](/docs/learn/querying/concepts-and-guides/transactions)
