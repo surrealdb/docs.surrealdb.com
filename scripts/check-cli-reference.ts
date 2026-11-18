@@ -142,6 +142,16 @@ function sourceDefault(items: Item[]): string | undefined {
     return current.map((i) => i.help?.match(/default:\s*([^)]+)\)/)?.[1]).find(Boolean);
 }
 
+/** Strip markup-like content from a table cell until no more changes occur. */
+function sanitizeCellText(input: string): string {
+    let current = input;
+    for (;;) {
+        const next = current.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
+        if (next === current) return next.trim();
+        current = next;
+    }
+}
+
 const problems: string[] = [];
 
 // The environment variables page
@@ -153,10 +163,7 @@ for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
     // The cell's text without its markup. Removing the tags can leave a `<` or
     // `>` behind, so those go too, and no tag can survive into the text.
     const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
-        m[1]
-            .replace(/<[^>]*>/g, "")
-            .replace(/[<>]/g, "")
-            .trim(),
+        sanitizeCellText(m[1]),
     );
     if (cells.length === 0) continue;
 
