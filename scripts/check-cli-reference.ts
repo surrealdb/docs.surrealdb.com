@@ -6,7 +6,7 @@
  * It fails when:
  *
  * - a `SURREAL_` variable in the release has no row on the environment
- *   variables page, and is not listed in `INTERNAL` or `NOT_YET_DOCUMENTED`;
+ *   variables page, and is not listed in `INTERNAL`;
  * - a row names a variable that no tagged release has had, which is usually a
  *   typo;
  * - a row names a variable the release no longer has, and neither the row nor
@@ -15,12 +15,12 @@
  *   `1 << 20`, `1 MiB` and `1,048,576` are the same number, so only a real
  *   disagreement is reported;
  * - a flag in the release is not mentioned on its command's page, and is not
- *   listed in `HIDDEN_FLAGS` or `FLAGS_NOT_YET_DOCUMENTED`;
- * - an entry in one of those lists no longer applies, so the lists only ever
- *   hold what is still true.
+ *   listed in `HIDDEN_FLAGS`;
+ * - an entry in `INTERNAL` or `HIDDEN_FLAGS` no longer applies, so the lists
+ *   only ever hold what is still true.
  *
- * Entries in the two "not yet documented" lists are printed as a reminder on
- * every run. Documenting one means removing it from its list.
+ * The two lists are for what is not a setting for users, each with the
+ * reason. A setting a user can change is documented, not listed.
  *
  * The data covers tagged releases only, so a setting added on a branch for an
  * unreleased version is checked once that version is tagged and the data is
@@ -43,45 +43,24 @@ const INTERNAL: Record<string, string> = {
     SURREAL_COMPILE_CACHE_STATS: "a measurement switch for engine development",
     SURREAL_HOLD_CREATES: "a benchmark switch for engine development",
     SURREAL_INVOKED_AS: "set by the Surreal CLI itself when it runs the database",
+    SURREAL_MORSEL_LOOPBACK_PLACES: "a conformance setting for testing the host-place contract",
+    SURREAL_MORSEL_NEEDS_VIEW: "a test setting that runs the parallel merge on every backend",
+    SURREAL_MORSEL_STEAL_ALWAYS: "a test setting that forces the most work stealing a run can see",
     SURREAL_ONLINE_VERSION_CHECK: "accepted so old invocations parse; it has no effect",
+    SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL: "read only by debug builds, for integration tests",
     SURREAL_TELEMETRY_RPC_LIVE_ID: "accepted but no longer applied; the server logs a warning",
     SURREAL_TRACE_COMPILES: "a tracing switch for engine development",
     SURREAL_VM_LEAF: "a debugging report for engine development",
 };
 
-/** Settings a user can change that have no row yet. */
-const NOT_YET_DOCUMENTED = [
-    "SURREAL_CAPS_DENY_EXPERIMENTAL",
-    "SURREAL_COMPILED_UNIT_CACHE_SIZE",
-    "SURREAL_MCP_DB",
-    "SURREAL_MCP_NS",
-    "SURREAL_MORSEL_EXPLAIN_ANALYZE",
-    "SURREAL_MORSEL_LOOPBACK_PLACES",
-    "SURREAL_MORSEL_NEEDS_VIEW",
-    "SURREAL_MORSEL_SPLIT_ROWS",
-    "SURREAL_MORSEL_STEAL_ALWAYS",
-    "SURREAL_MORSEL_TARGET_BYTES",
-    "SURREAL_MORSEL_WINDOW_BYTES",
-    "SURREAL_SCAN_BATCH_SIZE",
-    "SURREAL_SPECIALISED_BODY_CACHE_SIZE",
-    "SURREAL_SPECIALISED_BODY_MAX_ARG_BYTES",
-    "SURREAL_SPECIALISED_BODY_VALUES",
-    "SURREAL_STATEMENT_CACHE_SIZE",
-    "SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL",
-    "SURREAL_TOPK_THRESHOLD_PUSHDOWN_ENABLED",
-    "SURREAL_VM_QUANTUM",
-];
-
-/** Flags the release hides from `--help` and ignores, with the reason. */
+/** Flags the release hides from `--help`, with the reason. */
 const HIDDEN_FLAGS: Record<string, string> = {
+    "surreal start --key": "hidden; not currently in use",
     "surreal start --no-banner": "hidden; the database prints no banner",
     "surreal start --planner-strategy": "hidden; retired, and refused with an error",
     "surreal sql --planner-strategy": "hidden; retired, and refused with an error",
     "surreal mcp --planner-strategy": "hidden; retired, and refused with an error",
 };
-
-/** Flags a user can pass that their command's page does not mention yet. */
-const FLAGS_NOT_YET_DOCUMENTED = ["surreal start --key", "surreal sql --deny-experimental"];
 
 /**
  * A command whose page sends the reader to another command's page for a shared
@@ -164,7 +143,6 @@ function sourceDefault(items: Item[]): string | undefined {
 }
 
 const problems: string[] = [];
-const reminders: string[] = [];
 
 // The environment variables page
 
@@ -213,17 +191,18 @@ for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
 const current = [...byVariable].filter(([, items]) => items.some(inRelease)).map(([name]) => name);
 
 for (const name of current) {
-    if (rows.has(name) || name in INTERNAL || NOT_YET_DOCUMENTED.includes(name)) continue;
+    if (rows.has(name) || name in INTERNAL) continue;
     problems.push(
         `${name} is in ${release} but has no row; document it, or list it in INTERNAL with the reason`,
     );
 }
 
-for (const name of [...Object.keys(INTERNAL), ...NOT_YET_DOCUMENTED]) {
-    if (!current.includes(name))
-        problems.push(`${name} is listed, but ${release} does not have it`);
-    else if (rows.has(name)) problems.push(`${name} is listed, but it has a row now`);
-    else if (NOT_YET_DOCUMENTED.includes(name)) reminders.push(name);
+for (const name of Object.keys(INTERNAL)) {
+    if (!current.includes(name)) {
+        problems.push(`${name} is in INTERNAL, but ${release} does not have it`);
+    } else if (rows.has(name)) {
+        problems.push(`${name} is in INTERNAL, but it has a row`);
+    }
 }
 
 // The command pages
@@ -248,11 +227,6 @@ for (const flag of flags) {
     const documented = new RegExp(`${long}(?![\\w-])`).test(text);
 
     if (flag.key in HIDDEN_FLAGS) continue;
-    if (FLAGS_NOT_YET_DOCUMENTED.includes(flag.key)) {
-        if (documented) problems.push(`${flag.key} is listed, but its page mentions it now`);
-        else reminders.push(flag.key);
-        continue;
-    }
     if (!documented) {
         problems.push(
             `${flag.key} is in ${release} but its page does not mention it; document it, or list it in HIDDEN_FLAGS with the reason`,
@@ -261,14 +235,12 @@ for (const flag of flags) {
 }
 
 const flagKeys = new Set(flags.map((f) => f.key));
-for (const key of [...Object.keys(HIDDEN_FLAGS), ...FLAGS_NOT_YET_DOCUMENTED]) {
-    if (!flagKeys.has(key)) problems.push(`${key} is listed, but ${release} does not have it`);
+for (const key of Object.keys(HIDDEN_FLAGS)) {
+    if (!flagKeys.has(key))
+        problems.push(`${key} is in HIDDEN_FLAGS, but ${release} does not have it`);
 }
 
 for (const problem of problems) console.error(problem);
-if (reminders.length > 0) {
-    console.log(`[cli] Not yet documented: ${reminders.join(", ")}`);
-}
 console.log(
     `[cli] ${release}: ${current.length} variables and ${flags.length} flags checked, ${problems.length} problems`,
 );
