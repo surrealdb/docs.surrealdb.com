@@ -872,13 +872,27 @@ function agentMemoryRedirects(): Redirect[] {
         // Removed in October 2026: these described the management API and the
         // internal schema, which customers on SurrealDB Cloud do not use. Listed
         // before the `/spectron` prefix rules so the old paths need one hop.
-        [
-            "/agent-memory/reference/management-api",
-            "/docs/agent-memory/quickstarts/surrealdb-cloud",
-        ],
-        ["/spectron/reference/management-api", "/docs/agent-memory/quickstarts/surrealdb-cloud"],
+        ["/agent-memory/reference/management-api", "/docs/agent-memory/operate/cloud"],
+        ["/spectron/reference/management-api", "/docs/agent-memory/operate/cloud"],
         ["/agent-memory/reference/data-model-and-schema", "/docs/agent-memory/reference"],
         ["/spectron/reference/data-model-and-schema", "/docs/agent-memory/reference"],
+        // The Get started page is the one quickstart. The Cloud page explains
+        // how contexts work on Cloud, so it moved to Operate, and the two pages
+        // that described a library Agent Memory does not offer were removed.
+        ...(
+            [
+                ["quickstarts/surrealdb-cloud", "/docs/agent-memory/operate/cloud"],
+                ["quickstarts/hosted", "/docs/agent-memory#quickstart"],
+                ["quickstarts/embedded", "/docs/agent-memory#quickstart"],
+                ["quickstarts", "/docs/agent-memory#quickstart"],
+                [
+                    "integrations/surfaces/embedded-library",
+                    "/docs/agent-memory/integrations/surfaces/rest",
+                ],
+            ] as [string, string][]
+        ).flatMap(([from, to]): [string, string][] =>
+            ["/agent-memory", "/spectron"].map((root): [string, string] => [`${root}/${from}`, to]),
+        ),
         // Concepts moved into Learn, Enterprise into Deploy, and Memory & knowledge
         // was renamed Learn. Listed before the `/spectron` prefix rules so the
         // old paths need one hop.

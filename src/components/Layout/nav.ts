@@ -516,7 +516,7 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "SurrealDB Cloud",
-                        href: "/docs/agent-memory/quickstarts/surrealdb-cloud",
+                        href: "/docs/agent-memory/operate/cloud",
                         description: "How contexts and keys work on Cloud.",
                     },
                     {

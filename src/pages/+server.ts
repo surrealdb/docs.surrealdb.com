@@ -2,6 +2,7 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
+import agentMemoryInstructions from "~/lib/agent-memory-instructions.md?raw";
 import { handleFeedbackRequest } from "~/lib/api/feedback";
 import { handleSearchRequest } from "~/lib/api/search";
 import { type Assets, serveEdge } from "~/lib/edge-routes";
@@ -125,6 +126,20 @@ app.get(`${BASE}/agents/instructions.md`, (c) =>
         "Content-Type": MARKDOWN_CONTENT_TYPE,
         "Cache-Control": MARKDOWN_CACHE_CONTROL,
         "X-Markdown-Tokens": String(estimateTokens(agentInstructionsBody)),
+    }),
+);
+
+/**
+ * The Agent Memory setup instructions, served the same way. The prompt on the
+ * Agent Memory Get started page quotes this URL, so it is a stable address too.
+ */
+const agentMemoryInstructionsBody = `${suffixDocsLinks(agentMemoryInstructions.trimEnd())}\n`;
+
+app.get(`${BASE}/agent-memory/agents/instructions.md`, (c) =>
+    c.body(agentMemoryInstructionsBody, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(agentMemoryInstructionsBody)),
     }),
 );
 
