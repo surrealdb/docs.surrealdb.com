@@ -6,8 +6,12 @@
 //
 //   1. Fetch content hashes for all existing records
 //   2. Crawl all markdown files and compare hashes
-//   3. Embed and upsert only changed entries (saves OpenAI $)
-//   4. Delete records for pages/sections that no longer exist
+//   3. Delete records for pages/sections that no longer exist
+//   4. Embed and upsert only changed entries (saves OpenAI $)
+//
+// Stale records go first because `page.path` is unique. A page that moves to
+// another collection gets a new record id, and its old record would otherwise
+// still hold the path when the new one is written.
 //
 // This makes repeated runs fast - only new or modified content
 // triggers an embedding API call.
@@ -189,9 +193,23 @@ export async function runIndexer() {
     // Phase 2: Crawl all content and identify what changed.
     console.log("[CW] Crawling content...");
 
+    // Two pages with one URL would fail the unique path index partway through
+    // the upserts, after their embeddings were paid for.
+    const pathOwners = new Map<string, string>();
+
     for await (const entry of crawl()) {
         const rid = recordIdString(entry);
         seenIds.add(rid);
+
+        if (entry.kind === "page") {
+            const owner = pathOwners.get(entry.path);
+            if (owner) {
+                throw new Error(
+                    `Two pages are served at ${entry.path}: ${owner} and ${rid}. Remove or move one of them.`,
+                );
+            }
+            pathOwners.set(entry.path, rid);
+        }
 
         const existing = existingRecords.get(rid);
 
@@ -207,7 +225,34 @@ export async function runIndexer() {
 
     console.log(`[CW] Crawl complete. ${changed.length} entries to embed and upsert.`);
 
-    // Phase 3: Embed changed entries in batches, then upsert.
+    // Phase 3: Clean up records whose source files no longer exist, so the
+    // upserts below never meet an old record holding a path they need.
+    const stalePages: RecordId[] = [];
+    const staleSections: RecordId[] = [];
+
+    for (const [rid, record] of existingRecords) {
+        if (seenIds.has(rid)) continue;
+
+        if (rid.startsWith("page:")) {
+            stalePages.push(record.rid);
+        } else if (rid.startsWith("section:")) {
+            staleSections.push(record.rid);
+        }
+    }
+
+    if (stalePages.length > 0) {
+        await deleteStaleRecords(db, "page", stalePages);
+        stats.pagesDeleted = stalePages.length;
+        console.log(`[IX] Deleted ${stalePages.length} stale page(s)`);
+    }
+
+    if (staleSections.length > 0) {
+        await deleteStaleRecords(db, "section", staleSections);
+        stats.sectionsDeleted = staleSections.length;
+        console.log(`[IX] Deleted ${staleSections.length} stale section(s)`);
+    }
+
+    // Phase 4: Embed changed entries in batches, then upsert.
     const texts = changed.map(buildEmbedText);
 
     for (let batchStart = 0; batchStart < changed.length; batchStart += EMBED_BATCH_SIZE) {
@@ -235,32 +280,6 @@ export async function runIndexer() {
             const globalIdx = batchStart + localIdx + 1;
             console.log(`[IX] ${globalIdx}/${changed.length} ${entry.kind} ${entry.id}`);
         });
-    }
-
-    // Phase 4: Clean up records whose source files no longer exist.
-    const stalePages: RecordId[] = [];
-    const staleSections: RecordId[] = [];
-
-    for (const [rid, record] of existingRecords) {
-        if (seenIds.has(rid)) continue;
-
-        if (rid.startsWith("page:")) {
-            stalePages.push(record.rid);
-        } else if (rid.startsWith("section:")) {
-            staleSections.push(record.rid);
-        }
-    }
-
-    if (stalePages.length > 0) {
-        await deleteStaleRecords(db, "page", stalePages);
-        stats.pagesDeleted = stalePages.length;
-        console.log(`[IX] Deleted ${stalePages.length} stale page(s)`);
-    }
-
-    if (staleSections.length > 0) {
-        await deleteStaleRecords(db, "section", staleSections);
-        stats.sectionsDeleted = staleSections.length;
-        console.log(`[IX] Deleted ${staleSections.length} stale section(s)`);
     }
 
     console.log("[IX] Indexing complete:");

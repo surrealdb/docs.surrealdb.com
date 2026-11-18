@@ -1,0 +1,170 @@
+---
+position: 5
+title: Sync
+description: "Sync pushes your .surql schema files to SurrealDB immediately, keeping the database in desired state. Use it for local development and ephemeral environments."
+---
+
+# Sync
+
+Sync applies all `.surql` files in `database/schema/` to the connected SurrealDB database in a single pass, bringing the database into alignment with your files. It tracks each file by content hash so that unchanged files are skipped on subsequent runs.
+
+## Basic usage
+
+```bash
+surrealkit sync --user root --pass secret
+```
+
+SurrealKit connects to the database, reads your schema files, applies any definitions that have changed, and removes definitions for files that have been deleted (pruning).
+
+To apply several independently tracked schemas, or to apply one schema to several databases in a single run, see [Schema modules and targets](/docs/operate/schema-migration/modules-and-targets). Sync and `rollout status` are the only commands that fan out across several targets.
+
+## Watch mode
+
+During active development, pass `--watch` to keep SurrealKit running and automatically re-sync on any file change:
+
+```bash
+surrealkit sync --watch --user root --pass secret
+```
+
+SurrealKit debounces rapid consecutive saves, so editing multiple files in quick succession triggers a single sync rather than many overlapping ones.
+
+## How it works
+
+When Sync runs:
+
+1. All `.surql` files in `database/schema/` are read and their content hashes computed.
+2. Hashes are compared against the `__entity` metadata table stored in the database.
+3. New or changed files have their SQL statements applied.
+4. Files that existed in a previous sync but are no longer present are pruned: their definitions are removed from the database.
+5. The `__entity` table is updated to reflect the new state.
+
+Any definition that exists in the database but not in a file will be removed on the next sync. Pruning emits `REMOVE … IF EXISTS`, so a tracking entry that points at an object which is already gone no longer errors: drift between SurrealKit's metadata and the database self-heals on the next sync.
+
+## Tracked schema objects
+
+Sync manages the full range of SurrealDB schema definitions, tracking each one in the `__entity` table so it can be updated and pruned. This includes `TABLE`, `FIELD`, `INDEX`, `ANALYZER`, `PARAM`, `FUNCTION`, `ACCESS`, and `USER` definitions, as well as `BUCKET`, `SEQUENCE`, `CONFIG`, `MODEL`, `TYPE`, and `MODULE` (which also covers `DEFINE EXTENSION`).
+
+## How schema files are applied
+
+Sync and rollouts re-apply whole files, so every `DEFINE` has to be safe to run again. SurrealKit adds `OVERWRITE`, and turns `IF NOT EXISTS` into `OVERWRITE` so that a changed definition reaches the database. Everything else in the statement, comments and regex literals included, reaches the server exactly as written.
+
+Some definitions are handled differently:
+
+- **Sequences.** A sequence's definition carries its counter, so `OVERWRITE` would put it back to `START`, and the next ids it hands out would collide with existing records. A plain `DEFINE SEQUENCE` is applied as `IF NOT EXISTS`, and an explicit `IF NOT EXISTS` is kept. A changed sequence definition therefore does not reach a database where the sequence exists, and sync says so. An explicit `OVERWRITE` is applied as written, with a warning every time. To reposition a sequence, do it on purpose in a rollout `run_sql` step or by hand.
+- **Record access without a key.** A record `DEFINE ACCESS` with no `WITH JWT ... KEY` gets a new random signing key every time it is overwritten, which signs every user out. SurrealKit warns when it applies one. Give it a stable key, for example `WITH JWT ALGORITHM HS512 KEY ${JWT_SECRET}` with a [template variable](/docs/operate/schema-migration/template-variables).
+- **Fields on tables that hold records.** A field change that existing records might not fit needs a `MIGRATE EXISTING ROWS` clause on SurrealDB 4.0. See [Migrating existing records](/docs/operate/schema-migration/existing-records).
+
+SurrealKit reads schema files with a SurrealQL tokenizer. A file it cannot read, such as one with an unterminated string, an unmatched bracket, or a `DEFINE` that starts inside another statement, stops sync before anything is applied or pruned, and the error names the file, line and column.
+
+## Empty source sets
+
+<Since v="v1.0" />
+
+Before opening a connection, SurrealKit resolves the schema directory and refuses if it holds no `.surql` files. A wrong working directory or `--folder` value would otherwise look like a schema that had been deleted, and Sync would prune the database to match:
+
+```text title="Error output"
+refusing filesystem sync: schema_module=default resolved_schema_dir=./database/schema source_count=0; check --folder / SURREALDB_FOLDER and module selection, or pass --allow-empty-prune if the empty source set is intentional
+```
+
+Pass `--allow-empty-prune` when the empty source set is deliberate and you do want every managed object removed. The check also covers `--dry-run` and the first sync of a `--watch` session, because an empty selection cannot otherwise be told apart from a wrong path.
+
+## Pruning on shared databases
+
+Pruning is safe when you are the sole owner of the database. On a shared database (one already containing SurrealKit metadata from another developer or environment), automatic pruning could remove definitions that others have added.
+
+SurrealKit detects this situation and refuses to prune unless you pass an explicit flag:
+
+```bash
+surrealkit sync --allow-shared-prune --user root --pass secret
+```
+
+Do not use this flag routinely on shared databases. Consider switching to [Rollouts](/docs/operate/schema-migration/rollouts) for any database that more than one person or service writes to.
+
+## Running non-DEFINE statements
+
+By default, schema files may only contain `DEFINE` statements. To allow other statements such as `INSERT`, `UPDATE`, or `CREATE` in your schema files, pass `--allow-all-statements`:
+
+```bash
+surrealkit sync --allow-all-statements --user root --pass secret
+```
+
+This disables catalog entity tracking for the run: SurrealKit can no longer reason about individual objects, so only file-level content hashes are tracked. Pruning of individual definitions is unavailable while this flag is in effect. Prefer keeping data changes in [seed files](/docs/operate/schema-migration/getting-started/new-databases) or [rollout steps](/docs/operate/schema-migration/rollouts) rather than schema files.
+
+## Metadata tables
+
+SurrealKit creates internal tables in the target database:
+
+| Table | Purpose |
+|---|---|
+| `__entity` | Stores the content hash and file key for every schema definition SurrealKit manages. Used to detect changes and drive pruning. |
+| `__rollout` | Stores rollout state. Created when you first use Rollouts; may be present even if you use Sync only. |
+| `__seed` | Stores which [seed files](/docs/operate/schema-migration/seeding) have been applied. Created on the first seed run. |
+
+On a project using [schema modules](/docs/operate/schema-migration/modules-and-targets), records in `__entity` are partitioned per module, so each module only ever prunes its own objects.
+
+These tables are managed by SurrealKit and should not be modified directly.
+
+## Vite plugin
+
+If you are using Vite, the `vite-plugin-surrealkit` package integrates Sync with the dev server:
+
+```bash
+npm install --save-dev vite-plugin-surrealkit
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { surrealkitPlugin } from 'vite-plugin-surrealkit';
+
+export default defineConfig({
+    plugins: [
+        surrealkitPlugin(),
+    ],
+});
+```
+
+On `vite dev`, the plugin:
+
+1. Runs `surrealkit sync` once at startup.
+2. Watches `database/schema/**/*.surql` and `database/modules/*/schema/**/*.surql`.
+3. Re-runs sync on any file change, debouncing concurrent runs so they never overlap.
+
+<OptionsTable
+	title="Options"
+	options={[
+		{ "name": "binary", "type": "string", "default": "surrealkit", "description": "SurrealKit binary name, or a path to it." },
+		{ "name": "cwd", "type": "string", "description": "Working directory for the SurrealKit process. Defaults to the Vite root." },
+		{ "name": "env", "type": "object", "description": "Extra environment variables, merged over the Vite process environment." },
+		{ "name": "syncArgs", "type": "string[]", "default": "[]", "description": "Additional arguments appended after `surrealkit sync`." },
+		{ "name": "schemas", "type": "string[]", "description": "Schema modules to sync, passed as `--schema`. Defaults to whatever `surrealkit sync` selects." },
+		{ "name": "targets", "type": "string[]", "description": "Database targets to sync to, passed as `--target`. Defaults to the primary or only target." },
+		{ "name": "all", "type": "boolean", "default": false, "description": "Sync every declared module against every declared target, passing `--all`." },
+		{ "name": "schemaGlobs", "type": "string[]", "description": "Globs relative to the Vite root that trigger a sync. Override this for a custom `[schema.<name>] path`." },
+		{ "name": "include", "type": "string[]", "default": "['serve']", "description": "Where the plugin runs: `serve`, `build`, or both." },
+		{ "name": "runOnStartup", "type": "boolean", "default": true, "description": "Run an initial sync when the dev server starts or a build begins." },
+		{ "name": "reloadOnSync", "type": "boolean", "default": false, "description": "Send a full page reload after a successful file-triggered sync in dev." },
+		{ "name": "debounceMs", "type": "number", "default": 150, "description": "Debounce window for file changes in dev, in milliseconds." },
+		{ "name": "logLevel", "type": "string", "default": "info", "description": "One of `silent`, `error`, `info` and `debug`." },
+		{ "name": "failBuildOnError", "type": "boolean", "default": true, "description": "Fail the Vite build when sync exits non-zero." }
+	]}
+/>
+
+The `schemas`, `targets` and `all` options, and the glob covering `database/modules`, were added in SurrealKit 1.0. Older plugin releases accept neither.
+
+## Reference
+
+| Flag | Default | Description |
+|---|---|---|
+| `--watch` | off | Re-sync automatically when schema files change |
+| `--debounce-ms` | | With `--watch`, how often to check for changes, in milliseconds |
+| `--no-prune` | off | Leave objects whose schema files were deleted in the database |
+| `--allow-shared-prune` | off | Permit pruning on a database that already has SurrealKit metadata |
+| `--allow-all-statements` | off | Permit non-`DEFINE` statements (e.g. `INSERT`, `UPDATE`, `CREATE`) in schema files; disables catalog entity tracking |
+| `--allow-empty-prune` | off | Permit a sync whose schema directory holds no `.surql` files |
+| `--dry-run` | off | Print what would be applied without modifying the database |
+| `--fail-fast` | off | With `--watch`, stop at the first sync that fails |
+
+Sync also accepts the [selection flags](/docs/operate/schema-migration/modules-and-targets#selecting-what-to-apply) `--schema`, `--no-deps`, `--target`, `--all` and `--keep-going`.
+
+The schema root defaults to `./database`. Override it with the global `--folder` flag or the `SURREALDB_FOLDER` environment variable. `--folder` had no effect before 1.0, so check any command that passes it when [upgrading](/docs/operate/schema-migration/upgrading#check-whether-you-pass-folder).

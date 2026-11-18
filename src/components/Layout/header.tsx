@@ -14,7 +14,8 @@ import {
     Stack,
     Text,
 } from "@mantine/core";
-import { Icon, iconChevronDown, iconOpen } from "@surrealdb/ui";
+import { spotlight } from "@mantine/spotlight";
+import { Icon, iconChevronDown, iconOpen, iconSearch } from "@surrealdb/ui";
 import {
     type CSSProperties,
     type FocusEvent,
@@ -31,6 +32,7 @@ import { usePageContext } from "vike-react/usePageContext";
 import { SurrealDBLogo } from "~/components/Logo";
 import { SearchDocs } from "~/components/SearchDocs";
 import { VersionMenu } from "~/components/VersionMenu";
+import type { NavSection } from "~/utils/navigation";
 import { ColorSchemeToggle, HEADER_CONTROL_SIZE } from "../ColorSchemeToggle";
 import {
     flattenMenuItems,
@@ -42,6 +44,7 @@ import {
 } from "./nav";
 import { ProductList, ProductWordmark } from "./product-switcher";
 import { getProductFromPath, PRODUCTS } from "./products";
+import { SidebarSection } from "./sidebar";
 import classes from "./style.module.scss";
 
 export type {
@@ -558,6 +561,8 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                 h="100%"
                 px={HEADER_INSET}
                 gap="md"
+                wrap="nowrap"
+                className={classes.headerRow}
             >
                 {/* Width comes from the stylesheet so it can track the tree's
                     column; a `flex` prop here would render inline and win. */}
@@ -619,13 +624,31 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     flex={1}
                     justify="flex-end"
                     wrap="nowrap"
+                    className={classes.headerControls}
                 >
                     <SearchDocs
                         w={220}
                         mb={0}
                         visibleFrom="sm"
                     />
-                    {product.id === "surrealdb" && <VersionMenu />}
+                    {/* Phones get the search as a button, which opens the same
+                        search panel as the box above. */}
+                    <ActionIcon
+                        hiddenFrom="sm"
+                        variant="subtle"
+                        size={HEADER_CONTROL_SIZE}
+                        aria-label="Search the docs"
+                        onClick={() => spotlight.open()}
+                    >
+                        <Icon path={iconSearch} />
+                    </ActionIcon>
+                    {/* On phones the version menu moves into the menu drawer,
+                        so the header fits on one row. */}
+                    {product.id === "surrealdb" && (
+                        <Box visibleFrom="sm">
+                            <VersionMenu />
+                        </Box>
+                    )}
                     <ClientOnly
                         fallback={
                             <ActionIcon
@@ -682,9 +705,11 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
 
 export interface MobileNavProps {
     navLinks: NavEntry[];
+    /** The sidebar of the page being read, shown first when there is one. */
+    pageNavigation?: NavSection[] | null;
 }
 
-export function MobileNav({ navLinks }: MobileNavProps) {
+export function MobileNav({ navLinks, pageNavigation }: MobileNavProps) {
     const product = useCurrentProduct();
     const activeHref = useActiveHref(navLinks);
 
@@ -697,12 +722,37 @@ export function MobileNav({ navLinks }: MobileNavProps) {
         >
             {/* The header search only has room from `sm` up, so phones reach
                 it from here instead. */}
-            <SearchDocs
-                mb={0}
-                hiddenFrom="sm"
-            />
+            {product.id === "surrealdb" && (
+                <Box hiddenFrom="sm">
+                    <VersionMenu />
+                </Box>
+            )}
             <ProductList current={product.id} />
             <Divider />
+            {/* The part of the docs this page belongs to comes first, so the
+                menu opens where the reader already is. */}
+            {pageNavigation && pageNavigation.length > 0 && (
+                <>
+                    <Stack
+                        gap="lg"
+                        data-mobile-page-nav
+                    >
+                        {pageNavigation.map((section) => (
+                            <SidebarSection
+                                key={section.title}
+                                section={section}
+                            />
+                        ))}
+                    </Stack>
+                    <Divider />
+                    <Text
+                        component="div"
+                        className={classes.navLinkLabel}
+                    >
+                        All sections
+                    </Text>
+                </>
+            )}
             <Stack gap="xs">
                 {navLinks.map((entry, i) => {
                     const groupActive =
@@ -720,7 +770,7 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                                     bdrs="xs"
                                     py="sm"
                                     active={groupActive}
-                                    defaultOpened={groupActive}
+                                    defaultOpened={groupActive && !pageNavigation?.length}
                                 >
                                     {/* Tapping the group label expands it here
                                         rather than navigating, so the hub page

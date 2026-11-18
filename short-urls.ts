@@ -41,8 +41,8 @@ const curated: ShortUrl[] = [
     ["installation", "/docs/running/installation"],
     ["docker", "/docs/running/docker"],
     ["sandbox", "/docs/running/sandbox"],
-    ["studio", "/docs/explore/studio"],
-    ["mcp", "/docs/build/ai-agents/mcp"],
+    ["studio", "/docs/reference/studio"],
+    ["mcp", "/docs/integrate/ai-agents/mcp"],
 
     // SDKs. Each goes to the SDK's own section, which links to its quickstart.
     ["sdk", "/docs/languages"],
@@ -111,24 +111,24 @@ const curated: ShortUrl[] = [
     ["tokens", "/docs/learn/security/authorization/tokens-and-jwts"],
 
     // Deploying and operating
-    ["cloud", "/docs/manage/instances"],
-    ["kubernetes", "/docs/manage/self-hosted/kubernetes"],
-    ["k8s", "/docs/manage/self-hosted/kubernetes"],
-    ["backups", "/docs/manage/self-hosted/backups-and-recovery"],
+    ["cloud", "/docs/operate/instances"],
+    ["kubernetes", "/docs/operate/self-hosted/kubernetes"],
+    ["k8s", "/docs/operate/self-hosted/kubernetes"],
+    ["backups", "/docs/operate/self-hosted/backups-and-recovery"],
     // The guide for the latest major version. Repoint it at each major release.
-    ["upgrade", "/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x"],
-    ["migrate", "/docs/build/migrating/from-other-databases/overview"],
-    ["postgres", "/docs/build/migrating/from-other-databases/from-postgresql"],
-    ["postgresql", "/docs/build/migrating/from-other-databases/from-postgresql"],
-    ["mongodb", "/docs/build/migrating/from-other-databases/from-mongodb"],
-    ["neo4j", "/docs/build/migrating/from-other-databases/from-neo4j"],
-    ["mysql", "/docs/build/migrating/from-other-databases/from-mysql"],
+    ["upgrade", "/docs/operate/upgrading/3x-to-4x"],
+    ["migrate", "/docs/integrate/migrating/from-other-databases/overview"],
+    ["postgres", "/docs/integrate/migrating/from-other-databases/from-postgresql"],
+    ["postgresql", "/docs/integrate/migrating/from-other-databases/from-postgresql"],
+    ["mongodb", "/docs/integrate/migrating/from-other-databases/from-mongodb"],
+    ["neo4j", "/docs/integrate/migrating/from-other-databases/from-neo4j"],
+    ["mysql", "/docs/integrate/migrating/from-other-databases/from-mysql"],
     ["environment-variables", "/docs/reference/cli/db/environment-variables"],
     ["env", "/docs/reference/cli/db/environment-variables"],
-    ["observability", "/docs/manage/observability"],
-    ["metrics", "/docs/manage/observability/metrics"],
-    ["enterprise", "/docs/manage/enterprise"],
-    ["sso", "/docs/manage/enterprise/single-sign-on"],
+    ["observability", "/docs/operate/observability"],
+    ["metrics", "/docs/operate/observability/metrics"],
+    ["enterprise", "/docs/operate/enterprise"],
+    ["sso", "/docs/operate/enterprise/single-sign-on"],
 ];
 
 /**

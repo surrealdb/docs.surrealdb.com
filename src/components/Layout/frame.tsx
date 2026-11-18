@@ -1,9 +1,11 @@
 import { Anchor, Box, Drawer } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import { Footer } from "~/components/Footer";
+import type { NavSection } from "~/utils/navigation";
 import { Header, MobileNav } from "./header";
+import { PageNavigationProvider } from "./mobile-menu";
 import { navLinksForPath } from "./nav";
 import { getProductFromPath } from "./products";
 import classes from "./style.module.scss";
@@ -24,6 +26,8 @@ import classes from "./style.module.scss";
  */
 export function PageFrame({ children }: { children: React.ReactNode }) {
     const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
+    const [pageNavigation, setPageNavigation] = useState<NavSection[] | null>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
     const { urlPathname } = usePageContext();
 
     const product = getProductFromPath(urlPathname);
@@ -42,6 +46,18 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         closeMenu();
     }, [urlPathname]);
+
+    // The menu opens on the page the reader is on, which can sit far down a
+    // long sidebar, so it is scrolled into the middle of the menu.
+    useEffect(() => {
+        if (!menuOpened) return;
+        const timer = window.setTimeout(() => {
+            menuRef.current
+                ?.querySelector('[data-mobile-page-nav] [aria-current="page"]')
+                ?.scrollIntoView({ block: "center" });
+        }, 50);
+        return () => window.clearTimeout(timer);
+    }, [menuOpened]);
 
     return (
         <Box
@@ -66,12 +82,18 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
                 onClose={closeMenu}
                 size="325px"
                 hiddenFrom="lg"
-                withCloseButton={false}
-                classNames={{ content: classes.drawerContent }}
+                title="Menu"
+                closeButtonProps={{ "aria-label": "Close menu" }}
+                classNames={{ content: classes.drawerContent, header: classes.drawerHeader }}
             >
-                <MobileNav navLinks={navLinks} />
+                <Box ref={menuRef}>
+                    <MobileNav
+                        navLinks={navLinks}
+                        pageNavigation={pageNavigation}
+                    />
+                </Box>
             </Drawer>
-            {children}
+            <PageNavigationProvider value={setPageNavigation}>{children}</PageNavigationProvider>
             <Footer />
         </Box>
     );

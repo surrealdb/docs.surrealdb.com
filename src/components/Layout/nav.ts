@@ -85,6 +85,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Database",
                 items: [
                     {
+                        label: "Database basics",
+                        href: "/docs/learn/database-basics",
+                        description: "What databases do, for readers new to them.",
+                    },
+                    {
                         label: "Querying",
                         href: "/docs/learn/querying",
                         description: "Mutate and query your data.",
@@ -104,10 +109,20 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         href: "/docs/learn/security",
                         description: "Configure authentication, scopes, and access.",
                     },
+                ],
+            },
+            {
+                heading: "Examples",
+                items: [
                     {
-                        label: "Database basics",
-                        href: "/docs/learn/database-basics",
-                        description: "What databases do, for readers new to them.",
+                        label: "Tutorials & demos",
+                        href: "/docs/learn/tutorials",
+                        description: "Follow hands-on walkthroughs and demos.",
+                    },
+                    {
+                        label: "SurrealDB Labs",
+                        href: "/docs/labs",
+                        description: "Talks, videos and projects from the community.",
                     },
                 ],
             },
@@ -131,72 +146,67 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
         ],
     },
     {
-        label: "Build",
-        href: "/docs/build",
+        label: "Integrate",
+        href: "/docs/integrate",
         sections: [
             {
-                heading: "Running",
+                heading: "Connect",
                 items: [
                     {
+                        label: "Integrations",
+                        href: "/docs/integrate/integrations",
+                        description: "Connect SDKs, frameworks, and tools.",
+                    },
+                    {
+                        label: "AI Agents",
+                        href: "/docs/integrate/ai-agents",
+                        description: "Integrate SurrealDB with your agents.",
+                    },
+                    {
                         label: "Embedding SurrealDB",
-                        href: "/docs/build/embedding",
+                        href: "/docs/integrate/embedding",
                         description: "Embed the engine natively or with WebAssembly.",
                     },
                 ],
             },
             {
-                heading: "Ecosystem",
+                heading: "Migrate",
                 items: [
                     {
                         label: "Migrating",
-                        href: "/docs/build/migrating",
+                        href: "/docs/integrate/migrating",
                         description: "Import data and schemas from other databases.",
-                    },
-                    {
-                        label: "Integrations",
-                        href: "/docs/build/integrations",
-                        description: "Connect SDKs, frameworks, and tools.",
-                    },
-                ],
-            },
-            {
-                heading: "Intelligence",
-                items: [
-                    {
-                        label: "AI Agents",
-                        href: "/docs/build/ai-agents",
-                        description: "Integrate SurrealDB with your agents.",
                     },
                 ],
             },
         ],
     },
     {
-        label: "Manage",
-        href: "/docs/manage",
+        label: "Operate",
+        href: "/docs/operate",
         sections: [
             {
-                heading: "Resources",
+                heading: "SurrealDB Cloud",
                 items: [
                     {
                         label: "Instances",
-                        href: "/docs/manage/instances",
+                        href: "/docs/operate/instances",
                         description: "Create, scale, and monitor your database instances.",
                     },
                     {
                         label: "SurrealDB Earth",
-                        href: "/docs/manage/instances/earth",
+                        href: "/docs/operate/instances/earth",
                         description: "Run serverless SurrealDB on the Cloudflare network.",
                         badge: "new",
                     },
                     {
                         label: "Organisations",
-                        href: "/docs/manage/organisations",
+                        href: "/docs/operate/organisations",
                         description: "Manage members, roles, and billing for your team.",
                     },
                     {
                         label: "Enterprises",
-                        href: "/docs/manage/enterprise",
+                        href: "/docs/operate/enterprise",
                         description: "Manage your enterprises and their single sign-on.",
                         badge: "new",
                     },
@@ -207,13 +217,18 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "Observability",
-                        href: "/docs/manage/observability",
+                        href: "/docs/operate/observability",
                         description: "Monitor metrics, logs, and slow queries.",
                     },
                     {
                         label: "Schema migration",
-                        href: "/docs/manage/schema-migration",
+                        href: "/docs/operate/schema-migration",
                         description: "Promote schema updates safely.",
+                    },
+                    {
+                        label: "Upgrading",
+                        href: "/docs/operate/upgrading",
+                        description: "Move to a newer major or minor version.",
                     },
                 ],
             },
@@ -222,46 +237,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "Self-hosted instance",
-                        href: "/docs/manage/self-hosted",
+                        href: "/docs/operate/self-hosted",
                         description: "Run and operate SurrealDB on your own infrastructure.",
-                    },
-                ],
-            },
-        ],
-    },
-    {
-        label: "Explore",
-        href: "/docs/explore",
-        sections: [
-            {
-                heading: "Tools",
-                items: [
-                    {
-                        label: "SurrealDB Studio",
-                        href: "/docs/explore/studio",
-                        description: "Explore data in the official SurrealDB dashboard.",
-                    },
-                    {
-                        label: "SurrealDB CLI",
-                        href: "/docs/explore/cli",
-                        description:
-                            "Install and run the database, Cloud and modules from one command.",
-                        badge: "new",
-                    },
-                ],
-            },
-            {
-                heading: "Guides and resources",
-                items: [
-                    {
-                        label: "Tutorials & demos",
-                        href: "/docs/explore/tutorials",
-                        description: "Follow hands-on walkthroughs and demos.",
-                    },
-                    {
-                        label: "SurrealDB Labs",
-                        href: "/docs/labs",
-                        description: "Preview experimental features and lab notes.",
                     },
                 ],
             },
@@ -285,11 +262,21 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         description:
                             "REST, HTTP, RPC, CBOR and Postgres wire protocols, and the error format they share.",
                     },
+                ],
+            },
+            {
+                heading: "Tools",
+                items: [
                     {
-                        label: "CLI Tools",
+                        label: "CLI",
                         href: "/docs/reference/cli",
                         description:
-                            "Command reference for the surreal launcher, its components, and surqlfmt.",
+                            "Install and use the surreal command, with every command and flag.",
+                    },
+                    {
+                        label: "SurrealDB Studio",
+                        href: "/docs/reference/studio",
+                        description: "Explore data in the official SurrealDB dashboard.",
                     },
                 ],
             },
@@ -379,20 +366,35 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
     /** Label is display-only; target is the `agent-memory/index` hub at `/agent-memory`. */
     { label: "Get started", href: "/docs/agent-memory" },
     {
-        label: "Memory & knowledge",
-        href: "/docs/agent-memory/memory-and-knowledge",
+        label: "Learn",
+        href: "/docs/agent-memory/learn",
         sections: [
+            {
+                heading: "Concepts",
+                items: [
+                    {
+                        label: "Mental model",
+                        href: "/docs/agent-memory/learn/mental-model",
+                        description: "Contexts, scopes, sessions and memory categories.",
+                    },
+                    {
+                        label: "Architecture",
+                        href: "/docs/agent-memory/learn/architecture",
+                        description: "Pillars, tri-temporal facts and retrieval tiers.",
+                    },
+                ],
+            },
             {
                 heading: "Storing",
                 items: [
                     {
                         label: "Ingest",
-                        href: "/docs/agent-memory/memory-and-knowledge/ingest",
+                        href: "/docs/agent-memory/learn/ingest",
                         description: "Add documents, turns and facts.",
                     },
                     {
                         label: "Sessions",
-                        href: "/docs/agent-memory/memory-and-knowledge/sessions",
+                        href: "/docs/agent-memory/learn/sessions",
                         description: "Group turns into conversations.",
                     },
                 ],
@@ -402,12 +404,12 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "Retrieve",
-                        href: "/docs/agent-memory/memory-and-knowledge/retrieve",
+                        href: "/docs/agent-memory/learn/retrieve",
                         description: "Recall and search what is stored.",
                     },
                     {
                         label: "Reasoning",
-                        href: "/docs/agent-memory/memory-and-knowledge/reasoning",
+                        href: "/docs/agent-memory/learn/reasoning",
                         description: "How facts are reconciled over time.",
                     },
                 ],
@@ -417,24 +419,44 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "Operations",
-                        href: "/docs/agent-memory/memory-and-knowledge/operations",
+                        href: "/docs/agent-memory/learn/operations",
                         description: "Forget, reflect, profiles and the judge.",
                     },
                     {
                         label: "Tuning",
-                        href: "/docs/agent-memory/memory-and-knowledge/tuning",
+                        href: "/docs/agent-memory/learn/tuning",
                         description: "Caching, models and vocabulary.",
+                    },
+                ],
+            },
+            {
+                heading: "Examples",
+                items: [
+                    {
+                        label: "Showcase",
+                        href: "/docs/agent-memory/cookbooks/showcase",
+                        description: "Complete demos built on Agent Memory.",
+                    },
+                    {
+                        label: "Cookbooks",
+                        href: "/docs/agent-memory/cookbooks/build",
+                        description: "Step-by-step agent builds.",
+                    },
+                    {
+                        label: "Patterns",
+                        href: "/docs/agent-memory/cookbooks/patterns",
+                        description: "Reusable memory patterns.",
                     },
                 ],
             },
         ],
     },
     {
-        label: "Integrations",
-        href: "/docs/agent-memory/integrations",
+        label: "Integrate",
+        href: "/docs/agent-memory/integrate",
         sections: [
             {
-                heading: "Code",
+                heading: "Connect",
                 items: [
                     {
                         label: "SDKs",
@@ -447,19 +469,14 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                         description: "Connect any MCP-capable agent.",
                     },
                     {
-                        label: "AI SDKs",
-                        href: "/docs/agent-memory/integrations/ai-sdks",
-                        description: "Memory for AI SDK applications.",
-                    },
-                ],
-            },
-            {
-                heading: "Agents and apps",
-                items: [
-                    {
                         label: "Agent frameworks",
                         href: "/docs/agent-memory/integrations/frameworks",
                         description: "Memory for agent frameworks.",
+                    },
+                    {
+                        label: "AI SDKs",
+                        href: "/docs/agent-memory/integrations/ai-sdks",
+                        description: "Memory for AI SDK applications.",
                     },
                     {
                         label: "Voice & realtime",
@@ -471,16 +488,6 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                         href: "/docs/agent-memory/integrations/automation",
                         description: "Workflow and automation tools.",
                     },
-                ],
-            },
-            {
-                heading: "Operating",
-                items: [
-                    {
-                        label: "Observability",
-                        href: "/docs/agent-memory/integrations/observability",
-                        description: "Trace and monitor memory calls.",
-                    },
                     {
                         label: "Surfaces",
                         href: "/docs/agent-memory/integrations/surfaces",
@@ -488,33 +495,49 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
                     },
                 ],
             },
+            {
+                heading: "Migrate",
+                items: [
+                    {
+                        label: "Migrating",
+                        href: "/docs/agent-memory/cookbooks/migrate",
+                        description: "Move from another memory layer.",
+                    },
+                ],
+            },
         ],
     },
     {
-        label: "Cookbooks",
-        href: "/docs/agent-memory/cookbooks",
+        label: "Operate",
+        href: "/docs/agent-memory/operate",
         sections: [
             {
+                heading: "Where it runs",
                 items: [
                     {
-                        label: "Showcase",
-                        href: "/docs/agent-memory/cookbooks/showcase",
-                        description: "Complete demos built on Agent Memory.",
+                        label: "SurrealDB Cloud",
+                        href: "/docs/agent-memory/operate/cloud",
+                        description: "How contexts and keys work on Cloud.",
                     },
                     {
-                        label: "Build",
-                        href: "/docs/agent-memory/cookbooks/build",
-                        description: "Step-by-step agent builds.",
+                        label: "Enterprise",
+                        href: "/docs/agent-memory/operate/enterprise",
+                        description: "Single-tenant deployments, and self-hosted ones to come.",
+                    },
+                ],
+            },
+            {
+                heading: "Operations",
+                items: [
+                    {
+                        label: "Enterprise configuration",
+                        href: "/docs/agent-memory/operate/enterprise/configuration",
+                        description: "Models, storage, limits and security.",
                     },
                     {
-                        label: "Patterns",
-                        href: "/docs/agent-memory/cookbooks/patterns",
-                        description: "Reusable memory patterns.",
-                    },
-                    {
-                        label: "Migrate",
-                        href: "/docs/agent-memory/cookbooks/migrate",
-                        description: "Move from another memory layer.",
+                        label: "Observability",
+                        href: "/docs/agent-memory/integrations/observability",
+                        description: "Trace and monitor memory calls.",
                     },
                 ],
             },
