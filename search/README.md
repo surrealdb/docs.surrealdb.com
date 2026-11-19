@@ -8,13 +8,18 @@ SurrealDB.
 
 ### Indexing (build-time)
 
-1. **Crawler** (`search/crawler.ts`) walks every markdown file in
+1. **Crawler** (`search/scripts/crawler.ts`) walks every markdown file in
    `src/content/`, parses frontmatter and body, then yields two kinds of
    records:
    - **Page** - one per document (title, description, breadcrumb, full plain
      text).
    - **Section** - one per H2 heading within a page (title, breadcrumb, plain
      text until the next H2). Links to the parent page via `#anchor`.
+
+   The markdown parser gives plain text no node of its own, so the crawler
+   takes the source between a node's children. `bun run check:search-text`,
+   which CI runs, fails when that stops working: when a fixed sample no longer
+   extracts to the expected text, or a page yields no text.
 2. **Embedder** (`search/embed.ts`) sends each record's text to OpenAI
    `text-embedding-3-small` and receives a 1536-dimensional vector.
 3. **Indexer** (`search/indexer.ts`) connects to SurrealDB, compares content
