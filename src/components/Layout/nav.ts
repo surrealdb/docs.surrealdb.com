@@ -257,8 +257,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         description: "Explore the official SurrealQL query language.",
                     },
                     {
-                        label: "APIs & protocols",
-                        href: "/docs/reference/rest-api",
+                        label: "Protocols and APIs",
+                        href: "/docs/reference/protocols",
                         description:
                             "REST, HTTP, RPC, CBOR and Postgres wire protocols, and the error format they share.",
                     },

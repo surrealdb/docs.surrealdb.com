@@ -62,7 +62,7 @@ export const LLMS_BUNDLES: LlmsBundle[] = [
         slug: "rest-api",
         title: "Protocols and APIs",
         description: "HTTP, RPC, CBOR, PostgreSQL and MySQL protocols.",
-        prefixes: ["/reference/rest-api"],
+        prefixes: ["/reference/protocols"],
     },
     {
         slug: "cli",

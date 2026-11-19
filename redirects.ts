@@ -1086,12 +1086,12 @@ function legacyIntegrationApiRedirects(): Redirect[] {
     return ["integration", "integrations"].flatMap((prefix) => [
         {
             source: `/${prefix}/apis`,
-            destination: "/docs/reference/rest-api",
+            destination: "/docs/reference/protocols",
             statusCode: 301 as const,
         },
         {
             source: `/${prefix}/apis/:path*`,
-            destination: "/docs/reference/rest-api",
+            destination: "/docs/reference/protocols",
             statusCode: 301 as const,
         },
     ]);
@@ -1180,6 +1180,95 @@ function sharedSectionRedirects(): Redirect[] {
     ];
 }
 
+/** The tutorials that have a page at `/learn/tutorials/walkthroughs/<slug>`. */
+const TUTORIAL_PAGES = [
+    "auth0-integration",
+    "aws-cognito-integration",
+    "build-a-real-time-presence-app",
+    "build-an-ai-agent",
+    "connect-via-ngrok",
+    "define-a-schema",
+    "gen-ai-chatbot",
+    "github-actions",
+    "how-to-build-a-knowledge-graph-for-ai",
+    "http-via-postman",
+    "minimal-langchain",
+    "navigate-a-drone-without-gps",
+    "semantic-search-in-rust",
+];
+
+/**
+ * Every tutorial page lives at `/learn/tutorials/walkthroughs/<slug>`. Older
+ * addresses name it in two shapes: a `tutorials` folder inside the tutorials
+ * section, and the slug directly under `/tutorials`, `/explore/tutorials`,
+ * `/build/tutorials` or `/learn/tutorials`. Each goes to the page in one hop,
+ * so these rules come before the prefix rules that would send them to
+ * `/learn/tutorials/<slug>`, where no page exists.
+ */
+function tutorialPathRedirects(): Redirect[] {
+    const walkthroughs = "/docs/learn/tutorials/walkthroughs";
+    const parents = ["tutorials", "explore/tutorials", "build/tutorials", "learn/tutorials"];
+    const forms = (path: string) => [`/${path}`, `/docs/${path}`];
+
+    return parents.flatMap((parent) => [
+        ...forms(`${parent}/tutorials`).flatMap((source): Redirect[] => [
+            { source, destination: `${walkthroughs}/overview`, statusCode: 301 },
+            { source: `${source}/:path*`, destination: `${walkthroughs}/:path*`, statusCode: 301 },
+        ]),
+        ...TUTORIAL_PAGES.flatMap((page) =>
+            forms(`${parent}/${page}`).map(
+                (source): Redirect => ({
+                    source,
+                    destination: `${walkthroughs}/${page}`,
+                    statusCode: 301,
+                }),
+            ),
+        ),
+    ]);
+}
+
+/**
+ * The migrating section has one overview page, and the two sources that once
+ * had pages of their own are its sections. Their old addresses go to those
+ * sections in one hop, under the current and the former `build` prefix. Only
+ * these exact addresses move: the pages under them keep their paths.
+ */
+function migratingOverviewRedirects(): Redirect[] {
+    const hub = "/docs/integrate/migrating";
+    const moves: [string, string][] = [
+        ["from-other-databases/overview", "from-other-databases"],
+        ["from-other-databases", "from-other-databases"],
+        ["from-files-and-streams", "from-files-and-streams"],
+    ];
+
+    return ["integrate/migrating", "build/migrating"].flatMap((parent) =>
+        moves.flatMap(([page, section]) =>
+            [`/${parent}/${page}`, `/docs/${parent}/${page}`].map(
+                (source): Redirect => ({
+                    source,
+                    destination: `${hub}#${section}`,
+                    statusCode: 301,
+                }),
+            ),
+        ),
+    );
+}
+
+/**
+ * The protocol and API reference is at `/reference/protocols`. Its former
+ * `/reference/rest-api` address, and every page under it, goes there in one hop.
+ */
+function protocolsRedirects(): Redirect[] {
+    return ["/reference/rest-api", "/docs/reference/rest-api"].flatMap((source): Redirect[] => [
+        { source, destination: "/docs/reference/protocols", statusCode: 301 },
+        {
+            source: `${source}/:path*`,
+            destination: "/docs/reference/protocols/:path*",
+            statusCode: 301,
+        },
+    ]);
+}
+
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
@@ -1213,6 +1302,9 @@ const baseRedirects: Redirect[] = [
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "integrate/integrations"),
+    ...protocolsRedirects(),
+    ...tutorialPathRedirects(),
+    ...migratingOverviewRedirects(),
     ...legacyPrefixRedirects("tutorials", "learn/tutorials"),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),

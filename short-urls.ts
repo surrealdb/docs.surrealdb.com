@@ -77,11 +77,11 @@ const curated: ShortUrl[] = [
     ["idioms", `${QL}/language-primitives/idioms`],
     ["parameters", `${QL}/language-primitives/parameters`],
     ["casting", `${QL}/language-primitives/casting`],
-    ["api", "/docs/reference/rest-api"],
-    ["apis", "/docs/reference/rest-api"],
-    ["rest", "/docs/reference/rest-api"],
-    ["http", "/docs/reference/rest-api/http-protocol"],
-    ["rpc", "/docs/reference/rest-api/rpc-protocol"],
+    ["api", "/docs/reference/protocols"],
+    ["apis", "/docs/reference/protocols"],
+    ["rest", "/docs/reference/protocols"],
+    ["http", "/docs/reference/protocols/http-protocol"],
+    ["rpc", "/docs/reference/protocols/rpc-protocol"],
     ["graphql", "/docs/learn/querying/graphql/overview"],
 
     // Data models and features
@@ -117,7 +117,7 @@ const curated: ShortUrl[] = [
     ["backups", "/docs/operate/self-hosted/backups-and-recovery"],
     // The guide for the latest major version. Repoint it at each major release.
     ["upgrade", "/docs/operate/upgrading/3x-to-4x"],
-    ["migrate", "/docs/integrate/migrating/from-other-databases/overview"],
+    ["migrate", "/docs/integrate/migrating"],
     ["postgres", "/docs/integrate/migrating/from-other-databases/from-postgresql"],
     ["postgresql", "/docs/integrate/migrating/from-other-databases/from-postgresql"],
     ["mongodb", "/docs/integrate/migrating/from-other-databases/from-mongodb"],

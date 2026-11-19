@@ -92,7 +92,7 @@ edges.
 "Row" and "column" stay where the relational model genuinely is the subject:
 
 - **Row-level security**, which is the established name of the feature.
-- The [Postgres wire protocol](src/content/reference/rest-api/postgres-protocol.mdx),
+- The [Postgres wire protocol](src/content/reference/protocols/postgres-protocol.mdx),
   and comparison or migration pages set against a relational database, where
   tabular framing is the point.
 - Quoting SQL, or another database's own wording.
