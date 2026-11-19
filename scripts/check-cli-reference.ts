@@ -8,7 +8,8 @@
  * - a `SURREAL_` variable in the release has no row on the environment
  *   variables page, and is not listed in `INTERNAL`;
  * - a row names a variable that no tagged release has had, which is usually a
- *   typo;
+ *   typo, unless the row's `<Since>` badge names a version newer than the
+ *   release (see below);
  * - a row names a variable the release no longer has, and neither the row nor
  *   the opening of its section says which versions it applies to;
  * - a row's default and the source's default are both numbers and differ.
@@ -24,7 +25,9 @@
  *
  * The data covers tagged releases only, so a setting added on a branch for an
  * unreleased version is checked once that version is tagged and the data is
- * regenerated.
+ * regenerated. A row for such a setting says so with a `<Since>` badge that
+ * names a version newer than the release, and the check lists it as waiting
+ * instead of reporting it.
  *
  * Usage: bun scripts/check-cli-reference.ts
  */
@@ -149,6 +152,20 @@ const problems: string[] = [];
 const page = readFileSync(join(ROOT, ENV_PAGE), "utf8");
 const rows = new Set<string>();
 
+/** Rows for settings of a version that no tag has yet, which wait for that tag. */
+const waiting: string[] = [];
+
+/** The version a row's `<Since>` badge names, such as `4.0.2` for `<Since v="v4.0.2" />`. */
+const sinceOf = (html: string) => html.match(/<Since v="v?(\d+\.\d+\.\d+)"/)?.[1];
+
+/** Whether the version `a` is newer than the version `b`, each written as `4.0.2` or `v4.0.2`. */
+const isNewer = (a: string, b: string) => {
+    const parts = (v: string) => v.replace(/^v/, "").split(".").map(Number);
+    const [pa, pb] = [parts(a), parts(b)];
+    for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
+    return false;
+};
+
 for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
     // Each cell's text by its column label, without its markup: the pieces
     // between its tags, joined. The text is only compared and printed, never
@@ -172,6 +189,14 @@ for (const row of page.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
     for (const name of (cells.get("Env var") ?? "").match(/SURREAL_[A-Z0-9_]+/g) ?? []) {
         rows.add(name);
         const items = byVariable.get(name);
+
+        // A variable the release does not have, whose badge names a newer version
+        const envCell = row[1].match(/data-label="Env var"[^>]*>([\s\S]*?)<\/td>/)?.[1] ?? "";
+        const since = sinceOf(envCell);
+        if (since && isNewer(since, release) && !items?.some(inRelease)) {
+            waiting.push(`${name} (${since})`);
+            continue;
+        }
 
         if (!items) {
             problems.push(`${name} has a row, but no tagged release has had it`);
@@ -257,6 +282,11 @@ for (const key of Object.keys(HIDDEN_FLAGS)) {
 }
 
 for (const problem of problems) console.error(problem);
+if (waiting.length > 0) {
+    console.log(
+        `[cli] ${waiting.length} ${waiting.length === 1 ? "row is" : "rows are"} for versions after ${release}, and ${waiting.length === 1 ? "is" : "are"} checked once those are tagged: ${waiting.join(", ")}`,
+    );
+}
 console.log(
     `[cli] ${release}: ${current.length} variables and ${flags.length} flags checked, ${problems.length} problems`,
 );
