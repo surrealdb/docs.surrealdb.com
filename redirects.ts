@@ -893,6 +893,14 @@ function agentMemoryRedirects(): Redirect[] {
         ).flatMap(([from, to]): [string, string][] =>
             ["/agent-memory", "/spectron"].map((root): [string, string] => [`${root}/${from}`, to]),
         ),
+        // The architecture glossary is part of the glossary in Reference. Listed
+        // before the folder rules below so each older address needs one hop.
+        ...["/agent-memory", "/spectron"].flatMap((root): [string, string][] =>
+            ["architecture", "learn/architecture"].map((folder): [string, string] => [
+                `${root}/${folder}/glossary`,
+                "/docs/agent-memory/reference/glossary",
+            ]),
+        ),
         // Concepts moved into Learn, Enterprise into Deploy, and Memory & knowledge
         // was renamed Learn. Listed before the `/spectron` prefix rules so the
         // old paths need one hop.
@@ -1269,6 +1277,41 @@ function protocolsRedirects(): Redirect[] {
     ]);
 }
 
+/**
+ * Each language's embedding guide is in its SDK reference. The pages that once
+ * sat under `embedding/by-language` go there in one hop, under the current and
+ * the former `build` prefix, and the folder goes to the embedding overview.
+ */
+function embeddingLanguageRedirects(): Redirect[] {
+    const guides: [string, string][] = [
+        ["dotnet", "/docs/reference/dotnet/embedding"],
+        ["golang", "/docs/reference/golang/embedding"],
+        ["javascript", "/docs/reference/javascript/concepts/embedded-engines"],
+        ["python", "/docs/reference/python/concepts/embedded-databases"],
+        ["rust", "/docs/reference/rust/embedding"],
+    ];
+
+    return ["integrate", "build"].flatMap((section) => {
+        const folder = `${section}/embedding/by-language`;
+        const forms = (path: string) => [`/${path}`, `/docs/${path}`];
+
+        return [
+            ...forms(folder).map(
+                (source): Redirect => ({
+                    source,
+                    destination: "/docs/integrate/embedding",
+                    statusCode: 301,
+                }),
+            ),
+            ...guides.flatMap(([language, destination]) =>
+                forms(`${folder}/${language}`).map(
+                    (source): Redirect => ({ source, destination, statusCode: 301 }),
+                ),
+            ),
+        ];
+    });
+}
+
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
@@ -1305,6 +1348,7 @@ const baseRedirects: Redirect[] = [
     ...protocolsRedirects(),
     ...tutorialPathRedirects(),
     ...migratingOverviewRedirects(),
+    ...embeddingLanguageRedirects(),
     ...legacyPrefixRedirects("tutorials", "learn/tutorials"),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
