@@ -1,0 +1,177 @@
+---
+position: 3
+title: Forgetting memories
+description: "Default forget, purge, and scoped erasure. How to retire or permanently erase memories."
+---
+
+# Forgetting memories
+
+SurrealDB Agent Memory distinguishes **retiring** memory (the agent stops using it) from **erasing** memory (the content is removed for compliance). Most day-to-day use is retirement; erasure is explicit and grant-gated.
+
+All forget operations require the **`memory:forget`** grant on the caller’s API key. Keys with only read/write access cannot forget. A scoped forget needs the grant over the whole subtree it erases. Semantic forget and entity delete act on the whole Context, so a key that holds `memory:forget` over any scope can use them on memory in every scope. Give `memory:forget` only to principals that may remove memory anywhere in the Context.
+
+## Semantic forget (default - retire, do not erase)
+
+Describe what to remove in natural language. SurrealDB Agent Memory finds the entities and conversational chunks closest in meaning to the description, then **expires** them. Expiring an entity also expires all of its live facts, relations and actions, in every scope and category. Each call expires a limited number of the closest matches, so a broad description can need more than one call. Expired memory:
+
+- Does **not** appear in **`/query`**, **`/profile`**, **`/state`**, or chat context going forward.
+- Does **not** come back through a point-in-time read. A query anchored at a moment before the forget still excludes it, so forgetting holds across time travel rather than only from now on.
+- **Does** remain in storage so you can audit what was retired and when.
+
+Forgetting is separate from expiry. A fact that simply ended, was superseded by a newer value, or aged out is still part of the record: point-in-time reads continue to serve it, which is what makes supersession history auditable. Only an explicit forget is withheld from those reads.
+
+```http
+POST /api/v1/{context_id}/forget
+Content-Type: application/json
+Authorization: Bearer sk-...
+
+{
+  "query": "anything about my old job",
+  "dryRun": true
+}
+```
+
+```json
+{
+  "deleted": 3
+}
+```
+
+**`dryRun: true`** scores matching records and returns the count **without writing anything** - use this to preview before applying. A successful dry run emits no forget audit event. Omit **`dryRun`** or set it to **`false`** to expire records.
+
+To apply after preview:
+
+```http
+POST /api/v1/{context_id}/forget
+Content-Type: application/json
+Authorization: Bearer sk-...
+
+{
+  "query": "anything about my old job"
+}
+```
+
+The response counts how many entities and conversational chunks were expired. Semantic forget searches the whole Context, not only the scopes in the key's grants.
+
+```bash
+surreal memory forget "anything about my old job" \
+  --url "$SURREAL_MEMORY_URL" --api-key "$SURREAL_MEMORY_API_KEY" --context-id "$SURREAL_MEMORY_CONTEXT_ID"
+
+# Preview matches without expiring anything
+surreal memory forget "anything about my old job" --dry-run \
+  --url "$SURREAL_MEMORY_URL" --api-key "$SURREAL_MEMORY_API_KEY" --context-id "$SURREAL_MEMORY_CONTEXT_ID"
+```
+
+## Entity delete (default - retire one entity)
+
+To target a specific entity by type and name:
+
+```http
+DELETE /api/v1/{context_id}/entities/{entity_type}/{entity_name}
+```
+
+This expires the entity and its active facts, relations and actions, in every scope. Like semantic forget, it is a **soft** retirement by default - the entity no longer surfaces in retrieval, but the retired records remain stored.
+
+## Purge - permanent erasure (compliance)
+
+When you must guarantee that content no longer exists in the memory substrate - for example a **right-to-erasure** request - use the same **`POST /forget`** endpoint with **`purge: true`**, or the CLI **`--purge`** flag.
+
+```http
+POST /api/v1/{context_id}/forget
+Content-Type: application/json
+Authorization: Bearer sk-...
+
+{
+  "query": "anything about my old job",
+  "purge": true
+}
+```
+
+With **`purge: true`**, SurrealDB Agent Memory permanently removes the matched entities, their fact history (including prior corrections), related relations, and linked conversational chunks. After a successful purge, that content is not recoverable from memory storage.
+
+**Audit note:** the trace graph may still record that a forget call occurred (who, when, which operation) without retaining the deleted content itself. The forget audit event names the resource as `query` and never stores the query text, because the query describes what the caller asked to have forgotten. Decision, retrieval and response traces are not erased by a forget and follow their own retention. Plan your compliance process around both memory erasure and trace retention policies.
+
+Purging is **opt-in**. Omitting **`purge`** (or setting it to **`false`**) keeps supersession history even after the current values are expired - the default path for ordinary agent memory management.
+
+## Scoped forget - erase a whole subtree
+
+To remove **everything** tagged under a scope path (a user branch, team, or project subtree), use:
+
+```http
+POST /api/v1/{context_id}/scopes/forget
+Content-Type: application/json
+Authorization: Bearer sk-...
+
+{
+  "path": "user/alice/"
+}
+```
+
+This **hard-deletes** every memory and knowledge record stored only under that subtree - facts, relations, instructions, uncertainties, sessions, documents, chunks and related index state - and any entity left with no facts. A record that is also stored under another scope is not deleted: it keeps that other scope and loses only the forgotten one, so the other owner's access stays. Retrieval traces are kept as the audit record. It requires the **`memory:forget`** grant over that subtree. The response reports how many records were erased.
+
+Use scoped forget for GDPR-style deletion when a principal’s entire branch must go, rather than a single fact.
+
+## Derived memory goes with its sources
+
+Background passes build new rows from existing facts: gists, rollups, elaborated relations and consolidated facts. Each derived row records the rows it was built from, and every way of forgetting follows those records, so a summary does not keep forgotten content in another form:
+
+- **Entity delete** retires the rows derived from the entity's facts, and leaves unrelated derived rows alone.
+- **Forget** retires the derived rows, and with `purge: true` deletes them with their history.
+- **Scoped forget** deletes derived rows in other scopes that were built from erased rows, and erases the [ingest judge](/docs/agent-memory/learn/operations/ingest-judge) review entries written under the erased subtree.
+
+The removal follows a row's sources through at most four steps of derivation.
+
+### Retire what a stage produced
+
+Switching a background stage off in the Context's configuration stops new passes, and leaves the rows it already produced in place. To retire those as well, name the stages:
+
+```http
+POST /api/v1/{context_id}/derived/retire
+Content-Type: application/json
+Authorization: Bearer sk-...
+
+{
+  "stages": ["gist", "rollup"]
+}
+```
+
+```json
+{
+  "stages": [
+    { "stage": "gist", "retired": 12 },
+    { "stage": "rollup", "retired": 3 }
+  ]
+}
+```
+
+The stages are `gist`, `rollup`, `elaboration` and `consolidation`, where `consolidation` means merged facts other than gists and rollups. Retired rows are marked as forgotten, in the same way as a forget without `purge`. The call needs the **`grant:manage`** grant over the whole Context.
+
+```bash
+surreal memory derived retire --stage gist --stage rollup
+```
+
+## Choosing the right operation
+
+| Goal | Operation | Erases from storage? |
+| --- | --- | --- |
+| Preview what would be retired | **`POST /forget`** with **`dryRun: true`** or **`surreal memory forget --dry-run`** | No - read-only count |
+| Agent should stop mentioning something | **`POST /forget`** (default) or **`DELETE /entities/...`** | No - expired, still auditable |
+| User’s erasure request for specific topics | **`POST /forget`** with **`purge: true`** | Yes - matched content removed |
+| Delete everything for a user/team scope | **`POST /scopes/forget`** | Yes - entire subtree removed |
+| Remove what a switched-off background stage produced | **`POST /derived/retire`** | No - retired, still auditable |
+| Retire a scope folder in the vocabulary only | **`scope:delete`** (tombstone the scope node) | Tombstone is soft - distinct from erasing facts; see [Contexts and scope](/docs/agent-memory/learn/mental-model/contexts-and-scope#tombstone-vs-erase) |
+
+The figure below compares what forget, purge and scoped forget leave behind with supersession, expiry and decay.
+
+<img src="~/assets/img/diagrams/light/am-forget-matrix-light.webp" darkSrc="~/assets/img/diagrams/am-forget-matrix.webp" alt="What each way of retiring a fact leaves behind. A correction (supersession): current recall shows the new value only, point-in-time reads serve the old value, correction history and storage are kept. Context expiry, 7 days after known time: no longer returned by current recall, still served by point-in-time reads, history and storage kept. Decay: still returned, point-in-time reads and history unchanged, stored. Forget or entity delete: no longer returned, withheld from point-in-time reads, history kept and stored for audit. Forget with purge: removed from recall and point-in-time reads, history and storage erased. Scoped forget: removed and erased, with the subtree hard-deleted. Tombstoning a scope node only retires the folder in the scope vocabulary." />
+
+## After forget - extraction can bring facts back
+
+Forget operates on what is stored **now**. If a later conversation turn mentions the same information again, extraction may create **new** memory for it. If you need a topic to stay gone, combine forget with product-level controls (do not re-ingest, block the source, or purge again).
+
+## Related reading
+
+- [Reconciliation and supersession](/docs/agent-memory/learn/reasoning/reconciliation-and-supersession) - why corrections keep history by default
+- [Tri-temporal model](/docs/agent-memory/learn/architecture/tri-temporal-model) - time-travel and belief history
+- [Permissions and delegation](/docs/agent-memory/learn/mental-model/contexts-and-scope#permissions-and-delegation) - **`memory:forget`** grants
+- [REST API](/docs/agent-memory/reference/rest-api)

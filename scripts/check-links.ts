@@ -1,11 +1,29 @@
 /**
  * Checks every internal link in `src/content` against the pages that exist.
  *
- * A link is an absolute `/docs/...` path or a same-page `#anchor`, written as a
- * markdown link or an `href` attribute. Each one has to land on a content page,
- * a folder that resolves to one, a static page, a route the server answers, a
- * file in `public/`, or a redirect in `redirects.ts`. A link with an anchor also has to name a heading
- * on the page it lands on, after any redirect.
+ * A link is a `/docs/...` path, written as a path or as a full
+ * `https://surrealdb.com/docs/...` URL, or a same-page `#anchor`, written as a
+ * markdown link, an `href` attribute or a `src` in a component's props. Each
+ * one has to land on a content page, a static page, a route the server
+ * answers or a file in `public/`, and it has to land there directly:
+ *
+ * - A link that a rule in `redirects.ts` or `vercel.ts` redirects fails, and
+ *   names the address to link instead. That covers a moved page, a short URL,
+ *   a trailing slash and a `.html` file that `cleanUrls` serves without its
+ *   extension. The rules are matched as the Worker matches them, from the
+ *   table `scripts/generate-edge-routes.ts` compiles, so a pattern with a
+ *   parameter in the middle counts too.
+ * - A link to a folder with no page of its own fails, because the folder
+ *   redirects to its first page.
+ * - A relative link (`./cbor`, `../statements/let`) fails, because it
+ *   resolves against the address of the page that holds it, which changes
+ *   when that page moves.
+ *
+ * A link with an anchor also has to name a heading on the page it lands on.
+ * Every check here reads the repository only, so it needs no network and
+ * gives the same answer every time. Links to the rest of surrealdb.com, such
+ * as `/blog/...`, are not checked: their redirects live in the
+ * www.surrealdb.com repository.
  *
  * Heading ids come from the UI kit's own `extractHeadings`, the function the
  * renderer uses, so the check agrees with the rendered page, including the
@@ -14,7 +32,9 @@
  * The build does not catch these: a broken link renders, and a broken anchor
  * scrolls nowhere.
  *
- * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`.
+ * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`. And
+ * it checks that every page the product switch links in
+ * `src/utils/product-counterparts.ts` exists; see `checkCounterpartPages`.
  *
  * Usage: bun scripts/check-links.ts
  */
@@ -24,6 +44,9 @@ import { join, relative } from "node:path";
 import { extractHeadings, markdownSourceFromString, parseMarkdownTree } from "@surrealdb/ui";
 import { resolveRedirect } from "../redirects";
 import { SHORT_URL_FOLDERS, shortUrls } from "../short-urls";
+import { matchRedirect } from "../src/lib/edge-routes";
+import { isDocumentHref } from "../src/utils/document-links";
+import { COUNTERPART_PAGES } from "../src/utils/product-counterparts";
 import { CONTENT_DIR, PAGES_DIR, readCollections, slugify, walk } from "./lib/docs-pages.mjs";
 
 const PUBLIC_DIR = "public";
@@ -122,11 +145,34 @@ function serverRoutes(): Set<string> {
     return routes;
 }
 
-function isPublicFile(path: string): boolean {
-    const rel = path.replace(/^\/docs\/?/, "");
+function isFile(rel: string): boolean {
     return (
         rel !== "" && existsSync(join(PUBLIC_DIR, rel)) && statSync(join(PUBLIC_DIR, rel)).isFile()
     );
+}
+
+/**
+ * Whether a path names a file in `public/`. An HTML file is named without its
+ * `.html`, the address `cleanUrls` serves it at.
+ */
+function isPublicFile(path: string): boolean {
+    const rel = path.replace(/^\/docs\/?/, "");
+    return isFile(rel) || (!/\.[a-z0-9]+$/i.test(rel) && isFile(`${rel}.html`));
+}
+
+/**
+ * Where the docs app redirects a `/docs/...` path, before any page is looked
+ * up, or undefined. The app sees the path without `/docs`, as it arrives from
+ * the www rewrite, and a destination it answers with is put back under `/docs`.
+ */
+function redirectOf(path: string): string | undefined {
+    const match = matchRedirect(path.replace(/^\/docs(?=\/|$)/, "") || "/");
+
+    if (!match) return undefined;
+
+    const location = match.location.replace(/^https:\/\/surrealdb\.com/, "");
+
+    return location.startsWith("/docs") ? location : `/docs${location}`;
 }
 
 /** Where a path ends up after redirects, or undefined when no redirect matches. */
@@ -184,7 +230,12 @@ function anchorsFor(file: string): Set<string> {
 const LINK_PATTERNS = [
     /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
     /\bhref=\{?["']([^"']+)["']\}?/g,
+    // The pages a `<DemoEmbed>` frames, which it also links.
+    /"src":\s*"([^"]+)"/g,
 ];
+
+/** A link written relative to the page that holds it. */
+const RELATIVE = /^\.{1,2}\//;
 
 /** Internal links on each line of a file, outside fenced code blocks and inline code. */
 function* linksIn(file: string): Generator<{ line: number; link: string }> {
@@ -207,8 +258,8 @@ function* linksIn(file: string): Generator<{ line: number; link: string }> {
 
         for (const pattern of LINK_PATTERNS) {
             for (const match of text.matchAll(pattern)) {
-                const link = match[1];
-                if (link.startsWith("/docs") || link.startsWith("#")) {
+                const link = match[1].replace(/^https:\/\/surrealdb\.com(?=\/docs(\/|$|[#?]))/, "");
+                if (link.startsWith("/docs") || link.startsWith("#") || RELATIVE.test(link)) {
                     yield { line: index + 1, link };
                 }
             }
@@ -234,6 +285,37 @@ for (const page of pages.values()) {
         const path = target === "" ? page.url : normalise(target.split("?")[0]);
         const report = (reason: string) =>
             problems.push({ file: relative(CONTENT_DIR, page.file), line, link, reason });
+
+        if (RELATIVE.test(target)) {
+            report("relative link; write the full /docs/... path");
+            continue;
+        }
+
+        const raw = target.split("?")[0];
+        const redirect = raw === "" ? undefined : redirectOf(raw);
+
+        if (redirect) {
+            report(`redirects to ${redirect}; link that address instead`);
+            continue;
+        }
+
+        if (!pageAt(path) && folders.has(path)) {
+            report(
+                "a folder with no page of its own, which redirects to its first page; link that page",
+            );
+            continue;
+        }
+
+        if (
+            isPublicFile(path) &&
+            !isFile(path.replace(/^\/docs\/?/, "")) &&
+            !isDocumentHref(path, "https://surrealdb.com")
+        ) {
+            report(
+                "an HTML file in public/ in a folder that DOCUMENT_PREFIXES in src/utils/document-links.ts does not list, so a click renders a 404",
+            );
+            continue;
+        }
 
         let landing = pageAt(path);
 
@@ -306,6 +388,24 @@ function checkShortUrls(): string[] {
 
 const shortUrlProblems = checkShortUrls();
 
+/**
+ * The pages in `COUNTERPART_PAGES`, where the product switch goes: each path
+ * must be a page of its own, because the switch links it directly.
+ */
+function checkCounterpartPages(): string[] {
+    const found: string[] = [];
+
+    for (const pair of COUNTERPART_PAGES) {
+        for (const path of [pair.surrealdb, pair["agent-memory"]]) {
+            if (!pages.has(`/docs${path}`)) found.push(`${path} is not a page`);
+        }
+    }
+
+    return found;
+}
+
+const counterpartProblems = checkCounterpartPages();
+
 for (const problem of problems) {
     console.error(`${problem.file}:${problem.line}  ${problem.link}\n    ${problem.reason}`);
 }
@@ -314,9 +414,18 @@ for (const problem of shortUrlProblems) {
     console.error(`short-urls.ts  ${problem}`);
 }
 
+for (const problem of counterpartProblems) {
+    console.error(`src/utils/product-counterparts.ts  ${problem}`);
+}
+
 console.log(
     `[links] ${checked} internal links checked across ${pages.size} pages, ${problems.length} broken`,
 );
 console.log(`[links] ${shortUrls.length} short URLs checked, ${shortUrlProblems.length} problems`);
+console.log(
+    `[links] ${COUNTERPART_PAGES.length} product switch pairs checked, ${counterpartProblems.length} problems`,
+);
 
-if (problems.length > 0 || shortUrlProblems.length > 0) process.exit(1);
+if (problems.length > 0 || shortUrlProblems.length > 0 || counterpartProblems.length > 0) {
+    process.exit(1);
+}

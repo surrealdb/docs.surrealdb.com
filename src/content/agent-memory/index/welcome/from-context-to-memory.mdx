@@ -1,0 +1,148 @@
+---
+position: 3
+title: From context to memory
+description: "Why an agent needs memory, and three ways to give it one: reloading the transcript, retrieval with embeddings, and structured memory of facts with sources and dates, and the questions each one can answer."
+---
+
+Agent memory is storage outside the model that keeps what an agent has learnt, and chooses what to put into the context window for each request. There are three common ways to build it, and they differ in what they keep and in the questions they can answer afterwards.
+
+## Why an agent needs memory
+
+Without memory, every session starts from nothing. If someone told the agent their preferred time zone last Tuesday, the agent asks again on Wednesday, and a support agent that resolved a billing issue in March has no record of it in April. Memory gives an agent three things it cannot have otherwise:
+
+- **Personalisation.** Knowing a person's role, preferences, history and current project lets the agent adapt its tone, skip explanations the person has already heard, and bring up what matters to them.
+- **Learning from corrections.** When the agent misunderstands a request or gives outdated information and is corrected, the correction is still there in the next session, so the same mistake does not happen again.
+- **Work that continues.** A research task that stops halfway can resume where it stopped, and several agents that work together can share a record of what has already been done.
+
+## The example conversation
+
+The examples on this page follow one conversation. Early on, a user called Sam says "I live in Oslo". Weeks later, Sam says "We moved to Bergen last month". Then Sam asks the agent for restaurants near home.
+
+## Reloading the transcript
+
+The simplest memory saves every message and sends the saved conversation back at the start of the next session. Nothing is lost in storage, and nothing has to be decided about what to keep.
+
+The transcript runs into the same limit as a single long session. It grows with every message, so before long it no longer fits in the [context window](/docs/agent-memory/welcome/how-a-model-remembers#tokens-and-the-context-window), and the agent has to truncate or compact it. Sam's message about Bergen is recent and survives, but anything else Sam said in the first weeks is at risk.
+
+## Retrieval with embeddings
+
+The most widely used kind of agent memory is retrieval. Each message or document is split into short passages, and each passage is stored with an **embedding**: a list of numbers that represents what the passage means. Passages with similar meanings get similar lists of numbers.
+
+The numbers come from a model, and the agent sends each passage to it in the same way that it sends a request to a language model. This is a different kind of model, called an **embedding model**. It is trained to turn text into a list of numbers rather than to write a reply, and the companies that offer language models usually offer embedding models as well. The list often holds a few hundred to a few thousand numbers.
+
+Each list of numbers is a position, in the same way that two numbers give a position on a map and three give a position in a room. A list of a thousand numbers is a position in a space of a thousand directions, which is impossible to draw, but the idea is the same: two passages with similar meanings are close together, and two with unrelated meanings are far apart.
+
+Before each request, the agent turns the question into an embedding too, finds the stored passages whose embeddings are closest to it, and puts those passages into the context window. This approach is often called retrieval-augmented generation, or RAG. A store built for finding the closest embeddings is a vector store.
+
+Retrieval finds text about the subject of a question, however long ago it was written, and it never runs out of room. It is good at questions such as "what did we decide about the logo?".
+
+It has trouble with questions where the answer is a fact rather than a passage:
+
+- **Which value is current.** "I live in Oslo" and "We moved to Bergen" are both about where Sam lives, so both come back for "restaurants near home", with similar scores. The model has to guess which one is true now, and it often picks the one that states it more directly.
+- **When, and who.** A passage is a piece of text. Unless the application adds them, it carries no record of when it was said, by whom, or whether it was later corrected.
+- **Counting and combining.** "How many customers asked about refunds this month?" needs every matching record, counted. Retrieval returns the few passages that sound most like the question.
+- **Similar and relevant.** A passage can be close in meaning to a question by coincidence, and the passage that holds the answer can be farther away, as the diagram below shows.
+- **What the memory holds.** A collection of embeddings cannot be read as a list of facts, so the only way to check what it holds is to run queries and read what comes back.
+
+The diagram below draws the passages from Sam's conversation as points in three directions. The two statements about where Sam lives are close to the question and to each other, so retrieval returns both and cannot say which is current. A passage about a restaurant in Bergen would help answer the question, but it is about food rather than about Sam's home, so it is farther from the question than either of them.
+
+<img src="~/assets/img/diagrams/light/embedding-space-light.webp" darkSrc="~/assets/img/diagrams/embedding-space.webp" alt="Passages from Sam's conversation drawn as points in a cube, standing for the space of embeddings. The question 'Restaurants near home?' sits close to two other points, 'I live in Oslo.' with a similarity of 0.83 and 'We moved to Bergen last month.' with 0.79, which are also close to each other. 'Bill's Pizza is on Strandgaten in Bergen.' is farther away, at 0.52. 'The meeting moved to Friday.' and 'Bring an umbrella tomorrow.' are far from the question, at 0.12 and 0.09. The positions and scores are illustrative." />
+
+## Structured memory
+
+Structured memory reads each message as it arrives and writes down the facts in it as records, in the same way that a person takes notes. It stores what a passage means rather than only the passage:
+
+- **Entities** are the people, places and things that the conversation is about, such as Sam, Bergen and Sam's employer.
+- **Attributes** are facts about one entity, such as Sam's home city.
+- **Relations** connect two entities, such as Sam works for a company.
+
+Each fact also records where it came from and when it was true. When Sam says "We moved to Bergen last month", the memory does not add a second home city next to the first one. It closes the Oslo fact, with the date it stopped being true, and records Bergen as the current value. The Oslo fact is kept, so a question about the past still has an answer.
+
+| What Sam says | What structured memory stores |
+| --- | --- |
+| "I live in Oslo." | Sam, home city: Oslo, from the date of the message |
+| "We moved to Bergen last month." | Sam, home city: Bergen, from last month. The Oslo fact is closed at the same date |
+| "Restaurants near home?" | Nothing new. The agent reads Sam's current home city, Bergen |
+
+In a database, each of these facts is a record. The example below is a simplified sketch of those records in SurrealQL, the query language of SurrealDB. Agent Memory's own records hold more fields than this, such as a confidence score and links between an old value and the value that replaced it.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ data: 'Bergen', source: 'turn 41' }]"
+
+[[test.results]]
+value = "[{ data: 'Oslo', source: 'turn 3' }]"
+
+*/
+CREATE entity:sam SET kind = 'person', name = 'Sam';
+CREATE attribute:1 SET
+	entity = entity:sam, key = 'home_city', data = 'Oslo',
+	valid_from = d'2026-08-03', valid_until = d'2026-10-01',
+	source = 'turn 3';
+CREATE attribute:2 SET
+	entity = entity:sam, key = 'home_city', data = 'Bergen',
+	valid_from = d'2026-10-01',
+	source = 'turn 41';
+
+-- Where does Sam live now? The current fact has no valid_until
+SELECT data, source FROM attribute
+WHERE entity = entity:sam AND key = 'home_city'
+	AND valid_until IS NONE;
+//- [{ data: 'Bergen', source: 'turn 41' }]
+
+-- Where did Sam live on 1 September?
+SELECT data, source FROM attribute
+WHERE entity = entity:sam AND key = 'home_city'
+	AND valid_from <= d'2026-09-01'
+	AND (valid_until IS NONE OR valid_until > d'2026-09-01');
+//- [{ data: 'Oslo', source: 'turn 3' }]
+```
+
+Facts can be read directly, so "where does Sam live?" is a lookup rather than a search, and "how many customers asked about refunds?" is a count. Structured memory still uses embeddings, to find facts and passages by meaning when a question does not name them exactly.
+
+<img src="~/assets/img/diagrams/light/memory-three-approaches-light.webp" darkSrc="~/assets/img/diagrams/memory-three-approaches.webp" alt="The same conversation answered three ways. Sam said 'I live in Oslo' at turn 3 and 'We moved to Bergen last month' at turn 41, and now asks for restaurants near home. Reloading the transcript runs out of room, and the early turns are compacted away. Retrieval with embeddings returns both messages with similar scores, 0.83 for Oslo and 0.79 for Bergen, so the model has to guess. Structured memory holds one entity, Sam, whose home city is Bergen from October, with the Oslo value closed at the same date, so the agent reads Bergen directly. The scores are illustrative." />
+
+## Comparing the three
+
+| | Transcript | Retrieval | Structured memory |
+| --- | --- | --- | --- |
+| What is stored | Every message | Passages and their embeddings | Facts, with their sources and dates, and the passages they came from |
+| What a request gets | The most recent messages, or a summary | The passages closest in meaning | The facts that answer the question, and passages where needed |
+| Old and new values | Both, if both still fit | Both, side by side | The current value, and the old one on request |
+| Questions about a past date | Only from text that is still there | Only if the application stores dates with each passage | Yes |
+| Where an answer came from | The transcript | The passage | The fact's source: a message, a document, or another fact |
+| Work at write time | None | An embedding per passage | A model reads each message and extracts its facts |
+
+The last line is the cost of structured memory. Extracting facts takes a model call when information arrives, so writing is slower and costs more than storing a passage. In exchange, reading is cheaper: an answer needs a few facts in the context window instead of many passages, and a smaller model can often answer from them.
+
+## Structured memory in SurrealDB Agent Memory
+
+SurrealDB Agent Memory is a structured memory. It keeps track of what is true first, and retrieves second: embeddings find candidate facts, and supersession, provenance and traces keep a current view of the world as it changes. A memory that only stores outputs and returns something similar later works as a cache. It can say what was returned last time, but not what the agent believed at a given time, why that belief changed, or which source contradicted which.
+
+The ideas on this page have names in the rest of the Agent Memory documentation:
+
+| Idea | Name in Agent Memory |
+| --- | --- |
+| A message in a conversation | A **turn**, inside a [session](/docs/agent-memory/learn/mental-model/sessions-and-turns) |
+| Reading facts out of a message or document | The [extraction pipeline](/docs/agent-memory/learn/reasoning/extraction-pipeline) |
+| Deciding whether a new fact adds to, replaces or contradicts an old one | **Reconciliation**, which records an **`uncertainty`** when two sources disagree and it cannot decide |
+| Closing an old value when a new one arrives | **Supersession**, described in [Supersession, decay, and forget](/docs/agent-memory/learn/mental-model/memory-lifecycle) |
+| Where a fact came from | **Provenance**: a `source` on every record, with its kind, the passage it came from and how much it is trusted, described in [Provenance and traceability](/docs/agent-memory/learn/mental-model/provenance-and-traceability) |
+| When a fact was true, and when the memory learnt it | The [tri-temporal model](/docs/agent-memory/learn/architecture/tri-temporal-model) |
+| Finding the facts for a question | **Recall**, which combines a direct lookup of facts with a search by meaning, described in [Coherence, retrieval, and cost tiers](/docs/agent-memory/learn/architecture/coherence-retrieval-and-tiers) |
+| A record of what was retrieved, what was decided and how an answer was made | **Traces**, which are stored as records in the memory, described in [Traces and memory evolution](/docs/agent-memory/learn/architecture/traces-and-evolution) |
+
+All of it is stored in one SurrealDB database, and the facts, relations and embeddings from one write are committed together in one transaction. Because every answer can be traced back to records, sources and dates, its correctness can be checked rather than assumed: [The accuracy promise](/docs/agent-memory/welcome/accuracy-promise) explains how, and [How it works in five minutes](/docs/agent-memory/welcome/how-it-works) follows one message through all of these steps.
+
+Memory of this kind is useful wherever text has to become facts that can be checked later, with or without an agent. [Structured memory for agents and beyond](/docs/agent-memory/welcome/beyond-agents) shows some of those uses.

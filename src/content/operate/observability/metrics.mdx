@@ -1,0 +1,963 @@
+---
+position: 5
+title: Metrics reference
+description: "Access paths, labels, and the full metric reference for both editions."
+---
+
+# Metrics reference
+
+This page is the canonical reference for every metric emitted by SurrealDB. It covers how operators access them, the labels and naming rules that govern the surface, the full catalogue grouped by signal family, the public allowlist for anonymous scrapers, and the migration table from 3.0 names.
+
+The instruments listed below were introduced as part of the 3.1 observability overhaul. The [Migration from 3.0](#migration-from-30) section at the bottom maps every legacy Prometheus name to its current replacement.
+
+## Access paths
+
+Metrics can be exposed in two complementary ways. Both pipelines can run simultaneously.
+
+### Prometheus pull
+
+| Property | Value |
+| --- | --- |
+| Trigger | `SURREAL_METRICS_ENABLED=true` (default) |
+| Transport | `GET /metrics` on the main HTTP port, content-type `text/plain; version=0.0.4` |
+| Authentication | Root credentials gate the full surface. Anonymous scrapers receive the [`PUBLIC_METRICS`](#public-metrics-allowlist) allowlist only. |
+| Surface | Every instrument the running build registers. |
+
+Disable the endpoint by setting `SURREAL_METRICS_ENABLED=false` - the route then returns `404`.
+
+### OTLP push
+
+| Property | Value |
+| --- | --- |
+| Trigger | `SURREAL_TELEMETRY_PROVIDER=otlp` |
+| Transport | gRPC, default endpoint `http://localhost:4317`, push cadence from `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds; default `60000`), cumulative temporality |
+| Authentication | The collector's responsibility. The exporter speaks gRPC and native-TLS but does not enforce client authentication. |
+| Surface | The same instruments as `/metrics`, plus the OTel logs surface (audit and slow-query records, when their OTel export is enabled) and `tracing` spans. |
+
+Selectively disable parts of the OTLP pipeline:
+
+- `SURREAL_TELEMETRY_DISABLE_METRICS=true` - suppress the OTLP metrics reader, leaving logs and traces unaffected.
+- `SURREAL_TELEMETRY_DISABLE_TRACING=true` - suppress the OTLP trace exporter, leaving metrics and logs unaffected.
+
+For the full environment variable reference, see [Configuration](/docs/operate/observability/configuration#core-knobs).
+
+## Render rules
+
+OpenTelemetry instrument names use a dotted form (`surrealdb.statement.duration`). The Prometheus text exporter converts each instrument deterministically:
+
+- Counters get a `_total` suffix.
+- Histograms and counters with unit `s` get a `_seconds` suffix.
+- Histograms and counters with unit `By` get a `_bytes` suffix.
+- Up-down counters render as plain gauges with no suffix.
+- Attribute keys containing dots (`http.request.method`, `http.route`, `rpc.method`) are sanitised to underscore form at render time.
+
+A few worked examples:
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">OpenTelemetry name</th>
+            <th scope="col">Unit</th>
+            <th scope="col">Prometheus name</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="OTel"><code>surrealdb.statement.duration</code></td>
+            <td scope="row" data-label="Unit"><code>s</code></td>
+            <td scope="row" data-label="Prometheus"><code>surrealdb_statement_duration_seconds</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="OTel"><code>surrealdb.statement</code> (counter)</td>
+            <td scope="row" data-label="Unit">-</td>
+            <td scope="row" data-label="Prometheus"><code>surrealdb_statement_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="OTel"><code>surrealdb.http.request.size</code></td>
+            <td scope="row" data-label="Unit"><code>By</code></td>
+            <td scope="row" data-label="Prometheus"><code>surrealdb_http_request_size_bytes_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="OTel"><code>surrealdb.process.memory</code></td>
+            <td scope="row" data-label="Unit"><code>By</code></td>
+            <td scope="row" data-label="Prometheus"><code>surrealdb_process_memory_bytes</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="OTel"><code>surrealdb.http.active_requests</code> (up-down counter)</td>
+            <td scope="row" data-label="Unit">-</td>
+            <td scope="row" data-label="Prometheus"><code>surrealdb_http_active_requests</code></td>
+        </tr>
+    </tbody>
+</table>
+
+## Common labels
+
+Every labelled family carries `outcome` plus the resolved tenant context (`namespace`, `database`, `user`) where applicable. Unresolved values render as the `"-"` sentinel; record-access principals render as the fixed `<record>` sentinel. From SurrealDB 4.1, an unauthenticated request or session also reports `"-"` for `namespace` and `database`, whatever namespace and database it names in its headers or path, so an anonymous client cannot add label values.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Bounded values</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Key"><code>outcome</code></td>
+            <td scope="row" data-label="Values"><code>success</code>, <code>error</code>, <code>canceled</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>statement_type</code></td>
+            <td scope="row" data-label="Values"><code>select</code>, <code>update</code>, <code>create</code>, … (closed AST set)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>namespace</code> / <code>database</code> / <code>user</code></td>
+            <td scope="row" data-label="Values">Free-form strings up to a user-configured length. <code>"-"</code> when unresolved; <code>&lt;record&gt;</code> for record-access principals.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>protocol</code></td>
+            <td scope="row" data-label="Values"><code>websocket</code>, <code>http</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>auth_action</code></td>
+            <td scope="row" data-label="Values"><code>signin</code>, <code>signup</code>, <code>authenticate</code>, …</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>auth_scope</code></td>
+            <td scope="row" data-label="Values"><code>root</code>, <code>namespace</code>, <code>database</code>, <code>record</code>, <code>none</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>http_request_method</code></td>
+            <td scope="row" data-label="Values"><code>get</code>, <code>post</code>, <code>put</code>, <code>delete</code>, <code>patch</code>, <code>head</code>, <code>options</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>http_route</code></td>
+            <td scope="row" data-label="Values">Matched router pattern, bounded by the router definitions. <code>"-"</code> for unmatched.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>http_response_status_code</code></td>
+            <td scope="row" data-label="Values">Stringified status (<code>200</code>, <code>400</code>, …)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>rpc_method</code></td>
+            <td scope="row" data-label="Values">Bounded by the RPC dispatch table.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Key"><code>error_class</code></td>
+            <td scope="row" data-label="Values">Bounded; populated only when <code>outcome != success</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+
+## Metric catalogue
+
+The catalogue is grouped by signal family. Each subsection lists the Prometheus name (the form an operator scrapes), the instrument type, the edition that exposes it, the labels it carries, and any notes.
+
+### Process - `surrealdb.process`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+            <th scope="col">Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_build_info</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels"><code>build_version</code></td>
+            <td scope="row" data-label="Notes">Always <code>1</code>. The value carries no signal; the label is the static compile-time version.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_uptime_seconds</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Seconds since process start.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_bytes</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Resident set size of the process.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_allocated_bytes</code><Since v="v3.2.5" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Tracked memory: live Rust-heap allocations, counted at the size class the allocator reserved for each, plus memory held by any registered external memory reporter. This is the value compared against <code>SURREAL_MEMORY_THRESHOLD</code>.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_requested_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Bytes requested for live heap allocations, before the allocator rounded each request up to a size class.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_reserved_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Reserved Rust-heap bytes: the size classes that live requests were rounded up into, without the external memory reporters.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_threshold_bytes</code><Since v="v3.2.5" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">The configured <code>SURREAL_MEMORY_THRESHOLD</code> in bytes, or <code>0</code> when the memory guard is disabled. Constant for the life of the process.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_refusals_total</code><Since v="v3.3.5" /></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>site</code></td>
+            <td scope="row" data-label="Notes">Requests and queries refused because tracked memory was above <code>SURREAL_MEMORY_THRESHOLD</code>. <code>site</code> is <code>websocket</code> for an RPC message refused before it ran, <code>http</code> for a <code>POST /rpc</code> request refused before it ran, or <code>query</code> for a running query that failed with the memory threshold error. All three series are published from <code>0</code>.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_guard_engaged_seconds</code><Since v="v3.3.5" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">How long, in seconds, the memory threshold has refused every request without a break, or <code>0</code> while tracked memory is below it. <a href="/docs/reference/rest-api/http-protocol#health"><code>/health</code></a> returns <code>503</code> once this reaches <code>SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER</code>.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_cpu_percent</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Aggregate process CPU %. May exceed <code>100</code> on multi-core hosts.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>target_info</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">resource attributes</td>
+            <td scope="row" data-label="Notes">Emitted by the OTel SDK from the process <code>Resource</code>. Carries <code>service_edition</code>.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>otel_scope_info</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">scope attributes</td>
+            <td scope="row" data-label="Notes">Emitted by the OTel SDK per instrumentation scope.</td>
+        </tr>
+    </tbody>
+</table>
+
+The cadence of the process snapshot can be tuned with `SURREAL_PROCESS_METRICS_REFRESH_INTERVAL` (seconds; default `5`, floored at 1).
+
+The four `surrealdb_process_memory_*_bytes` gauges are not on the [public allowlist](#public-metrics-allowlist), because together they show how close an instance is to refusing queries, so only an authenticated scrape returns them. The same is true of the refusal counter and the engaged gauge. The allocated and threshold gauges are available from 3.2.5, the requested and reserved gauges from 3.3.0, and the refusal counter and the engaged gauge from 3.3.5. The allocated, requested and reserved gauges report `0` in a build compiled without allocation tracking. Read together, they answer three questions:
+
+- `surrealdb_process_memory_allocated_bytes / surrealdb_process_memory_threshold_bytes` is how close the instance is to the threshold. Once tracked memory passes it, queries fail with a memory threshold error.
+- `surrealdb_process_memory_bytes - surrealdb_process_memory_allocated_bytes` is resident memory the tracker cannot see, such as allocator overhead and thread stacks. This is the headroom to leave between `SURREAL_MEMORY_THRESHOLD` and a container memory limit.
+- `surrealdb_process_memory_reserved_bytes - surrealdb_process_memory_requested_bytes` is internal fragmentation. Use the reserved gauge rather than the allocated one here, because the allocated gauge also counts the external reporters.
+
+### Statement - `surrealdb.statement`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_statement_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>statement_type, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_statement_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_statement_rows_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above. Recorded only when <code>result_rows &gt; 0</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+### Query - `surrealdb.query`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_query_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_query_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+    </tbody>
+</table>
+
+### Transaction - `surrealdb.transaction`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>write, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_kv_ops_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>op</code> (<code>get</code> / <code>scan</code> / <code>set</code> / <code>del</code> / …)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_keys_read_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_keys_written_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_key_bytes_read_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_value_bytes_read_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_key_bytes_written_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_value_bytes_written_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>outcome</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_transaction_conflicts_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>namespace, database, user</code> only. Doubles as the retry-pressure signal - alert on <code>rate(...[5m])</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+### RPC - `surrealdb.rpc`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_rpc_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>rpc_method, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_rpc_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+    </tbody>
+</table>
+
+### Auth - `surrealdb.auth`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_auth_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>auth_action, auth_scope, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+    </tbody>
+</table>
+
+### Session - `surrealdb.session`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_session_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>session_action</code> (<code>connect</code> / <code>disconnect</code>), <code>protocol</code>, <code>service</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_session_active</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels"><code>protocol, service</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_session_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels"><code>protocol, service</code></td>
+        </tr>
+    </tbody>
+</table>
+
+### Network - `surrealdb.network`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_network_received_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>protocol, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_network_sent_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+    </tbody>
+</table>
+
+### Bucket - `surrealdb.bucket`
+
+<Edition value="community" /> <Since v="v3.3.0" />
+
+One event is recorded per object-store operation that a [file bucket](/docs/reference/query-language/statements/define/bucket) performs, including those behind the global bucket. Bucket operations run below the session layer, so these families carry no `namespace`, `database` or `user` labels. They are not on the public allowlist, so only an authenticated scrape returns them.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+            <th scope="col">Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_operations_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>backend, op, outcome</code></td>
+            <td scope="row" data-label="Notes">Incremented once per operation, successful or not.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_sent_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">Bytes given to a successful <code>put</code> or <code>put_if_not_exists</code>. A <code>put_if_not_exists</code> that finds the file already present still counts its bytes.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_received_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">Bytes downloaded from the backend. Recorded only for a successful <code>get</code> that found the file.</td>
+        </tr>
+    </tbody>
+</table>
+
+- `backend` is the storage provider taken from the URL scheme: `s3`, `gcs`, `azure`, `file` or `memory`. It is never the bucket name.
+- `op` is one of `put`, `put_if_not_exists`, `get`, `head`, `delete`, `exists`, `copy`, `copy_if_not_exists`, `rename`, `rename_if_not_exists` or `list`.
+- `outcome` is `success` or `error`.
+
+### HTTP - `surrealdb.http`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_http_request_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>http_request_method, http_route, http_response_status_code, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_http_request_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_http_request_size_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_http_response_size_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_http_active_requests</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels"><code>http_request_method, http_route</code> (attribute-stripped to keep the gauge balanced)</td>
+        </tr>
+    </tbody>
+</table>
+
+### Live query - `surrealdb.live_query`
+
+<Edition value="community" />
+
+`surrealdb_live_query_orphaned_total` increments when a live-query registration cannot be torn down cleanly after a WebSocket disconnect, leaving a catalog record that still receives notifications. Alert on sustained growth.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_live_query_active</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels"><code>namespace</code>, <code>database</code> (from 4.1)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_live_query_notifications_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>namespace</code>, <code>database</code> (from 4.1)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_live_query_orphaned_total</code><Since v="v3.2.0" /></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>namespace</code>, <code>database</code></td>
+        </tr>
+    </tbody>
+</table>
+
+### WebSocket - `surrealdb.websocket`
+
+<Since v="v4.1.0" />
+
+These metrics describe the WebSocket connections on `/rpc`, `/sql` and `/graphql`. They are not on the public allowlist, so only an authenticated scrape returns them. The `reason` on a closed connection is one of `normal`, `pong_timeout`, `idle_timeout`, `client_lagging`, `overloaded`, `shutdown` or `transport_error`. See the WebSocket settings in [environment variables](/docs/reference/cli/db/environment-variables#websocket-config) for the timeouts and the connection limit.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_websocket_active</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_websocket_closed_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>reason</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_websocket_age_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels"><code>reason</code>, with buckets up to 24 hours</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_websocket_rejected_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>reason</code> (<code>max_connections</code>)</td>
+        </tr>
+    </tbody>
+</table>
+
+### Slow-query counter - `surrealdb.slow_query`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_slow_query_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">Same labels as <code>surrealdb_statement_total</code>. Increments when statement duration ≥ <code>SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS</code> (default 1000 ms; <code>0</code> disables the counter).</td>
+        </tr>
+    </tbody>
+</table>
+
+The slow-query counter is a Community-edition signal - it bumps for every statement that crosses the threshold. The [Enterprise slow-query log pipeline](/docs/operate/observability/slow-query-logging) produces full records on top of this counter.
+
+### GraphQL - `surrealdb.graphql`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_graphql_operation_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>operation_type</code> (<code>query</code> / <code>mutation</code> / <code>subscription</code>), <code>outcome</code>, <code>error_class</code>, <code>namespace</code>, <code>database</code>, <code>user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_graphql_operation_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+    </tbody>
+</table>
+
+### MCP - `surrealdb.mcp`
+
+<Edition value="community" />
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_mcp_tool_invocation_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>tool, transport, outcome, error_class, namespace, database, user</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_mcp_tool_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_mcp_session_active</code></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels"><code>transport</code></td>
+        </tr>
+    </tbody>
+</table>
+
+### Storage backend - `surrealdb.storage.<backend>`
+
+<Edition value="community" />
+
+Each enabled backend can publish a manifest of `u64` values through the transaction layer. The server bridge registers each entry as an observable gauge under `surrealdb.storage.<backend>.<metric>`; Prometheus renders them as `surrealdb_storage_<backend>_<metric>`. The set is backend-specific and may change between releases - the canonical list at runtime is whatever the running build exposes at `/metrics`. In SurrealDB 4.0 the in-memory, SurrealKV and TiKV backends publish none, and SurrealDS publishes its own. Before SurrealDB 4.0, the RocksDB backend published them, such as compaction statistics and block cache hits.
+
+Treat these metrics as operator-only - they expose backend-specific implementation detail that is rarely meaningful outside the operator persona.
+
+### Index compaction - `surrealdb.index`
+
+<Edition value="community" /> <Since v="v4.0.0" />
+
+Count, full-text, HNSW and DiskANN indexes keep each write as a pending update. A background compaction pass later merges the pending updates into the index. Until then, every query that uses the index must read the pending updates too, so a backlog makes queries slower. These metrics show whether compaction keeps up with writes.
+
+Every metric is labelled by the kind of index, never by the index itself, so the number of series is fixed. None of them is on the [public allowlist](#public-metrics-allowlist), so only a scrape with root credentials returns them. To check one index, use [`INFO FOR INDEX`](/docs/reference/query-language/statements/info#index-information).
+
+| Name | Type | Labels | Notes |
+| --- | --- | --- | --- |
+| `surrealdb_index_compaction_pass_total` | counter | `kind`, `trigger`, `outcome` | Compaction passes, one for each pass over one index. |
+| `surrealdb_index_compaction_pass_duration_seconds` | histogram | `kind`, `trigger`, `outcome` | Duration of each pass. |
+| `surrealdb_index_compaction_plans_total` | counter | `kind`, `mode` | Committed compaction steps that merged at least one pending update. |
+| `surrealdb_index_compaction_plan_duration_seconds` | histogram | `kind`, `mode` | Duration of each of those steps. |
+| `surrealdb_index_compaction_pending_keys_folded_total` | counter | `kind`, `mode` | Pending updates that those steps merged into the index. |
+| `surrealdb_index_compaction_retries_total` | counter | `kind`, `reason` | Steps that had to start again. |
+| `surrealdb_index_compaction_unqueued_total` | counter | `kind`, `trigger` | Passes that stopped with work left and could not queue a new request for it. |
+| `surrealdb_index_hnsw_cache_discards_total` | counter | - | HNSW steps that failed to commit after they changed the in-memory graph. The node drops the graph and loads it again from storage on next use. |
+| `surrealdb_index_pending_keys_read` | histogram | `kind` | Pending updates that one query read merged. A read that merged none records nothing, so `_count` counts reads that met a backlog, not all reads. A BM25 full-text search can record two values: one for its terms and one for its document statistics. Buckets: `1`, `4`, `16`, `64`, `256`, `512`, `1024`, `4096`, `16384`. |
+
+The labels take these values:
+
+- **`kind`:** `count`, `fulltext`, `hnsw` or `diskann`. A pass that stopped before it read the index definition reports `-`.
+- **`trigger`:** `queue` for the background pass over queued requests, which runs at a fixed interval and also when a write that queued compaction commits. `after_commit` for a pass that a blocking `DEFINE INDEX` or `REBUILD INDEX` runs after it commits, while it waits for its index to be ready.
+- **`mode`:** `folded` for count, full-text and DiskANN steps. `staged` for an HNSW step that only adds vectors, built beside the graph and published on commit. `in_place` for an HNSW step applied to the in-memory graph directly.
+- **`reason`:** `txn_conflict` when the write transaction conflicted at commit, or `lost_race` when another compaction pass merged part of the same work first.
+
+On the two pass metrics, `outcome` is the result of the pass. It does not use the `success`, `error` and `cancelled` values of the other families:
+
+| `outcome` | Meaning |
+| --- | --- |
+| `empty` | Nothing was pending, or the index was removed. |
+| `short` | The pass merged everything it found. |
+| `budget` | The pass reached its limit of steps, or lost its compaction lease between steps, with work left, and queued the index again. |
+| `lost_race` | Other compaction passes kept changing the same work, the pass ran out of retries, and it queued the index again. |
+| `fenced` | An index build owns the vector index, so the pass left the request for later. |
+| `not_visible` | The index definition is not yet visible on this node while a build owns it, so the pass left the request for later. |
+| `error` | The pass failed. If it failed after it ran out of retries on write conflicts, it also queued the index again. |
+| `cancelled` | The pass stopped because it was cancelled, for example at shutdown. |
+
+### Audit log pipeline self-metrics
+
+<Edition value="enterprise" /> <Since v="v3.1.0" />
+
+Observable gauges registered when the [audit log pipeline](/docs/operate/observability/audit-logging) is enabled. The values are pulled at scrape time from atomic counters on the pipeline, so the cost is zero when nothing consumes the metric.
+
+| Name | Type | Notes |
+| --- | --- | --- |
+| `surrealdb_audit_records` | gauge | Cumulative count of records successfully enqueued (observer → queue). |
+| `surrealdb_audit_dropped` | gauge | Cumulative count of records dropped (overflow or queue closed). **Alert on any non-zero rate** - every drop is a lost record. |
+| `surrealdb_audit_queue_depth` | gauge | Records currently buffered between observer and worker. Sustained depth above ~50% of `SURREAL_AUDIT_QUEUE_CAPACITY` indicates a slow sink. |
+| `surrealdb_audit_appended` | gauge | Cumulative records the worker wrote to the sink. The gap to `surrealdb_audit_records` is queue depth plus append errors. |
+| `surrealdb_audit_append_errors` | gauge | Cumulative sink-write failures. **Alert on any non-zero rate**. |
+
+> These are exposed as gauges, not counters - the values are pulled live from atomic counters on the pipeline. The Prometheus name therefore has no `_total` suffix even though the underlying values are monotonic.
+
+### Slow-query log pipeline self-metrics
+
+<Edition value="enterprise" /> <Since v="v3.1.0" />
+
+The slow-query pipeline exposes the same shape as the audit pipeline under the `surrealdb.slow_query` scope:
+
+| Name | Type | Notes |
+| --- | --- | --- |
+| `surrealdb_slow_query_records` | gauge | Cumulative records enqueued. |
+| `surrealdb_slow_query_dropped` | gauge | Cumulative records dropped. **Alert on any non-zero rate**. |
+| `surrealdb_slow_query_queue_depth` | gauge | Current queue depth. |
+| `surrealdb_slow_query_appended` | gauge | Cumulative records written to the sink. |
+| `surrealdb_slow_query_append_errors` | gauge | Cumulative sink-write failures. **Alert on any non-zero rate**. |
+
+### Licence - `surrealdb.license`
+
+<Edition value="enterprise" /> <Since v="v3.3.0" />
+
+These observable gauges describe the [licence](/docs/operate/enterprise/product/licensing#monitor-the-licence) state of an Enterprise node. They are the only place licence state is reported, and an anonymous scrape does not return them. A refused start is reported only through the exit status and the startup log, because the startup check runs before the HTTP listener is bound. Timestamps are absolute Unix seconds rather than countdowns, and a timestamp that does not apply is omitted rather than reported as `0`.
+
+| Name | Type | Labels | Notes |
+| --- | --- | --- | --- |
+| `surrealdb_license_state` | gauge | `state` | One-hot: `1` for the current state and `0` for the others. `state` is one of `valid`, `expiry_grace`, `offline_grace`, `revoked` or `unlicensed`. Absent until the licence has been checked. |
+| `surrealdb_license_expires_at_seconds` | gauge | - | When the licence expires. |
+| `surrealdb_license_grace_ends_at_seconds` | gauge | - | When the grace period in effect ends. |
+| `surrealdb_license_shutdown_at_seconds` | gauge | - | When the node shuts down, after a confirmed revocation or once the offline allowance has run out. The process exits at the first revalidation after this time, so read it as the earliest exit time. |
+| `surrealdb_license_last_validated_at_seconds` | gauge | - | The signed timestamp of the most recent verified response from keygen.sh, fresh or cached. This is keygen.sh's clock, not the node's. |
+| `surrealdb_license_generation` | gauge | - | Monotonic count of licence state updates, which tells an unchanged licence apart from a stalled reporter. |
+| `surrealdb_license_enforcing` | gauge | - | `1` when the build acts on the licence verdict, `0` when it only reports it. |
+| `surrealdb_license_trust_override` | gauge | - | `1` when the build's licence trust anchors were replaced at compile time. Always `0` on a released image. |
+
+### Per-tenant rollups - `surrealdb.tenant`
+
+<Edition value="enterprise" />
+
+The `surrealdb.tenant` meter scope is **reserved** for low-cardinality per-tenant rollups keyed on `(namespace, database)` only. No instruments are currently registered under it. Until rollups land, customer-tenant filtering must be done at a proxy by filtering the higher-cardinality labelled families on `namespace` / `database`.
+
+## Public metrics allowlist
+
+Anonymous scrapers on `/metrics` see only the metrics on the public allowlist. Adding a metric to this list requires a security review. The six allowlisted metrics are:
+
+- `surrealdb_build_info`
+- `surrealdb_process_uptime_seconds`
+- `surrealdb_process_memory_bytes`
+- `surrealdb_process_cpu_percent`
+- `target_info`
+- `otel_scope_info`
+
+Root credentials unlock the full surface for an authenticated scrape.
+
+### Recommended cloud whitelist
+
+For cloud and multi-tenant deployments the recommendation is a three-tier whitelist:
+
+- **Tier 1 - Always public.** The allowlisted six above.
+- **Tier 2 - Customer-visible (per-tenant, via proxy filter).** A subset of labelled families exposed to customers showing their own usage. Every metric in this tier carries `namespace` and `database` labels and the cloud proxy MUST filter on those before responding to a customer request - there is no server-side mechanism today that restricts a labelled family to a single tenant. Strip the `user` label before exposing. Suggested subset: `surrealdb_statement_*`, `surrealdb_transaction_total`, `surrealdb_transaction_duration_seconds`, `surrealdb_transaction_conflicts_total`, `surrealdb_query_*`, `surrealdb_http_request_total`, `surrealdb_network_received_bytes_total`, `surrealdb_network_sent_bytes_total`, `surrealdb_live_query_active`, `surrealdb_slow_query_total`.
+- **Tier 3 - Operator-only.** Everything else: all pipeline self-metrics, `surrealdb_rpc_*` (full method dimension), `surrealdb_auth_*` (failure rates can be probed by an attacker), `surrealdb_graphql_*`, `surrealdb_mcp_*`, `surrealdb_storage_*`, `surrealdb_bucket_*`, the index compaction metrics (`surrealdb_index_*`), `surrealdb_license_*`, the tracked-memory gauges (`surrealdb_process_memory_allocated_bytes`, `_requested_bytes`, `_reserved_bytes` and `_threshold_bytes`), `surrealdb_http_active_requests` (real-time concurrency snapshot), and the KV-layer `surrealdb_transaction_*` counters. Reach these over an internal sidecar or private network with root credentials.
+
+## Cardinality and sensitivity
+
+| Flag | Where it applies | Mitigation |
+| --- | --- | --- |
+| **Tenant-identifying** | `namespace`, `database`, `user` on every labelled family | Strip or filter at the proxy before exposing to a customer. Anonymous scrapers cannot see any family carrying these labels because the families are absent from the public allowlist. |
+| **High-cardinality** | `http_route`, `rpc_method` | Fine internally. External exposure should be conditional on the route or method set already being public. |
+| **Workload inference** | The allowlisted process gauges (uptime, memory, CPU) | Already on the allowlist, but in a single-tenant-per-pod deployment they correlate with tenant workload. Acceptable trade-off in most architectures. |
+| **PII risk** | Audit and slow-query *records* carry SQL when `*_INCLUDE_SQL=true`. The pipeline self-metrics are safe; the records themselves go to the file sink and (opt-in) OTLP logs, not to `/metrics`. | Run the [three-pass redactor](/docs/operate/observability/audit-logging#redaction); alert on `*_append_errors`. |
+| **Default-deny** | Multi-tenant deployments | Set `SURREAL_METRICS_ENABLED=false` on customer-facing pods; serve scrapes from an internal sidecar bound to a non-tenant-visible interface. |
+
+## Alert hints
+
+A starter set for production:
+
+- `rate(surrealdb_statement_total{outcome="error"}[5m])` rising sharply against a baseline - application or operator error spike.
+- `rate(surrealdb_transaction_conflicts_total[5m])` rising - OCC pressure or retry storms.
+- `rate(surrealdb_audit_dropped[5m]) > 0` or `rate(surrealdb_audit_append_errors[5m]) > 0` - audit records being lost.
+- `surrealdb_audit_queue_depth` sustained above ~50% of `SURREAL_AUDIT_QUEUE_CAPACITY` - sink is falling behind.
+- `surrealdb_process_memory_allocated_bytes / surrealdb_process_memory_threshold_bytes > 0.9 and surrealdb_process_memory_threshold_bytes > 0` sustained - tracked memory is close to the point where queries fail.
+- `increase(surrealdb_process_memory_refusals_total[5m]) > 0`, or `surrealdb_process_memory_guard_engaged_seconds > 30` - the memory threshold is refusing requests.
+- `increase(surrealdb_index_compaction_unqueued_total[5m]) > 0` - a compaction pass could not queue the work it left.
+- `rate(surrealdb_index_compaction_pass_total{outcome="budget"}[15m])` sustained, or `rate(surrealdb_index_pending_keys_read_sum[5m])` rising - compaction is not keeping up with writes, and queries read a growing backlog.
+- `surrealdb_license_state{state="valid"} == 0` - an Enterprise node's licence is not currently verified as valid, so its next start may be refused. A `surrealdb_license_shutdown_at_seconds` series means an exit is scheduled.
+
+## Migration from 3.0
+
+The 3.1 release renamed the metric surface to a consistent `surrealdb.*` namespace. Legacy Prometheus names that operators may still see in old dashboards, and their current replacements:
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">3.0 name</th>
+            <th scope="col">3.1 replacement</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_statements_completed_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_statement_total{outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_statement_errors_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_statement_total{outcome="error"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_queries_completed_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_query_total{outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_query_errors_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_query_total{outcome="error"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_query_dim_duration_seconds</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_query_duration_seconds</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_transactions_completed_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_transaction_total{outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_transaction_writes_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_transaction_total{write="true",outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_transaction_errors_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_transaction_total{outcome="error"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_rpcs_completed_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_rpc_total{outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_rpc_errors_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_rpc_total{outcome="error"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_auth_attempts_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_auth_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_auth_failures_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_auth_total{outcome!="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_http_requests_completed_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_request_total{outcome="success"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_http_request_errors_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_request_total{outcome="error"}</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_http_dim_active_requests</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_active_requests</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_network_dim_received_bytes_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_network_received_bytes_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>surrealdb_network_dim_sent_bytes_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_network_sent_bytes_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>http_server_request_duration_milliseconds</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_request_duration_seconds</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>http_server_request_count_total</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_request_total</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>http_server_active_requests</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_http_active_requests</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>rpc_server_request_duration_milliseconds</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_rpc_duration_seconds</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Old"><code>rpc_server_active_connections</code></td>
+            <td scope="row" data-label="New"><code>surrealdb_session_active{protocol="websocket"}</code></td>
+        </tr>
+    </tbody>
+</table>
+
+The `otel_scope_name` label also changes shape in 3.1: scopes are now signal-domain (`surrealdb.statement`, `surrealdb.query`, …) rather than edition-tier (`surrealdb.community`, `surrealdb.enterprise`). Dashboards that filtered by scope should switch to the metric name (which now carries the same information, since scopes mirror the family prefix) or to the `service.edition` resource attribute, which is the authoritative edition signal.

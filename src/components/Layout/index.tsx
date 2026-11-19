@@ -1,22 +1,20 @@
-import { ActionIcon, Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { Icon, iconSidebar } from "@surrealdb/ui";
-import { useEffect } from "react";
-import { usePageContext } from "vike-react/usePageContext";
+import { Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import { RelatedContent } from "~/components/RelatedContent";
+import { SidebarToggle } from "~/components/SidebarToggle";
+import { useSidebarCollapsed } from "~/components/SidebarToggle/use-sidebar-collapsed";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
+import { useMobilePageNavigation } from "./mobile-menu";
 import { PageNavigation } from "./page-navigation";
-import { Shell, ShellContent, ShellDrawer } from "./shell";
+import { Shell, ShellContent } from "./shell";
 import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
 export interface DefaultLayoutProps {
     data: PageData;
     children: React.ReactNode;
-    lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
 }
@@ -27,30 +25,15 @@ export function DefaultLayout({
     showToc = true,
     versionSelector,
 }: DefaultLayoutProps) {
-    const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
-    const { urlPathname } = usePageContext();
+    // Below `lg` the sidebar is reached from the header's menu, which shows
+    // this page's part of the docs above the list of sections.
+    useMobilePageNavigation(data.navigation);
 
-    // Scrolling is left to Vike's client router, which scrolls to the URL's hash
-    // or to the top after a navigation and restores the position on back and
-    // forward. Scrolling here as well would also run on the first render, where
-    // it cancels the browser's scroll to a linked heading.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
-    useEffect(() => {
-        closeSidebar();
-    }, [urlPathname]);
+    const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
 
     return (
         <>
-            <ShellDrawer
-                opened={sidebarOpened}
-                onClose={closeSidebar}
-            >
-                <Sidebar
-                    navigation={data.navigation}
-                    versionSelector={versionSelector}
-                />
-            </ShellDrawer>
-            <Shell>
+            <Shell sidebarCollapsed={sidebarCollapsed}>
                 <Sidebar
                     navigation={data.navigation}
                     visibleFrom="lg"
@@ -66,21 +49,18 @@ export function DefaultLayout({
                         <Box
                             flex={1}
                             miw={0}
-                            maw={832}
+                            maw={sidebarCollapsed ? undefined : 832}
+                            pos="relative"
                             className={classes.contentColumn}
                         >
+                            <SidebarToggle
+                                collapsed={sidebarCollapsed}
+                                onToggle={toggleSidebar}
+                            />
                             <Group
                                 align="center"
                                 gap="sm"
                             >
-                                <ActionIcon
-                                    variant="default"
-                                    hiddenFrom="lg"
-                                    onClick={toggleSidebar}
-                                    aria-label="Toggle sidebar"
-                                >
-                                    <Icon path={iconSidebar} />
-                                </ActionIcon>
                                 <Box
                                     flex={1}
                                     miw={0}
@@ -145,7 +125,10 @@ export function DefaultLayout({
                             </Box>
                             <RelatedContent items={data.related ?? []} />
                             <Divider my="3xl" />
-                            <PageContentActions contentPath={data.contentPath} />
+                            <PageContentActions
+                                contentPath={data.contentPath}
+                                lastModified={data.lastModified}
+                            />
                             <PageNavigation navigation={data.navigation} />
                         </Box>
                         {showToc && <PageAside headings={data.headings} />}

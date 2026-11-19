@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import type { Plugin } from "vite";
 
 import { redirectDestinationForDev, resolveRedirect } from "../redirects";
@@ -14,8 +16,9 @@ function stripDocsBase(pathname: string): string {
 }
 
 /**
- * Applies the same redirect rules as vercel.ts during `vike dev` and `vike preview`.
- * Vercel reads redirects at deploy time; Vite does not.
+ * Applies the same redirect rules as vercel.ts during `vike dev` and `vike preview`,
+ * and serves the HTML files in `public/` at their extensionless addresses, as
+ * `cleanUrls` does in production. Vercel reads both at deploy time; Vite does not.
  */
 export function viteDevRedirects(mode: string): Plugin {
     if (mode === "production") {
@@ -51,6 +54,14 @@ function createRedirectMiddleware() {
         // register `/docs/…` variants that are inert in production but match here.
         const match = resolveRedirect(stripDocsBase(pathname)) ?? resolveRedirect(pathname);
         if (!match) {
+            // `/docs/showcase/rome/map` is `public/showcase/rome/map.html`, which
+            // production serves at that address and links name without `.html`.
+            const html = `${stripDocsBase(pathname)}.html`;
+
+            if (!/\.[a-z0-9]+$/i.test(pathname) && existsSync(join("public", html))) {
+                req.url = `${pathname}.html${q === -1 ? "" : raw.slice(q)}`;
+            }
+
             next();
             return;
         }

@@ -55,6 +55,10 @@ export const MCP_URL = "https://mcp.surrealdb.com";
 export const SETUP_PROMPT =
     "Set me up for SurrealDB. Fetch https://surrealdb.com/docs/agents/instructions.md and follow it.";
 
+/** The Agent Memory counterpart of `SETUP_PROMPT`, shown on its Get started page. */
+export const AGENT_MEMORY_SETUP_PROMPT =
+    "Set me up for SurrealDB Agent Memory. Fetch https://surrealdb.com/docs/agent-memory/agents/instructions.md and follow it.";
+
 /** Installs the official Agent Skills into the project it runs in. */
 export const SKILLS_COMMAND = "npx skills add surrealdb/agent-skills";
 

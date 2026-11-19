@@ -14,9 +14,12 @@ bun run diagrams:check  # list diagrams whose page sections have changed
 bun run screenshots:check # list screenshots whose UI has changed in Studio
 bun run check:links     # check every internal link and anchor in src/content
 bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
+bun run check:cli-reference # check the environment variables page and command pages against the release
+bun run check:duplicates # warn about pages and examples this branch made repeat another page
+bun run check:search-text # check that the search crawler extracts every page's text
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
 
 The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
 
@@ -687,6 +690,15 @@ clause do". Two pages that show the same examples compete for the same search
 and leave an agent to pick one at random. In November 2026, 11 guides shared
 between 2 and 13 examples with their reference page.
 
+`bun run check:duplicates`, which CI runs on every pull request, warns when a
+change adds a page whose prose mostly appears on another page, or copies an
+example from another page. It reports only what the change made similar, so a
+pair of pages that is meant to match, such as the `ALTER DATABASE` and `ALTER NAMESPACE` pages, does
+not warn on every edit. It never fails the build: when it warns, link to the
+page that already covers the topic, or merge the two, unless the pair is
+deliberate. `--all` lists every similar pair in the docs, which is where to
+start a clean-up.
+
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
@@ -847,6 +859,8 @@ bun run generate:cli-history
 
 `scripts/cli-history/generate.ts` reads every release tag of a local clone of surrealdb/surrealdb (`~/surrealdb`, or `SURREALDB_REPO`) with git only, takes release dates from `gh release list`, and writes `public/cli-history/data.json`, with its intermediate files in `generated/cli-history`. A run over all tags takes under a minute. Then update the version the page names as its latest, which appears in its `description`, its opening paragraph and its scope section. Check the diff of `data.json` before committing: a new tag should add a tag entry and extend or close ranges, and an unexpected swing in the counts the script prints usually means a source file moved and the extractor needs a new path.
 
+`bun run check:cli-reference`, which CI also runs, compares the pages with the newest stable release in `data.json`. Every `SURREAL_` variable in that release needs a row on the environment variables page, every row must name a variable some release has had, a row for a variable the release no longer has must give a version in the row or in its section's opening, and a numeric default must match the source. Every flag must be mentioned on its command's page. A variable or flag that is not a setting for users, such as one read at compile time, one only debug builds read, or a hidden flag, goes in `INTERNAL` or `HIDDEN_FLAGS` in `scripts/check-cli-reference.ts` with the reason. Every other setting is documented: there is no list for settings still to write up, so after regenerating the data for a new release, run the check and write a row for each new setting it reports in the same change. Take the description and default from the setting's doc comment at that tag, and add a `<Since>` badge with the version it first appeared in.
+
 When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
 
 ## Deployment targets
@@ -876,6 +890,11 @@ bun run test:routes         # check the compiled route table
   `https://` URL, because Workers cannot open an outbound WebSocket.
 - Search indexing (`postbuild`) runs on Vercel production builds and the
   re-index workflow, never in the Workers build.
+- The index holds the text `search/scripts/crawler.ts` extracts from each
+  page and each `##` section. A section with no prose, such as one that holds
+  only a code block, gets no entry of its own, so give each section a
+  sentence that says what it shows. `bun run check:search-text` fails when
+  extraction stops working.
 
 ## Content collections
 
@@ -885,7 +904,8 @@ Content lives in `src/content`. Frontmatter schemas live in
 ### Plugin configuration (`vite.config.ts`)
 
 - `contentDir`: `"src/content"`
-- `lastModified`: `true`
+- `lastModified`: `false` - page dates come from `generated/last-modified.json`
+  instead (see [Page dates](#page-dates))
 - `drafts.field`: `"draft"`, `includeDrafts`: `false`
 - `ssr.external`: includes `"vike-content-collection"`
 
@@ -893,12 +913,12 @@ Content lives in `src/content`. Frontmatter schemas live in
 
 A collection is any directory under `src/content` holding a `+Content.ts`, and
 its id is that directory's path relative to `src/content`. So
-`src/content/manage/instances/+Content.ts` declares the collection
-`manage/instances`. Renaming a directory renames the collection id, which then
+`src/content/operate/instances/+Content.ts` declares the collection
+`operate/instances`. Renaming a directory renames the collection id, which then
 has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
-section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*`
+section under `integrate/*`, `learn/*`, `operate/*`, `reference/*`
 and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
 Labs entries are not a collection: see [Labs](#labs).
 
@@ -948,13 +968,13 @@ collection id:
 
 | Collection           | `+data.ts` call                                   | URL                             |
 | -------------------- | ------------------------------------------------- | ------------------------------- |
-| `manage/instances`   | `(context, "manage/instances")`                   | `/docs/manage/instances/<slug>` |
+| `operate/instances`  | `(context, "operate/instances")`                  | `/docs/operate/instances/<slug>` |
 | `index`              | `(context, "index", "")`                          | `/docs/<slug>`                  |
 | `agent-memory/index` | `(context, "agent-memory/index", "agent-memory")` | `/docs/agent-memory/<slug>`     |
 
 ### Section hubs
 
-`build`, `explore`, `learn`, `manage` and `reference` are directories full of
+`integrate`, `learn`, `operate` and `reference` are directories full of
 collections, not collections themselves - a `+Content.ts` at that level would
 recurse into the collections beneath it and index every page twice. So the hub
 page for each lives in the **root `index` collection**: `src/content/index/learn.mdx`
@@ -963,8 +983,45 @@ is what serves `/docs/learn`.
 Each is also the `href` on its `NavMenuGroup` in `src/components/Layout/nav.ts`,
 which is what makes the top-nav label a link rather than a menu opener. Adding a
 section means adding both, or the label goes back to naming a page that does not
-exist. All five 404'd until September 2026, which left the sections unlinkable,
+exist. The section hubs 404'd until September 2026, which left the sections unlinkable,
 unrankable, and unguessable by an agent constructing a path.
+
+### The same five sections in both products
+
+The database docs and Agent Memory have the same top bar, in the same order:
+**Get started, Learn, Integrate, Operate, Reference**. A reader who knows where
+something is in one product can find its counterpart in the other, so keep the
+two aligned when adding a section or moving a page:
+
+| Section     | Database                                                                  | Agent Memory                                                             |
+| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Get started | Overview, running SurrealDB, language quickstarts, agent setup            | Welcome, quickstarts                                                     |
+| Learn       | `learn/*`: database basics, querying, schema, data models, security, tutorials and demos | `agent-memory/learn`: mental model, ingest to tuning, architecture, plus the cookbooks and showcase in the menu |
+| Integrate   | `integrate/*`: integrations, AI agents, embedding, migrating              | Integrations and migration guides                                        |
+| Operate     | `operate/*`: Cloud instances, Earth, organisations, enterprises, observability, self-hosting, upgrading | `agent-memory/operate`: Enterprise deployments and configuration |
+| Reference   | SurrealQL, protocols, CLI, Studio, SDKs                                   | REST API, MCP tools, CLI, SDKs, configuration                            |
+
+A page goes in the section whose job it does in the other product too:
+concepts and examples under Learn, connecting to code and tools under
+Integrate, running and configuring under Operate. The names are chosen so that
+neither suggests a step towards the other. The Agent Memory Integrate hub is
+`agent-memory/index/integrate.mdx`, in its root collection like the database
+hubs, because its pages live in the `integrations` and `cookbooks` collections.
+
+Each level of navigation appears in one place. The top bar lists the sections,
+a section's menu and hub page list its parts, and the sidebar lists the pages
+of the part you are in. The hub pages live in the root `index` collection, so
+`buildNavigation` leaves them out of the Get started sidebar, and a hub page
+shows its section's parts as its sidebar instead.
+
+The product switch at the top of the sidebar goes to the other product's home,
+except on a page that `COUNTERPART_PAGES` in `src/utils/product-counterparts.ts`
+pairs with a page in the other product. There it goes to that page: from a
+section hub to the same hub, and from the JavaScript SDK reference, or any page
+under it, to the Agent Memory JavaScript SDK. Add a pair only where both pages
+cover the same thing, so that most pages still switch to the home page. When a
+paired page moves, update its path there; `bun run check:links` fails on a
+pair that names no page.
 
 ### Adding content
 
@@ -993,7 +1050,8 @@ page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
 - `redirects.ts` - old URLs to new URLs (see below).
 - `public/llms.txt` - generated by `scripts/generate-llms-txt.mjs` from the
   content tree, on `prebuild` and via `bun run generate:llms`. Do not edit it by
-  hand; the only hand-written part is the script's `PREAMBLE`. It reads
+  hand; the only hand-written parts are the script's `PREAMBLE` and
+  `VERSION_NOTES`. It reads
   collection ids and URL prefixes out of the page groups' `+data.ts` calls, so a
   renamed collection cannot silently leave dead links here - but regenerate and
   commit the result in the same change.
@@ -1064,6 +1122,7 @@ every component in that file.
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
 | `<DemoEmbed pages={[…]} />`      | A page from `public/` in a frame, such as a showcase demo.    |
+| `<Details summary="…">`         | A block, such as a long example, closed under a summary line. |
 
 `<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
 it around an output pair while parsing, and no page writes it by hand.
@@ -1280,7 +1339,7 @@ A doc page group's `+data.ts` is a single call:
 
 ```ts
 export default async function data(context: PageContext) {
-    return resolveDataFromCollection(context, "manage/instances");
+    return resolveDataFromCollection(context, "operate/instances");
 }
 ```
 
@@ -1293,8 +1352,16 @@ export default async function data(context: PageContext) {
    already points at. Every other miss throws a 404, so a page that has really
    moved belongs in `redirects.ts`, where the destination is stated rather than
    guessed at.
-3. Sets the page `title` and `description` through `useConfig`, suffixing the
-   title per product (`src/utils/product.ts`).
+3. Sets the page `title` and `description` through `useConfig`. The title is
+   `{page} | {SDK or section} | SurrealDB Docs`, built by `documentTitle` in
+   `src/utils/page-title.ts`. An SDK reference page always names its SDK
+   ("Table | JavaScript SDK | SurrealDB Docs"), because every SDK tree has the
+   same page names. Any other qualifier is dropped when the title would run
+   past 60 characters, unless that would give two pages one title, and two
+   pages that still share one add the folder they sit in. No two pages share
+   a title, and a new page needs nothing extra to keep it that way. The meta
+   description is cut back to whole sentences past 160 characters
+   (`metaDescription` in `src/utils/meta.ts`).
 4. Builds the sidebar with `buildNavigation(id, prefix)`.
 5. Parses the markdown with `resolveMarkdown(entry.content)`.
 6. Walks each path prefix looking for a `<prefix>/__category` entry to build
@@ -1335,6 +1402,24 @@ are inert. Sitemap URLs come from `+sitemapUrls.ts` instead
 (`collectionSitemapUrls` in `src/utils/sitemap.ts`, which filters `__category`
 entries) - add one for every new page group.
 
+### Page dates
+
+Each page's date is the committer date of the newest commit that added or
+changed its source file. `scripts/generate-last-modified.mjs` reads them from
+git during `prebuild` into `generated/last-modified.json`, because a server has
+no git history to ask at request time. They appear as the sitemap's
+`<lastmod>`, the "Last updated" line beside "Edit page", `dateModified` in the
+page's `TechArticle` JSON-LD, `article:modified_time`, and `last_modified` in
+the frontmatter of the page's markdown rendering. A page without a known date
+leaves it out of all of these rather than showing a wrong one.
+
+Vercel clones with `--depth=10` and CI checks out one commit. In a shallow
+history the oldest commit appears to add every file, so the script first
+fetches the rest of the history, commits and trees only, which takes about a
+second. If that fails, a file whose newest commit is the shallow boundary gets
+no date, and every other file keeps its real one. `bun run dev` does not run
+`prebuild`, so run `bun run generate:last-modified` to see dates locally.
+
 ## Markdown for agents
 
 Four things advertise the markdown rendering, and they are easy to break one at
@@ -1348,7 +1433,16 @@ a time:
 | The index itself                                          | `public/llms.txt`                                       |
 
 The first three exist because the fourth is useless to an agent that never
-learns it is there. Content negotiation, `.md` URLs, `x-markdown-tokens` and
+learns it is there.
+
+A page's markdown rendering opens with YAML frontmatter, before the index
+pointer: `title`, `description`, `canonical_url`, the `sdk` an SDK reference
+page documents (with `sdk_version` when its registry reports a release for that
+tree) or the `section` any other page sits in, `surrealdb_version` (the major
+version the docs describe) and `last_modified`. It is added in
+`composePageMarkdown` in `src/pages/+server.ts` with `withFrontmatter`, so the
+`.md` URLs, content negotiation and the agent guides all carry it, and the
+corpus files, which repeat every page, do not. Content negotiation, `.md` URLs, `x-markdown-tokens` and
 `llms-full.txt` were all shipped and none of them was announced, so a trace of
 Claude Code looking for our authentication docs read rendering-heavy HTML for
 602k tokens and 25 steps (September 2026).
@@ -1361,9 +1455,28 @@ reintroduce a rule that drops pages - a page missing from the index is invisible
 in a way a page missing its description is not.
 
 The budget is a real constraint, not a formality. About 90 characters of URL and
-title per page is the floor, so at the current page count most of the ceiling is
-already spent before a description is written. If the file needs to get smaller,
-the lever is fewer pages or shorter URLs, not a shorter preamble.
+title per page is the floor, and at the current page count the floor alone is
+past the ceiling, so no page carries a description. If the file needs to get
+smaller, the lever is fewer pages or shorter URLs, not a shorter preamble.
+
+Two sections follow the preamble. **Version notes for agents** names the current
+release, read from the newest stable tag in `public/cli-history/data.json`, and
+lists the SurrealQL changes between major versions that the upgrade guides in
+`build/migrating/from-old-surrealdb-versions` document. Its prose is the
+script's `VERSION_NOTES`: when an upgrade guide is added or a major version
+ships, update it from the guide, and say nothing there that the guide does not.
+
+**Documentation bundles** lists the corpus split by section and SDK, served at
+`/docs/llms-full/<slug>.txt` from `src/pages/+server.ts`. `llms-full.txt`
+holds every page, about 2.4 million tokens, which no agent can read in one go,
+so the bundles are what an agent should fetch. The bundles and the paths they
+hold are `src/utils/llms-bundles.ts`, which the server and the generator both
+read, so the index lists the bundles the server answers; a page belongs to the
+first bundle whose prefix matches its path, and the last bundle catches the
+rest. The token counts in the index are estimated from the source, within a few
+per cent, and each response states its exact size in `x-markdown-tokens`. A
+bundle slug is part of an address agents are given, so keep it when its
+section moves and change the prefixes instead.
 
 ### Agent guides
 
