@@ -18,6 +18,19 @@
  * - **output**: a SurrealQL example whose result fence is titled `Response`
  *   or `Result`, which are for HTTP and RPC pages.
  * - **password**: an example password of `root`.
+ * - **embed**: a `<SurrealistMini>` that renders as an empty editor or leaks its
+ *   query onto the page: a `url` attribute, a template literal, or a blank line
+ *   inside the query.
+ * - **html**: a raw `<iframe>`, which the renderer strips without an error.
+ * - **callout**: a `> [!KIND]` that is not NOTE, TIP, IMPORTANT, WARNING or
+ *   CAUTION in capitals.
+ * - **alt**: an image with no alt text, which is all the `.md` endpoints serve.
+ * - **since**: a `<Since>` badge anywhere but directly under a heading, directly
+ *   under the frontmatter or in a table cell.
+ * - **tabs**: a group of version tabs with the older version first, or a
+ *   `surrealdb-version` group whose labels the version menu cannot match.
+ * - **link-once**: a link repeated in the prose of a short page, or of one
+ *   section of a long page.
  *
  * Text in code fences, inline code and link targets is not read for the prose
  * rules. By default only lines the branch added or changed are checked, so
@@ -39,6 +52,7 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MAJOR_VERSIONS } from "../src/utils/major-version";
 
 const ROOT = join(import.meta.dir, "..");
 const CONTENT = "src/content";
@@ -500,12 +514,224 @@ function checkFence(file: string, lines: Line[]) {
     }
 }
 
+/** The callout kinds the docs use. */
+const CALLOUTS = new Set(["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"]);
+
+/** An `<iframe>` is stripped without an error, and its contents stay in the page source. */
+const RAW_HTML = /<iframe\b/i;
+
+/** Pages shorter than this link a target once. Longer pages may link it again in a later section. */
+const LONG_PAGE_WORDS = 1700;
+
+/** The text of a tag that starts on line `from`, up to its closing `>` or `limit` lines. */
+function tagText(lines: Line[], from: number, limit = 40): string {
+    let text = "";
+    for (let n = from; n < Math.min(lines.length, from + limit); n++) {
+        text += `${lines[n].text}\n`;
+        if (/>\s*$/.test(lines[n].text)) break;
+    }
+    return text;
+}
+
+/** Numbers in a tab label such as "SurrealDB 3.1 and later", lower for "Before SurrealDB 3.1". */
+function tabVersion(label: string): number[] | undefined {
+    const m = label.match(/(\d+(?:\.\d+)*)/);
+    if (!m || !/surrealdb/i.test(label)) return undefined;
+    const parts = m[1].split(".").map(Number);
+    if (/\b(?:before|older|earlier|prior)\b/i.test(label)) parts.push(-1);
+    else parts.push(0);
+    return parts;
+}
+
+function compareVersions(a: number[], b: number[]): number {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const [x, y] = [a[i] ?? 0, b[i] ?? 0];
+        if (x !== y) return x - y;
+    }
+    return 0;
+}
+
+function checkComponents(file: string, lines: Line[]) {
+    const prose = lines.filter((l) => l.kind === "prose");
+    const at = (l: Line) => lines.indexOf(l);
+
+    const tabs: { line: number; sync: string; labels: string[] }[] = [];
+    let words = 0;
+    let section = 0;
+    const seen = new Map<string, number>();
+    const sections: { line: Line; targets: string[] }[] = [];
+
+    for (const l of prose) {
+        const text = mask(l.text);
+        const n = l.number;
+
+        const callout = l.text.match(/^\s*>\s*\[!([A-Za-z]+)\]/);
+        if (callout && !CALLOUTS.has(callout[1])) {
+            report(
+                file,
+                n,
+                "callout",
+                `"${callout[1]}" is not a callout kind. Use NOTE, TIP, IMPORTANT, WARNING or CAUTION, in capitals.`,
+            );
+        }
+
+        if (RAW_HTML.test(text)) {
+            report(
+                file,
+                n,
+                "html",
+                'An <iframe> is stripped without an error. Use <YouTube code="..." /> for a video or <DemoEmbed> for a page.',
+            );
+        }
+
+        if (/<img\b/.test(text) && !/\balt=/.test(tagText(lines, at(l), 12))) {
+            report(
+                file,
+                n,
+                "alt",
+                "An image needs alt text, which is all the raw .md endpoints serve.",
+            );
+        }
+        if (/!\[\]\(/.test(text)) {
+            report(
+                file,
+                n,
+                "alt",
+                "An image needs alt text, which is all the raw .md endpoints serve.",
+            );
+        }
+
+        if (/<SurrealistMini\b/.test(text)) {
+            let tag = "";
+            let blank: number | undefined;
+            for (let k = at(l); k < lines.length; k++) {
+                if (lines[k].kind !== "prose") break;
+                if (k > at(l) && lines[k].text.trim() === "" && !tag.includes("/>")) {
+                    blank = lines[k].number;
+                    break;
+                }
+                tag += `${lines[k].text}\n`;
+                if (lines[k].text.includes("/>")) break;
+            }
+            const why =
+                blank !== undefined
+                    ? "a blank line inside the query ends the element early, so the rest of the query and the closing /> appear as text. Separate sections with -- comments"
+                    : /\burl=/.test(tag)
+                      ? "a url attribute is dropped and the editor renders empty. Pass the SurrealQL as query"
+                      : /query=\{\s*`/.test(tag)
+                        ? "a braced value must be JSON, so a template literal is dropped and the editor renders empty. Use a quoted string"
+                        : undefined;
+            if (why) report(file, n, "embed", `This <SurrealistMini> renders wrongly: ${why}.`);
+        }
+
+        if (/<Since\b/.test(text) && !/^\s*\|/.test(l.text) && !l.markup) {
+            let ok = false;
+            if (/^\s*<Since\b/.test(l.text)) {
+                const i = at(l);
+                let k = i - 1;
+                while (k >= 0 && lines[k].text.trim() === "") k--;
+                const prev = lines[k];
+                ok =
+                    !prev ||
+                    prev.kind === "frontmatter" ||
+                    /^#{1,6}\s/.test(prev.text) ||
+                    /^\s*<Since\b/.test(prev.text);
+            }
+            if (!ok) {
+                report(
+                    file,
+                    n,
+                    "since",
+                    "Put <Since> on its own line directly under the heading it dates, or directly under the frontmatter. Where only part of a section is new, write the version into the sentence.",
+                );
+            }
+        }
+
+        const open = text.match(/<Tabs\b/);
+        if (open) {
+            const tag = tagText(lines, at(l), 6);
+            tabs.push({ line: n, sync: tag.match(/syncKey="([^"]*)"/)?.[1] ?? "", labels: [] });
+        }
+        if (/<TabItem\b/.test(text) && tabs.length > 0) {
+            const label = tagText(lines, at(l), 6).match(/label=(?:"([^"]*)"|'([^']*)')/);
+            if (label) tabs[tabs.length - 1].labels.push(label[1] ?? label[2]);
+        }
+        if (/<\/Tabs>/.test(text)) {
+            const group = tabs.pop();
+            if (group) checkTabs(file, group);
+        }
+
+        if (/^#{1,2}\s/.test(l.text)) {
+            section++;
+            continue;
+        }
+        if (l.markup || /^\s*(?:#|\||[-*+]\s|\d+[.)]\s)/.test(l.text)) continue;
+        words += text.split(/\s+/).filter(Boolean).length;
+        const targets = [
+            ...l.text.replace(/`[^`]*`/g, "").matchAll(/\[[^\]]*\]\(([^)\s]+)[^)]*\)/g),
+        ].map((m) => m[1].replace(/\/$/, "").toLowerCase());
+        if (targets.length > 0) {
+            sections.push({ line: l, targets: targets.map((t) => `${section}\t${t}`) });
+        }
+    }
+
+    const short = words < LONG_PAGE_WORDS;
+    for (const { line, targets } of sections) {
+        for (const key of targets) {
+            const [sectionId, target] = key.split("\t");
+            const scope = short ? target : `${sectionId}\t${target}`;
+            if (seen.has(scope)) {
+                report(
+                    file,
+                    line.number,
+                    "link-once",
+                    `${target} is already linked ${short ? "earlier on this page" : "earlier in this section"}. Link a page at its first mention only.`,
+                );
+            }
+            seen.set(scope, line.number);
+        }
+    }
+}
+
+function checkTabs(file: string, group: { line: number; sync: string; labels: string[] }) {
+    if (group.sync === "surrealdb-version") {
+        const known = MAJOR_VERSIONS.map((v) => v.label);
+        const bad = group.labels.find((label) => !known.includes(label));
+        if (bad) {
+            report(
+                file,
+                group.line,
+                "tabs",
+                `The label "${bad}" is not one the version menu selects. Use ${known.join(" and ")}, exactly as written.`,
+            );
+            return;
+        }
+        const order = group.labels.map((label) => known.indexOf(label));
+        if (order.some((v, i) => i > 0 && v < order[i - 1])) {
+            report(file, group.line, "tabs", "Put the newest version's tab first.");
+        }
+        return;
+    }
+    const versions = group.labels.map(tabVersion);
+    if (group.labels.length < 2 || versions.some((v) => v === undefined)) return;
+    const list = versions as number[][];
+    if (list.some((v, i) => i > 0 && compareVersions(v, list[i - 1]) > 0)) {
+        report(
+            file,
+            group.line,
+            "tabs",
+            "Put the newest version's tab first, because it is the one a reader sees and the one they download.",
+        );
+    }
+}
+
 for (const file of files) {
     if (!changed.has(file)) continue;
     const lines = pages.get(file) ?? [];
     for (const l of lines) if (l.kind === "prose") checkProse(file, l);
     checkWrapping(file, lines);
     checkFence(file, lines);
+    checkComponents(file, lines);
 }
 
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
