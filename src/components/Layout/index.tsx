@@ -2,6 +2,8 @@ import { Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import { RelatedContent } from "~/components/RelatedContent";
+import { SidebarToggle } from "~/components/SidebarToggle";
+import { useSidebarCollapsed } from "~/components/SidebarToggle/use-sidebar-collapsed";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { useMobilePageNavigation } from "./mobile-menu";
@@ -27,9 +29,11 @@ export function DefaultLayout({
     // this page's part of the docs above the list of sections.
     useMobilePageNavigation(data.navigation);
 
+    const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
+
     return (
         <>
-            <Shell>
+            <Shell sidebarCollapsed={sidebarCollapsed}>
                 <Sidebar
                     navigation={data.navigation}
                     visibleFrom="lg"
@@ -45,9 +49,14 @@ export function DefaultLayout({
                         <Box
                             flex={1}
                             miw={0}
-                            maw={832}
+                            maw={sidebarCollapsed ? undefined : 832}
+                            pos="relative"
                             className={classes.contentColumn}
                         >
+                            <SidebarToggle
+                                collapsed={sidebarCollapsed}
+                                onToggle={toggleSidebar}
+                            />
                             <Group
                                 align="center"
                                 gap="sm"

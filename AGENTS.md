@@ -14,6 +14,9 @@ bun run diagrams:check  # list diagrams whose page sections have changed
 bun run screenshots:check # list screenshots whose UI has changed in Studio
 bun run check:links     # check every internal link and anchor in src/content
 bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
+bun run check:cli-reference # check the environment variables page and command pages against the release
+bun run check:duplicates # warn about pages and examples this branch made repeat another page
+bun run check:search-text # check that the search crawler extracts every page's text
 ```
 
 Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
@@ -89,7 +92,7 @@ edges.
 "Row" and "column" stay where the relational model genuinely is the subject:
 
 - **Row-level security**, which is the established name of the feature.
-- The [Postgres wire protocol](src/content/reference/rest-api/postgres-protocol.mdx),
+- The [Postgres wire protocol](src/content/reference/protocols/postgres-protocol.mdx),
   and comparison or migration pages set against a relational database, where
   tabular framing is the point.
 - Quoting SQL, or another database's own wording.
@@ -687,6 +690,15 @@ clause do". Two pages that show the same examples compete for the same search
 and leave an agent to pick one at random. In November 2026, 11 guides shared
 between 2 and 13 examples with their reference page.
 
+`bun run check:duplicates`, which CI runs on every pull request, warns when a
+change adds a page whose prose mostly appears on another page, or copies an
+example from another page. It reports only what the change made similar, so a
+pair of pages that is meant to match, such as the `ALTER DATABASE` and `ALTER NAMESPACE` pages, does
+not warn on every edit. It never fails the build: when it warns, link to the
+page that already covers the topic, or merge the two, unless the pair is
+deliberate. `--all` lists every similar pair in the docs, which is where to
+start a clean-up.
+
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
@@ -847,6 +859,8 @@ bun run generate:cli-history
 
 `scripts/cli-history/generate.ts` reads every release tag of a local clone of surrealdb/surrealdb (`~/surrealdb`, or `SURREALDB_REPO`) with git only, takes release dates from `gh release list`, and writes `public/cli-history/data.json`, with its intermediate files in `generated/cli-history`. A run over all tags takes under a minute. Then update the version the page names as its latest, which appears in its `description`, its opening paragraph and its scope section. Check the diff of `data.json` before committing: a new tag should add a tag entry and extend or close ranges, and an unexpected swing in the counts the script prints usually means a source file moved and the extractor needs a new path.
 
+`bun run check:cli-reference`, which CI also runs, compares the pages with the newest stable release in `data.json`. Every `SURREAL_` variable in that release needs a row on the environment variables page, every row must name a variable some release has had, or carry a `<Since>` badge that names a version newer than that release, in which case the check lists it as waiting and looks at it once that version is tagged, a row for a variable the release no longer has must give a version in the row or in its section's opening, and a numeric default must match the source. Every flag must be mentioned on its command's page. A variable or flag that is not a setting for users, such as one read at compile time, one only debug builds read, or a hidden flag, goes in `INTERNAL` or `HIDDEN_FLAGS` in `scripts/check-cli-reference.ts` with the reason. Every other setting is documented: there is no list for settings still to write up, so after regenerating the data for a new release, run the check and write a row for each new setting it reports in the same change. Take the description and default from the setting's doc comment at that tag, and add a `<Since>` badge with the version it first appeared in.
+
 When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
 
 ## Deployment targets
@@ -876,6 +890,11 @@ bun run test:routes         # check the compiled route table
   `https://` URL, because Workers cannot open an outbound WebSocket.
 - Search indexing (`postbuild`) runs on Vercel production builds and the
   re-index workflow, never in the Workers build.
+- The index holds the text `search/scripts/crawler.ts` extracts from each
+  page and each `##` section. A section with no prose, such as one that holds
+  only a code block, gets no entry of its own, so give each section a
+  sentence that says what it shows. `bun run check:search-text` fails when
+  extraction stops working.
 
 ## Content collections
 

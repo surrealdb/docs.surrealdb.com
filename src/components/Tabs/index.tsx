@@ -1,7 +1,12 @@
 import { Tabs as MantineTabs } from "@mantine/core";
 import { MarkdownContent } from "@surrealdb/ui";
 import { Children, isValidElement, type ReactNode, useEffect, useRef, useState } from "react";
-import { selectSyncedTab, useSyncedTab } from "~/utils/synced-tabs";
+import {
+    MAJOR_VERSION_KEY,
+    SYNCED_TAB_SELECT_EVENT,
+    selectSyncedTab,
+    useSyncedTab,
+} from "~/utils/synced-tabs";
 
 /** Fired on `window` after any tab group changes the panel it shows. */
 export const TABS_CHANGE_EVENT = "docs:tabs-change";
@@ -43,7 +48,12 @@ function collectItems(children: ReactNode): Item[] {
  * header's version menu selects the `surrealdb-version` groups the same way.
  *
  * A link to a heading inside a panel the group is not showing opens that
- * panel, without changing the reader's stored choice.
+ * panel, without changing the reader's stored choice, whether the page loads
+ * with the link or the link is followed on the page. Every other group with
+ * the same `syncKey` opens its panel of the same name too, so a link to
+ * `#axum` on a page with a tab group for each step shows Axum in all of them.
+ * Version groups are the exception: the header's version menu reads their
+ * stored choice, so a link to a 3.x heading opens only the group it is in.
  */
 export function Tabs({ syncKey, children }: TabsProps) {
     const items = collectItems(children);
@@ -59,20 +69,48 @@ export function Tabs({ syncKey, children }: TabsProps) {
         (synced && labels.includes(synced) && synced) ||
         first;
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: reads the labels and key of this group, which do not change
     useEffect(() => {
-        const id = decodeURIComponent(window.location.hash.slice(1));
-        const target = id ? document.getElementById(id) : null;
-        const panel = target?.closest<HTMLElement>("[data-tab-label]");
+        const openLinkedPanel = () => {
+            const id = decodeURIComponent(window.location.hash.slice(1));
+            const target = id ? document.getElementById(id) : null;
+            const panel = target?.closest<HTMLElement>("[data-tab-label]");
+            const group = panel?.closest<HTMLElement>("[data-docs-tabs]");
+            const label = panel?.dataset.tabLabel;
 
-        if (panel && panel.closest("[data-docs-tabs]") === rootRef.current) {
-            setLocal(panel.dataset.tabLabel ?? null);
-            requestAnimationFrame(() => target?.scrollIntoView());
-        }
+            if (!group || !label) return;
+
+            if (group === rootRef.current) {
+                setLocal(label);
+                requestAnimationFrame(() => target?.scrollIntoView());
+            } else if (
+                syncKey &&
+                syncKey !== MAJOR_VERSION_KEY &&
+                group.dataset.syncKey === syncKey &&
+                labels.includes(label)
+            ) {
+                setLocal(label);
+            }
+        };
+
+        openLinkedPanel();
+        window.addEventListener("hashchange", openLinkedPanel);
+        return () => window.removeEventListener("hashchange", openLinkedPanel);
     }, []);
 
-    // A later change to the shared choice, from the header or another group,
-    // overrides a panel that a link opened. The first stored value to arrive
-    // after hydration does not count as a change.
+    // A reader picking a tab, here, in another group or in the header, overrides
+    // a panel that a link opened
+    useEffect(() => {
+        if (!syncKey) return;
+        const onSelect = (event: Event) => {
+            if ((event as CustomEvent<string>).detail === syncKey) setLocal(null);
+        };
+        window.addEventListener(SYNCED_TAB_SELECT_EVENT, onSelect);
+        return () => window.removeEventListener(SYNCED_TAB_SELECT_EVENT, onSelect);
+    }, [syncKey]);
+
+    // A change to the shared choice from another browser tab does the same. The
+    // first stored value to arrive after hydration does not count as a change.
     const previousSynced = useRef(synced);
 
     useEffect(() => {
@@ -100,6 +138,7 @@ export function Tabs({ syncKey, children }: TabsProps) {
             keepMounted
             keepMountedMode="display-none"
             data-docs-tabs
+            data-sync-key={syncKey}
         >
             <MantineTabs.List>
                 {items.map((item) => (

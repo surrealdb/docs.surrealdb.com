@@ -79,7 +79,7 @@ export function PageAside({ headings }: PageAsideProps) {
             px="md"
             pb="md"
             w={275}
-            mah="stretch"
+            mah="calc(100vh - var(--docs-header-height) - 48px)"
             pos="sticky"
             top="calc(var(--docs-header-height) + 24px)"
             right="2rem"
