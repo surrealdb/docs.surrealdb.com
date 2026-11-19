@@ -89,11 +89,13 @@ In the MySQL dialect, every record ID in a result is sent as its key, as a SQL c
 
 ## The MySQL dialect
 
-The MySQL dialect parses MySQL 8.0 and 8.4 syntax, and runs `SELECT` with joins, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and `LIMIT`, aggregate functions, non-recursive common table expressions (`WITH`), `INSERT` (including `INSERT ... ON DUPLICATE KEY UPDATE`), `UPDATE`, `DELETE`, `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` and the statements that drivers send while they connect. Prepared statements, statements sent several at a time, window functions, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `SET autocommit` are supported. A statement that names a table in another database is refused.
+The MySQL dialect parses MySQL 8.0 and 8.4 syntax, and runs `SELECT` with joins, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and `LIMIT`, aggregate functions, non-recursive common table expressions (`WITH`), `INSERT` (including `INSERT ... ON DUPLICATE KEY UPDATE`), `UPDATE`, `DELETE`, `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` and the statements that drivers send while they connect. From SurrealDB 4.1, it also runs `ALTER TABLE`, `CREATE INDEX`, `DROP INDEX`, `CREATE VIEW`, `DROP VIEW`, `CREATE DATABASE` and `DROP DATABASE`, as described under [Schema changes](#schema-changes). Prepared statements, statements sent several at a time, window functions, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `SET autocommit` are supported. A statement that names a table in another database is refused.
 
 User variables and prepared statements in SQL work as in MySQL. `SET @a = expr` keeps the value of the expression for the connection, a later `@a` reads it, and a variable that was never set reads as `NULL`. `PREPARE name FROM 'statement'` (or `FROM @variable`), `EXECUTE name [USING @a, ...]` and `DEALLOCATE PREPARE name` prepare and run a statement, and `EXECUTE` of an unknown name fails with `1243`. `COM_RESET_CONNECTION` clears both.
 
 A column without an alias is named by its expression exactly as it was written, as MySQL names it, so `SELECT COUNT(*), MAX(k) + 1` answers the columns `COUNT(*)` and `MAX(k) + 1`. A name is cut at 255 bytes.
+
+From SurrealDB 4.1, a column name matches the column that the table declares in any letter case, as in MySQL, so `parentid` and `PARENTID` read, write, filter, join, sort and group the column declared as `parentId`. A name that matches no declared column fails with `1054`. Also from 4.1, `BINARY expr` reads as `CAST(expr AS BINARY)`, so it compares and sorts text by its bytes, as the schema reader of Prisma's MySQL connector uses it.
 
 `CREATE TABLE` defines a field of a [sized number](/docs/reference/query-language/language-primitives/data-types/numbers#sized-numbers) type for each number column: `TINYINT` is `i8`, `SMALLINT` is `i16`, `MEDIUMINT` and `INT` are `i32`, `BIGINT` is `int`, `INT UNSIGNED` is `u32`, `FLOAT` is `f32` and `DOUBLE` is `float`. A value out of range for the column, such as `300` for a `TINYINT` or `-1` for an `INT UNSIGNED`, is refused with `1366`.
 
@@ -113,11 +115,40 @@ Many points behave as they do over the PostgreSQL dialect, which shares the same
 
 An `AUTO_INCREMENT` column draws its numbers from a sequence, and is `NOT NULL`. `TRUNCATE` starts the numbering again from 1, as does `CREATE TABLE` of a table that was dropped. Because `TRUNCATE` defines the sequence again, a user who may delete records but not define a sequence, such as an editor, is refused `TRUNCATE` of a table with an `AUTO_INCREMENT` column.
 
+### Schema changes
+
+<Since v="v4.1.0" />
+
+`ALTER TABLE` runs `ADD COLUMN`, `DROP COLUMN`, `MODIFY COLUMN`, `CHANGE COLUMN` to the same name, `ADD UNIQUE`, `ADD PRIMARY KEY`, `DROP INDEX`, and the foreign key actions described under [Foreign keys](#foreign-keys). A statement with several actions is answered once, and if one action fails, none of them is kept. A table or a column that does not exist is refused. `ALTER TABLE ... RENAME` and `CHANGE COLUMN` to a new name are refused with `1235`, because the records and their values would stay under the old name.
+
+`CREATE TABLE` declares indexes with `INDEX` and `KEY` as well as `UNIQUE` and `PRIMARY KEY`. An index without a name takes the name of its first column, then `_2`, `_3` and so on, as MySQL names it. A `FULLTEXT` index is refused with `1235`. Two indexes of one name are refused with `1061`, an index named `PRIMARY` with `1280`, a second primary key with `1068`, a primary key over a column declared `NULL` with `1171`, and a key over a column that the table does not declare with `1072`.
+
+`CREATE INDEX`, `CREATE UNIQUE INDEX` and `DROP INDEX ... ON t` define and remove an index. `CREATE VIEW`, `CREATE OR REPLACE VIEW` and `DROP VIEW` define, replace and remove a view over one table that stays up to date after every write to the table, as over the [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#not-yet-supported). A view over a query with `GROUP BY` is refused with `1235`. `CREATE OR REPLACE VIEW` and `DROP VIEW` of a table that is not a view are refused with `1347`, and `DROP VIEW IF EXISTS` skips such a table.
+
+`CREATE DATABASE` (or `CREATE SCHEMA`) and `DROP DATABASE` (or `DROP SCHEMA`) define and remove a database in the namespace of the session, with its tables. `IF NOT EXISTS` and `IF EXISTS` work, and character set and collation options are accepted. Both statements need the role that [`DEFINE DATABASE`](/docs/reference/query-language/statements/define/database) needs, so a user of one database is refused them.
+
+### Foreign keys
+
+<Since v="v4.1.0" />
+
+A `FOREIGN KEY` constraint, in `CREATE TABLE` or in `ALTER TABLE ... ADD FOREIGN KEY`, makes the column a [record link](/docs/reference/query-language/statements/define/field#defining-a-reference) to the other table, which a query writes and reads as the key, as over the PostgreSQL dialect. A write whose key names no record in that table fails with `1452`, and so does an `ALTER TABLE ... ADD FOREIGN KEY` over records that already name a missing key.
+
+```sql
+CREATE TABLE member (id INT PRIMARY KEY, name VARCHAR(50));
+CREATE TABLE post (id INT PRIMARY KEY, author INT NOT NULL, editor INT, FOREIGN KEY (author) REFERENCES member(id) ON DELETE CASCADE, FOREIGN KEY (editor) REFERENCES member(id) ON DELETE SET NULL);
+```
+
+`ON DELETE CASCADE` deletes the referencing records with the record they link to, and `ON DELETE SET NULL` sets the column to `NULL`. Without either, deleting a record that another record links to fails with `1451`. `ON DELETE SET DEFAULT` is refused with `1235`. `ON UPDATE NO ACTION` and `ON UPDATE RESTRICT` are accepted, and `ON UPDATE CASCADE` and `ON UPDATE SET NULL` are refused with `1235`, because an update cannot change the key of a record.
+
+A constraint keeps the name that `CONSTRAINT name` gives it, and a constraint without one is named `table_ibfk_1`, `table_ibfk_2` and so on, as in MySQL. `ALTER TABLE ... DROP FOREIGN KEY name` and `ALTER TABLE ... DROP CONSTRAINT name` remove it. A name that is not a foreign key of the table fails with `1091` in `DROP FOREIGN KEY`, and with `1235` in `DROP CONSTRAINT`. As in MySQL 8.4, `DROP CONSTRAINT IF EXISTS` does not parse.
+
+A column's own `REFERENCES` clause, as in `parent_id INT REFERENCES parent(id)`, is read and ignored, as MySQL ignores it. These foreign keys are refused with `1235`: a key over several columns, a key to a column other than `id`, a key on the `id` column or on an `AUTO_INCREMENT` column, a second key on one column, and a constraint name that holds a double quote.
+
 ### System variables
 
 A `SELECT` of system variables, such as `SELECT @@version, @@sql_mode, @@autocommit`, answers one column for each variable, in the order asked, named by its alias or by the variable. A number is sent as an integer, and other values as text. `@@name`, `@@session.name`, `@@local.name` and `@@global.name` read the same value, in any letter case. A connection with no database chosen can run a `SELECT` of only system variables, which drivers send before they choose a database.
 
-The values are the fixed settings of the server, so a `SET` does not change what `@@name` reads. A name that MySQL 8.4 or 8.0.35 does not have fails with error `1193` `Unknown system variable`. A variable that MySQL has but this server does not model reads as `NULL`, and so do variables that describe the host, such as `@@datadir`, `@@hostname`, `@@port` and `@@version_compile_os`.
+The values are the fixed settings of the server, so a `SET` does not change what `@@name` reads. A name that MySQL 8.4 or 8.0.35 does not have fails with error `1193` `Unknown system variable`. A variable that MySQL has but this server does not model reads as `NULL`, and so do variables that describe the host, such as `@@datadir`, `@@hostname`, `@@port` and `@@version_compile_os`. From SurrealDB 4.1, `@@socket` reads as an empty text, because the server has no Unix domain socket, so a client that reads it stays on TCP.
 
 ### `SHOW` and `DESCRIBE`
 
@@ -153,6 +184,15 @@ A failed statement is answered with the error number and SQLSTATE that MySQL 8.4
 | `1364` | `HY000` | A write leaves out a field that requires a value. |
 | `1366` | `HY000` | A write gives a field a value of another type. |
 | `1406` | `22001` | A write gives a text column a value longer than its declared type allows, such as `VARCHAR(5)`. |
+| `1452` | `23000` | From 4.1, a write names a key that the table of a foreign key does not hold. |
+| `1451` | `23000` | From 4.1, a delete removes a record that a foreign key without `ON DELETE CASCADE` or `SET NULL` links to. |
+| `1091` | `42000` | From 4.1, `ALTER TABLE ... DROP FOREIGN KEY` names a key that the table does not have. |
+| `1061` | `42000` | From 4.1, `CREATE TABLE` declares two indexes of one name. |
+| `1068` | `42000` | From 4.1, `CREATE TABLE` declares a second primary key. |
+| `1072` | `42000` | From 4.1, a key names a column that the table does not declare. |
+| `1171` | `42000` | From 4.1, a primary key covers a column declared `NULL`. |
+| `1280` | `42000` | From 4.1, an index is named `PRIMARY`. |
+| `1347` | `HY000` | From 4.1, `DROP VIEW` or `CREATE OR REPLACE VIEW` names a table that is not a view. |
 | `1146` | `42S02` | The statement names a table that does not exist. |
 | `1054` | `42S22` | The statement names a column that does not exist. |
 | `1050` | `42S01` | `CREATE TABLE` names a table that already exists. |
@@ -179,11 +219,12 @@ The MySQL dialect refuses or differs from MySQL in these places:
 
 - Recursive common table expressions are refused with `1235`, before the statement changes any data.
 - The window function features that the [PostgreSQL dialect refuses](/docs/reference/rest-api/postgres-protocol#not-yet-supported), such as `GROUPS` frames and `DISTINCT` inside a window call, are refused with `1235`.
-- `INTERSECT ALL` and `EXCEPT ALL` are refused with `1235`, as are the other forms of `INTERSECT` and `EXCEPT` that the PostgreSQL dialect refuses. Text is compared exactly, so `SELECT 'a' INTERSECT SELECT 'A'` answers no rows, where MySQL's default collation ignores letter case.
+- The forms of `INTERSECT` and `EXCEPT` that the PostgreSQL dialect refuses are refused with `1235`. From SurrealDB 4.1, `INTERSECT ALL` and `EXCEPT ALL` run. Before 4.1, they are refused with `1235`. Text is compared exactly, so `SELECT 'a' INTERSECT SELECT 'A'` answers no rows, where MySQL's default collation ignores letter case.
 - `SQL_CALC_FOUND_ROWS` is refused. `SQL_NO_CACHE`, `SQL_CACHE`, `SQL_SMALL_RESULT`, `SQL_BIG_RESULT`, `SQL_BUFFER_RESULT` and `HIGH_PRIORITY` are accepted and ignored.
-- `ALTER TABLE` and `LOAD DATA` are not supported yet. A `LATERAL` subquery and an `ORDER BY` inside `GROUP_CONCAT` fail with `1064`.
-- `information_schema` lists the tables and declared columns of the database in PostgreSQL's form: the tables are in the schema `public`, not in a schema named after the database, so `WHERE table_schema = DATABASE()` finds none, `data_type` holds PostgreSQL type names such as `integer`, and `column_type` is `NULL`. `SHOW TABLES` and `SHOW COLUMNS` answer in MySQL's form.
-- `FOREIGN KEY` constraints are not supported. `CREATE TABLE` with one fails with `1105`.
+- From SurrealDB 4.1, `INSERT ... VALUES` and `REPLACE ... VALUES` without a column list are refused with `1235` before they write anything, because a table does not keep the order its columns were declared in. List the columns, as in `INSERT INTO person (id, name) VALUES (1, 'Ada')`.
+- `LOAD DATA` is not supported yet. Before SurrealDB 4.1, `ALTER TABLE` is not supported either. A `LATERAL` subquery and an `ORDER BY` inside `GROUP_CONCAT` fail with `1064`.
+- From SurrealDB 4.1, `information_schema.tables`, `views`, `schemata`, `columns`, `statistics`, `table_constraints`, `key_column_usage` and `referential_constraints` list the tables, views, columns, indexes and keys of the database in MySQL's form: `table_schema` is the name that `DATABASE()` returns, so `WHERE table_schema = DATABASE()` finds them, `column_type` holds the type as the column declares it, such as `varchar(255)` or `int unsigned`, and `column_key` is `PRI`, `UNI` or `MUL`. Before 4.1, `information_schema` lists the tables in PostgreSQL's form, in the schema `public`, with PostgreSQL type names in `data_type` and `NULL` in `column_type`, so `WHERE table_schema = DATABASE()` finds none.
+- Before SurrealDB 4.1, `FOREIGN KEY` constraints are not supported, and `CREATE TABLE` with one fails with `1105`. From 4.1, they work as described under [Foreign keys](#foreign-keys).
 - `LIKE` is refused with `1235` in an `INSERT`, `UPDATE` or `DELETE`, including in its `WHERE` clause, so `DELETE FROM t WHERE name LIKE 'a%'` fails before it deletes anything. It works in a `SELECT`. Functions, such as `SUBSTRING`, `LTRIM` and `CONCAT`, work in both.
 - `CAST(x AS UNSIGNED)` of a value read from a column fails with `1366` when the value is negative, or is a text that is not a number such as `'12abc'`. MySQL wraps the negative value, and reads the number at the start of the text.
 - `TIMESTAMPDIFF` with the unit `MONTH`, and compound interval units such as `DAY_HOUR`, are refused with `1235`.
