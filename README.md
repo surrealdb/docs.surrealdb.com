@@ -85,6 +85,8 @@ The style guide, the conventions for SurrealQL examples, and how the site is put
 | `bun run check:cli-reference` | Check the environment variables page and the command pages against the newest stable release in the version history data: every setting has a row, every row names a real setting, or says with a `<Since>` badge which newer version it is for, and the defaults agree. |
 | `bun run check:duplicates` | List the pages and examples that this branch made repeat another page, compared with `main`. `--all` lists every similar pair in the docs, and `--base REF` compares with another branch. It only warns. |
 | `bun run check:search-text` | Check that the search crawler extracts the text of every page, so search matches what pages say and not only their titles. |
+| `bun run check:content` | Warn about the lines this branch added that break a mechanical writing rule from `AGENTS.md`: dashes, American spellings, idioms, Title Case headings, wrapped paragraphs, the old record ID brackets, `IF ... THEN ... END`, bare `//` comments, `Response` titles on SurrealQL results and `root` passwords. `--all` reads every page, `--base REF` compares with another ref, and `--strict` exits 1 when anything is found. |
+| `bun run check:staleness` | List the pages whose content has not changed for 180 days, by section, with the oldest first. `--days N` changes the age, `--limit N` the length of the list and `--exclude PREFIX` leaves a part of `src/content` out. A commit that changes more than 40 pages counts as a sweep and does not date a page, and `--bulk N` changes that number. |
 | `bun run build` | Build the site. |
 | `bun run preview` | Build the site and serve the build. |
 
@@ -133,6 +135,7 @@ bun run check:links
 bun run check:doc-tests
 bun run check:cli-reference
 bun run check:duplicates
+bun run check:content
 bun run check:search-text
 bun run diagrams:check
 ```
@@ -152,9 +155,12 @@ The CI workflow runs on every push, including pushes to a pull request's branch.
 | Content checks | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
 | Content checks | `bun run check:cli-reference` | A `SURREAL_` variable or a flag in the newest stable release is not documented, a row names a variable no release has had and its `<Since>` badge does not name a newer version, a row for a removed variable gives no version, or a documented default differs from the source. Also when an entry in one of the script's lists no longer applies. | Add the row or mention the flag. A variable or flag that is not a setting for users goes in `INTERNAL` or `HIDDEN_FLAGS` in `scripts/check-cli-reference.ts`, with the reason. |
 | Content checks | `bun run check:duplicates` | Never: it warns, as an annotation on the changed file, when the change adds a page whose prose mostly appears on another page, or copies an example from another page. | Link to the page that already covers it, or merge the two. Leave the warning where the two pages are meant to match, such as the `ALTER` pages for a database and a namespace. |
+| Content checks | `bun run check:content` | Never: it warns, as an annotation on the changed line, when a line the change adds breaks one of the writing rules that `AGENTS.md` states mechanically. | Fix the line the warning names. A rule can bend where a page quotes something, and the person making the change decides. `bun run check:content --all` shows every line in the docs that breaks a rule. |
 | Content checks | `bun run check:search-text` | A fixed markdown sample no longer extracts to the expected text, or a page yields no text for the search index. | Fix the text extraction in `search/scripts/crawler.ts`. The message shows what the sample extracted to. |
 
 A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
+
+The **Stale pages** workflow runs every Monday, and by hand from the Actions tab. It runs `bun run check:staleness` and shows the pages unchanged for 180 days in the job summary. It reports and never fails.
 
 ## Writing documentation
 
