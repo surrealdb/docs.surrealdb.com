@@ -1120,6 +1120,23 @@ function mobileFrameworkRedirects(): Redirect[] {
 }
 
 /**
+ * The Actix, Axum and Rocket guides are one page, with the code for each
+ * framework in tabs. Each old address goes to its framework's heading, which
+ * opens that framework's tab in every tab group on the page. Listed before the
+ * `languages/rust/frameworks` prefix rule, so the oldest addresses also answer
+ * in one hop.
+ */
+function rustWebServerRedirects(): Redirect[] {
+    return ["actix", "axum", "rocket"].flatMap((framework): Redirect[] =>
+        ["/reference/rust/frameworks", "/languages/rust/frameworks"].map((folder) => ({
+            source: `${folder}/${framework}`,
+            destination: `/docs/reference/rust/frameworks/web-servers#${framework}`,
+            statusCode: 301,
+        })),
+    );
+}
+
+/**
  * The top bars of the database docs and Agent Memory share five sections: Get
  * started, Learn, Build, Deploy and Reference.
  *
@@ -1192,6 +1209,7 @@ const baseRedirects: Redirect[] = [
         }),
     ),
     ...mobileFrameworkRedirects(),
+    ...rustWebServerRedirects(),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "integrate/integrations"),
