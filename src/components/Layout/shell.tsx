@@ -25,6 +25,8 @@ export function ShellDrawer({ opened, onClose, children }: ShellDrawerProps) {
 
 export interface ShellProps {
     children: React.ReactNode;
+    /** Hide the rail and give its column to the reading column, from `lg` up. */
+    sidebarCollapsed?: boolean;
 }
 
 /**
@@ -34,8 +36,15 @@ export interface ShellProps {
  * through `:has(nav)`) and carries `visibleFrom="lg"` itself; the content
  * child wraps its page in `ShellContent`.
  */
-export function Shell({ children }: ShellProps) {
-    return <Box className={classes.shell}>{children}</Box>;
+export function Shell({ children, sidebarCollapsed }: ShellProps) {
+    return (
+        <Box
+            className={classes.shell}
+            data-sidebar-collapsed={sidebarCollapsed || undefined}
+        >
+            {children}
+        </Box>
+    );
 }
 
 export interface ShellContentProps {
