@@ -52,7 +52,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "reference/php", id: "reference/php" },
     { prefix: "reference/python", id: "reference/python" },
     { prefix: "reference/query-language", id: "reference/query-language" },
-    { prefix: "reference/rest-api", id: "reference/rest-api" },
+    { prefix: "reference/protocols", id: "reference/protocols" },
     { prefix: "reference/rust", id: "reference/rust" },
     { prefix: "reference/swift", id: "reference/swift" },
     { prefix: "agent-memory/cookbooks", id: "agent-memory/cookbooks" },
