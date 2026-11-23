@@ -36,6 +36,7 @@ export function DefaultLayout({
             <Shell sidebarCollapsed={sidebarCollapsed}>
                 <Sidebar
                     navigation={data.navigation}
+                    groups={data.sectionNavigation}
                     visibleFrom="lg"
                     versionSelector={versionSelector}
                 />

@@ -2,18 +2,35 @@ import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
+import { COLLECTION_ROUTES } from "./collections";
 import { lastModifiedFor } from "./last-modified";
 import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, metaDescription } from "./meta";
-import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
+import {
+    buildNavigation,
+    buildSectionNavigation,
+    groupsFromSections,
+    type NavGroup,
+    type NavSection,
+    resolveFolderLanding,
+    SECTION_HUBS,
+    sectionOf,
+    sectionOfHub,
+    soloCollectionOf,
+} from "./navigation";
 import { categoryTrail, documentTitle } from "./page-title";
 import { getRelated, type RelatedItem } from "./related";
-import { sectionHubNavigation, withoutSectionHubs } from "./section-hubs";
+import { sectionHubNavigation, sectionMenuPaths, withoutSectionHubs } from "./section-hubs";
 
 export interface PageData {
     content: string;
     headings: DocHeading[];
     navigation: NavSection[];
+    /**
+     * The sidebar of the whole section the page belongs to, one group for each
+     * of its collections. Absent where a collection is a section of its own.
+     */
+    sectionNavigation?: NavGroup[];
     contentPath: string;
     breadcrumbs: string[];
     /** Ancestor trail for BreadcrumbList JSON-LD: Docs, categories, then the page. */
@@ -128,6 +145,25 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         ? (sectionHubNavigation(context.urlPathname) ??
           withoutSectionHubs(buildNavigation(id, prefix)))
         : buildNavigation(id, prefix);
+    // A hub page of a section with several collections shows the same tree as
+    // the pages of the section, with every group closed.
+    const section = isRootCollection ? sectionOfHub(context.urlPathname) : sectionOf(id);
+    let sectionNavigation = section
+        ? buildSectionNavigation(
+              section,
+              COLLECTION_ROUTES.map((route) => route.id),
+              sectionMenuPaths(SECTION_HUBS[section]),
+          )
+        : undefined;
+
+    // The Get started sidebar of a product is a list of sections, which the
+    // sidebar shows as groups in the same way. So is the sidebar of a section
+    // that is a single collection, and of its hub page.
+    const solo = section ? undefined : soloCollectionOf(id, context.urlPathname);
+
+    if (solo || (isRootCollection && !section && !sectionHubNavigation(context.urlPathname))) {
+        sectionNavigation = groupsFromSections(solo ? buildNavigation(solo) : navigation);
+    }
     const { content, headings } = resolveMarkdown(entry.content);
     const contentPath = entry.filePath.replace(/.*\/content\//, "");
 
@@ -135,6 +171,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         content,
         headings,
         navigation,
+        sectionNavigation,
         contentPath,
         breadcrumbs,
         breadcrumbItems,
