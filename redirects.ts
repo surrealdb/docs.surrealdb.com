@@ -1263,6 +1263,25 @@ function migratingOverviewRedirects(): Redirect[] {
 }
 
 /**
+ * The upgrade guides open on `/operate/upgrading`, which is the page that was
+ * called `overview`. Its former address, and the same address under the old
+ * `build/migrating/from-old-surrealdb-versions` folder, goes there in one hop.
+ * Listed before the folder rule that would send the second one to
+ * `/operate/upgrading/overview`.
+ */
+function upgradingLandingRedirects(): Redirect[] {
+    return ["operate/upgrading", "build/migrating/from-old-surrealdb-versions"].flatMap((parent) =>
+        [`/${parent}/overview`, `/docs/${parent}/overview`].map(
+            (source): Redirect => ({
+                source,
+                destination: "/docs/operate/upgrading",
+                statusCode: 301,
+            }),
+        ),
+    );
+}
+
+/**
  * The protocol and API reference is at `/reference/protocols`. Its former
  * `/reference/rest-api` address, and every page under it, goes there in one hop.
  */
@@ -1474,6 +1493,7 @@ const baseRedirects: Redirect[] = [
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     ...shortPageFoldRedirects(),
+    ...upgradingLandingRedirects(),
     ...sharedSectionRedirects(),
     // Last, so that every rule naming a real former path is tried first. A short
     // URL is a guess at a word, and a guess should only be answered once nothing
