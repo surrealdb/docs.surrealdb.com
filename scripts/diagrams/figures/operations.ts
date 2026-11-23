@@ -371,9 +371,9 @@ const MX_ROWS: MxRow[] = [
         label: "Sync AOL, sync=5s",
         params: "aol=sync&sync=5s",
         proc: { lost: 0, note: "nothing" },
-        sys: { lost: 4, note: "since the last fsync" },
+        sys: { lost: 2, note: "since the last fsync" },
         perf: "fast",
-        mark: { at: 6, label: "fsync" },
+        mark: { at: 8, label: "fsync" },
     },
     {
         label: "Sync AOL, sync=every",

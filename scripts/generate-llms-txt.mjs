@@ -98,7 +98,7 @@ This index lists every documentation page. Descriptions are added shallowest-fir
 
 Working notes:
 
-- SurrealQL is the native query language. [GraphQL](${SITE}/docs/learn/querying/graphql/overview), [HTTP](${SITE}/docs/reference/rest-api/http-protocol), [RPC](${SITE}/docs/reference/rest-api/rpc-protocol) and [CBOR](${SITE}/docs/reference/rest-api/cbor-protocol) are also available.
+- SurrealQL is the native query language. [GraphQL](${SITE}/docs/learn/querying/graphql/overview), [HTTP](${SITE}/docs/reference/protocols/http-protocol), [RPC](${SITE}/docs/reference/protocols/rpc-protocol) and [CBOR](${SITE}/docs/reference/protocols/cbor-protocol) are also available.
 - Live queries push changes to subscribers rather than requiring polling.
 - The same database serves documents, graphs, vectors and time series inside one ACID transaction, so joins across models do not need a second store.
 `;
