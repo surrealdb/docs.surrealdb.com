@@ -979,6 +979,54 @@ Explanation:
 - `<-? AS was`: Retrieves all incoming relationships to Drake and aliases them as was.
 - `<->? AS involved_in`: Retrieves all relationships connected to Drake, regardless of direction, and aliases them as `involved_in`.
 
+### Naming an edge with a marker
+
+<Since v="v4.1.0" />
+
+A step of a graph lookup can name the edge that it takes. A marker is written as `($name = edge_table)` in place of the edge table, and the name can be read by the later steps, by a `WHERE` clause on the next step, and by the modifiers of a [recursive path](#modifiers).
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[place:c, place:t]"
+
+*/
+-- Setup
+CREATE place:a, place:b, place:c, place:t;
+RELATE place:a->road->place:b SET km = 10;
+RELATE place:b->road->place:t SET km = 40;
+RELATE place:a->road->place:c SET km = 15;
+RELATE place:c->road->place:t SET km = 20;
+RELATE place:a->road->place:t SET km = 60;
+
+SELECT VALUE ->($r = road)->place[WHERE $r.km > 12] FROM ONLY place:a;
+```
+
+```surql title="Output"
+[place:c, place:t]
+```
+
+The query follows the roads out of `place:a` and keeps the places that are reached by a road of more than 12 km. The names `$auth`, `$access`, `$token` and `$session` are protected and cannot be used as markers.
+
 ## Destructuring
 
 When working with nested data, you can destructure objects using the `.` and `{ ... }` idioms.
@@ -2942,7 +2990,7 @@ LET $star = person:star;
 $you.{..+shortest=$star}->knows->person;
 ```
 
-Where several paths have the same shortest length, `+shortest` returns only one of them. To get all of them, take the length of the shortest path and use it as the depth for `+path`, which then returns every path of exactly that many steps. Then keep the paths that end at the target. The depth must be a literal number, so this takes two queries. With one more edge added to the network above, two paths of three steps reach `person:star`:
+Where several paths have the same shortest length, `+shortest` returns only one of them. From SurrealDB 4.1, the [`+ranks=1`](#modifiers) modifier returns all of them. Before 4.1, take the length of the shortest path and use it as the depth for `+path`, which then returns every path of exactly that many steps. Then keep the paths that end at the target. The depth must be a literal number, so this takes two queries. With one more edge added to the network above, two paths of three steps reach `person:star`:
 
 ```surql
 /**[test]
@@ -3055,6 +3103,207 @@ person:you.{..+collect+inclusive}->knows->person;
 	person:star
 ]
 ```
+
+#### Modifiers
+
+<Since v="v4.1.0" />
+
+A recursion takes modifiers after its depth range. A modifier is written `+name` or `+name=value`, and any number of them can follow the range, in any order. A value is a record, a number or an expression in parentheses. All outputs follow the same rules, so a target, a cycle mode or a cut means the same for `+path`, `+collect` and `+shortest`.
+
+With several modifiers, each can go on its own line after the depth range, which is also how `--pretty` prints them. The depth range stays directly after the `{`, with no space or line break before it.
+
+The example below builds up a query on a small road network, one modifier at a time. Without modifiers, `+shortest` finds the path with the fewest steps, which is the direct road. The `+weight` modifier gives each step a cost, read from the edge through a [marker](#naming-an-edge-with-a-marker), and `+shortest` then finds the cheapest path. The `+budget` modifier sets the most that a path may cost, and the result is `NONE` when no path stays within it:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[place:t]"
+
+[[test.results]]
+value = "[place:c, place:t]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[place:c, place:t]"
+
+*/
+-- Setup
+CREATE place:a, place:b, place:c, place:t;
+RELATE place:a->road->place:b SET km = 10;
+RELATE place:b->road->place:t SET km = 40;
+RELATE place:a->road->place:c SET km = 15;
+RELATE place:c->road->place:t SET km = 20;
+RELATE place:a->road->place:t SET km = 60;
+
+place:a.{..+shortest=place:t}(->road->place);
+//- [place:t]
+
+place:a.{..+shortest=place:t+weight=($e.km)}(->($e = road)->place);
+//- [place:c, place:t]
+
+place:a.{..
+	+shortest=place:t
+	+weight=($e.km)
+	+budget=30
+}(->($e = road)->place);
+//- NONE
+
+place:a.{..
+	+shortest=place:t
+	+weight=($e.km)
+	+budget=35
+}(->($e = road)->place);
+//- [place:c, place:t]
+```
+
+The modifiers are grouped below by what they do.
+
+##### Which paths to follow
+
+| Modifier | Meaning |
+| --- | --- |
+| `+walk` | A path may repeat a node. It applies to the default output and to `+path` only. |
+| `+acyclic` | A path repeats no node, and does not return to the node it started from. |
+| `+simple` | A path repeats no node, except that it may end at the node it started from. |
+
+##### Where to stop
+
+| Modifier | Meaning |
+| --- | --- |
+| `+until=X` | The goal. `X` is a record, an array of records, or a condition in parentheses that reads the reached node. A path stops when it reaches the goal. |
+| `+prune=C` | A barrier. A path stops at a node that matches the condition `C`, and the node is kept. |
+
+##### Which paths to keep
+
+| Modifier | Meaning |
+| --- | --- |
+| `+limit=N` | Keeps `N` paths. |
+| `+ranks=N` | Keeps every path of the `N` shortest lengths, so `+ranks=1` keeps all the paths that tie for shortest. |
+| `+each` | Applies `+limit` to each target on its own. It needs `+until` or `+shortest=X`. |
+
+##### What a step costs
+
+| Modifier | Meaning |
+| --- | --- |
+| `+weight=E` | The cost of a step, as an expression. The search tries the cheapest paths first. |
+| `+heuristic=E` | An estimate of the cost still to go to the target, which turns the search into an A* search. |
+| `+budget=N` | The most that a path may cost in total. |
+
+##### The nodes at each depth
+
+The `+levels` modifier is an output of its own. It returns the nodes found at each depth, as one array for each depth.
+
+##### Expressions
+
+An expression in a modifier can read `$from`, the node that a step leaves, `$path`, the nodes walked so far, and `$target`, the target of the search. The reached node is the document, so `role = 'vp'` reads the field `role` of that node. A step can be named with a marker so that an expression reads the edge it took, as in `+weight=($e.km)`. A combination of modifiers that has no meaning is a parse error that names the modifier which does not fit.
+
+The next example uses a small rail network. It shows every shortest route from Amsterdam to Paris, every ring that returns to Amsterdam without visiting another city twice, and the cities found at each depth:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[[city:ber, city:par], [city:bru, city:par]]"
+
+[[test.results]]
+value = "[[city:ber, city:par, city:ams], [city:bru, city:par, city:ams]]"
+
+[[test.results]]
+value = "[[city:bru, city:ber], [city:par], [city:ams, city:lyo]]"
+
+*/
+-- Setup
+CREATE city:ams, city:bru, city:ber, city:par, city:lyo;
+RELATE city:ams->train->city:bru;
+RELATE city:ams->train->city:ber;
+RELATE city:bru->train->city:par;
+RELATE city:ber->train->city:par;
+RELATE city:par->train->city:lyo;
+RELATE city:par->train->city:ams;
+
+array::sort(city:ams.{..+shortest=city:par+ranks=1}(->train->city));
+//- [[city:ber, city:par], [city:bru, city:par]]
+
+array::sort(city:ams.{..+path+until=city:ams+simple}(->train->city));
+//- [[city:ber, city:par, city:ams], [city:bru, city:par, city:ams]]
+
+city:ams.{..+levels}(->train->city);
+//- [[city:bru, city:ber], [city:par], [city:ams, city:lyo]]
+```
+
+The paths are sorted because the order in which tied paths are found is not fixed. A `+prune` condition stops a walk at the first node that matches. The following example follows the chain of managers from an engineer upwards, and stops at the first vice president:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[person:cy, person:bea]"
+
+*/
+-- Setup
+CREATE person:ann SET role = 'ceo';
+CREATE person:bea SET role = 'vp', manager = person:ann;
+CREATE person:cy SET role = 'engineer', manager = person:bea;
+CREATE person:di SET role = 'engineer', manager = person:cy;
+
+person:di.{..+collect+prune=(role = 'vp')}(.manager);
+```
+
+The modifier expressions run with the permissions of the statement, so a record user's marker or weight never reads an edge that the user cannot read. Every recursion stays under the idiom recursion limit.
 
 #### Other notes
 

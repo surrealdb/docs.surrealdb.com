@@ -143,6 +143,88 @@ async fn main() {
 }
 ```
 
+## Read results without copying their text
+
+<Since v="v4.1.0" />
+
+`db.select_raw()` selects the same records as `.select()` but returns the result as it arrived, in a [`RawResult`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.RawResult.html), for you to read into types that borrow from it. Use it when a query returns many records or long strings and the copy of each string into a `String` is a cost you want to avoid. For small results, `.select()` into an owned struct is simpler.
+
+<Synopsis label="Signature">
+db.select_raw(resource) -> Select<RawResult>
+raw.opt::<R>() -> Result<Option<R>>
+raw.vec::<R>() -> Result<Vec<R>>
+raw.get::<T>() -> Result<T>
+raw.array_len() -> Option<usize>
+</Synopsis>
+
+`select_raw` takes the same `resource` as `.select()`, a table name or a record ID, and is a separate method so that the type inference of existing `.select()` calls does not change. Awaiting it gives the `RawResult`, and the types you read from it borrow from the `RawResult`, so it must stay in scope for as long as they are used.
+
+```rust
+use surrealdb::types::{RecordIdRef, SurrealDecode};
+
+#[derive(SurrealDecode)]
+struct Person<'a> {
+    id: RecordIdRef<'a>,
+    name: &'a str,
+    tags: Vec<&'a str>,
+}
+
+// A specific record
+let raw = db.select_raw(("person", "tobie")).await?;
+if let Some(person) = raw.opt::<Person<'_>>()? {
+    println!("{} has {} tags", person.name, person.tags.len());
+}
+
+// All records in a table
+let raw = db.select_raw("person").await?;
+for person in raw.vec::<Person<'_>>()? {
+    println!("{}", person.name);
+}
+```
+
+The methods of `RawResult` read the result in these ways:
+
+| Method | Reads the result as | Same as |
+| --- | --- | --- |
+| `opt::<R>()` | An optional record: `NONE`, `null` and an empty array give `None`, and a one-item array gives its item. | `.select()` into `Option<R>` |
+| `vec::<R>()` | A list of records: `NONE` and `null` give an empty list, an array gives its items, and any other value gives one record. | `.select()` into `Vec<R>` |
+| `get::<T>()` | The whole result as one `T`. | |
+| `array_len()` | Nothing is read. It returns the number of items if the result is an array, and `None` otherwise. | |
+
+### Types that borrow
+
+`SurrealDecode<'de>` is the trait that `opt`, `vec` and `get` read through. It is in the `surrealdb-types` crate, which the `surrealdb` crate re-exports as `surrealdb::types`, so the trait, its derive macro and the borrowing types below are all imported from `surrealdb::types`. `select_raw` and `RawResult` are in the `surrealdb` crate itself. The trait has two methods, `decode`, which reads from the CBOR of the response, and `decode_value`, which reads from a `Value`, so a type reads the same result on every engine.
+
+These types borrow their text and bytes from the result, so reading them copies none of it:
+
+| Type | Notes |
+| --- | --- |
+| `&str` | A string. |
+| `&[u8]` | Bytes. |
+| `Cow<str>` | A string, borrowed where the result holds it as text. |
+| `RecordIdRef` | A record ID with its `table` and `key`. The `key` is a `RecordIdKeyRef`: `Number(i64)`, `String`, which borrows, or `Other`, which holds any other key as a `RecordIdKey`. `to_record_id()` returns an owned `RecordId`. |
+| `ValueRef` | A dynamic value that borrows its strings, bytes and record IDs. `get(key)` returns an entry of an object, and `to_value()` returns the owned `Value`. The keys of an object are sorted, and a duplicate key is refused. |
+
+Every other type is read as `SurrealValue` reads it, so integers, booleans, `Option<T>` and `Vec<T>` of these types work in the same struct. `Option<T>` is `None` only for `NONE`. Each type accepts and refuses the same values as its owned counterpart, with the same error.
+
+### Deriving `SurrealDecode`
+
+`#[derive(SurrealDecode)]` works on structs with named fields, including structs with lifetime parameters, as in the example above. Every field type must implement `SurrealDecode`.
+
+- `#[surreal(rename = "...")]` and `#[surreal(rename_all = "...")]` change the key a field is read from, as they do for `SurrealValue`.
+- `#[surreal(default)]`, on a field or on the struct, reads a missing field as its default.
+- Fields can appear in any order in the result.
+- A key that no field names is skipped without being decoded.
+- A key that appears twice is refused.
+- A missing field with no default is read as `NONE`, so it gives `None` for an `Option<T>` and an error for a type that refuses `NONE`.
+- `#[surreal(flatten)]` and `#[surreal(wrap)]` are refused.
+
+### Errors and engines
+
+A value that does not match the type gives the same deserialisation error that `.select()` gives for the owned type.
+
+On the remote WebSocket engine, a response to a query whose statements all succeeded is kept as it arrived, and the borrowed fields point into it. On the other engines, such as embedded engines and HTTP, the result is a `Value` that the `RawResult` holds, and the borrowed fields point into that value. The methods and the results are the same either way.
+
 ## Translated query
 This function will run the following query in the database:
 
@@ -159,5 +241,6 @@ SELECT * FROM $resource;
 ## See also
 
 * [.select() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.select)
+* [`RawResult`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.RawResult.html)
 * [`Select::range`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Select.html#method.range-1)
 * [Live queries (`select().live()`)](/docs/reference/rust/methods/select-live); alternatively [`query()`](/docs/reference/rust/methods/query#live-select-stream) with `LIVE SELECT` and [`.stream()`](https://docs.rs/surrealdb/latest/surrealdb/struct.IndexedResults.html#method.stream)
