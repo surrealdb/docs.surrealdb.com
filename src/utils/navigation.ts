@@ -9,6 +9,11 @@ import type { PageSchema } from "./schema";
 export interface NavSection {
     title: string;
     icon?: SectionIconName;
+    /**
+     * The page the heading links to. Set when the section's first page repeats
+     * the heading, so the heading is that page and `links` leaves it out.
+     */
+    landing?: NavLink;
     links: NavLink[];
 }
 
@@ -24,6 +29,44 @@ type TreeNode = TypedTreeNode<PageSchema>;
 interface Positioned<T> {
     value: T;
     position: number;
+}
+
+const words = (title: string): string[] =>
+    title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(Boolean);
+
+/** A rough stem, enough to treat "get" and "getting", or "start" and "started", alike. */
+function stem(word: string): string {
+    return word
+        .replace(/(ing|ed|es|s)$/, "")
+        .replace(/(.)\1$/, "$1")
+        .replace(/e$/, "");
+}
+
+const stemmed = (title: string): string => [...new Set(words(title).map(stem))].sort().join(" ");
+
+/** Whether two titles use the same words, ignoring case, punctuation and endings. */
+function sameTitle(a: string, b: string): boolean {
+    const key = stemmed(a);
+    return key !== "" && key === stemmed(b);
+}
+
+/**
+ * Makes a section's heading a link to its first page when that page repeats the
+ * heading, such as an "Agent setup" page under an "Agent setup" heading. The
+ * page moves from the list to the heading. A section with nothing else in it
+ * keeps the page as its only row, so the sidebar never shows a bare heading.
+ */
+function withLanding(section: NavSection): NavSection {
+    const [first, ...rest] = section.links;
+
+    if (!first || rest.length === 0) return section;
+    if (first.children?.length || !sameTitle(section.title, first.title)) return section;
+
+    return { ...section, landing: first, links: rest };
 }
 
 function sortByPosition<T>(items: Positioned<T>[]): T[] {
@@ -92,11 +135,11 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
     }
 
     return {
-        value: {
+        value: withLanding({
             title: category?.metadata.title ?? folder.name,
             icon: category?.metadata.icon,
             links: sortByPosition(items),
-        },
+        }),
         position: category?.metadata.position ?? 0,
     };
 }
@@ -118,15 +161,9 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     const sections: Positioned<NavSection>[] = [];
 
     if (root.entry) {
-        // The sidebar's heading already names the part, so a landing page with
-        // the same name is listed as its overview rather than a second time.
-        const title = root.entry.metadata.title ?? "";
-        const sameAsHeading =
-            title.trim().toLowerCase() === rootCategory?.metadata.title?.trim().toLowerCase();
-
         rootLinks.push({
             value: {
-                title: sameAsHeading ? "Overview" : title,
+                title: root.entry.metadata.title ?? "",
                 path: join(base),
             },
             position: root.entry.metadata.position ?? 0,
@@ -170,11 +207,22 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
         }
     }
 
-    const rootSection: NavSection = {
+    const rootSection = withLanding({
         title: rootCategory?.metadata.title ?? "Overview",
         icon: rootCategory?.metadata.icon,
         links: sortByPosition(rootLinks),
-    };
+    });
+
+    // With nothing else in the section the landing page stays a row, and one
+    // that repeats the heading exactly is listed as the section's overview.
+    if (!rootSection.landing) {
+        rootSection.links = rootSection.links.map((link) =>
+            link.path === join(base) &&
+            link.title.trim().toLowerCase() === rootSection.title.trim().toLowerCase()
+                ? { ...link, title: "Overview" }
+                : link,
+        );
+    }
 
     return [rootSection, ...sortByPosition(sections)];
 }
@@ -197,6 +245,7 @@ export function flattenNavigation(sections: NavSection[]): NavLink[] {
     }
 
     for (const section of sections) {
+        if (section.landing) result.push(section.landing);
         collect(section.links);
     }
 

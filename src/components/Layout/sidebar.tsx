@@ -1,4 +1,4 @@
-import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
+import { Anchor, Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
 import { usePageContext } from "vike-react/usePageContext";
 import { docsHref, type NavLink as NavLinkItem, type NavSection } from "~/utils/navigation";
 import { ProductSwitcherSegmented } from "./product-switcher";
@@ -48,13 +48,37 @@ export interface SidebarSectionHeadingProps {
      * rail uses it.
      */
     eyebrow?: boolean;
+    /** Makes the heading a link, to the page the section opens with. */
+    href?: string;
+    /** Whether the reader is on the page `href` names. */
+    active?: boolean;
 }
 
 /**
  * Heading row for a sidebar section, shared with the labs filter rail. Text
  * only: the section headings carry no icons.
  */
-export function SidebarSectionHeading({ children, eyebrow = false }: SidebarSectionHeadingProps) {
+export function SidebarSectionHeading({
+    children,
+    eyebrow = false,
+    href,
+    active = false,
+}: SidebarSectionHeadingProps) {
+    const label = href ? (
+        <Anchor
+            className={classes.sidebarHeadingLink}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            data-active={active || undefined}
+            underline="never"
+            inherit
+        >
+            {children}
+        </Anchor>
+    ) : (
+        children
+    );
+
     return (
         <Group
             align="center"
@@ -68,7 +92,7 @@ export function SidebarSectionHeading({ children, eyebrow = false }: SidebarSect
                     component="h3"
                     className={classes.navSectionLabel}
                 >
-                    {children}
+                    {label}
                 </Text>
             ) : (
                 <Text
@@ -76,7 +100,7 @@ export function SidebarSectionHeading({ children, eyebrow = false }: SidebarSect
                     fz={16}
                     fw={600}
                 >
-                    {children}
+                    {label}
                 </Text>
             )}
         </Group>
@@ -140,9 +164,21 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
 }
 
 export function SidebarSection({ section }: { section: NavSection }) {
+    const { urlPathname } = usePageContext();
+    const { landing } = section;
+    // Every heading opens its section. When the first page repeats the heading
+    // it has no row of its own, so the heading carries that page's current
+    // state; otherwise the row below already does.
+    const target = landing ?? section.links[0];
+
     return (
         <Box component="section">
-            <SidebarSectionHeading>{section.title}</SidebarSectionHeading>
+            <SidebarSectionHeading
+                href={target ? docsHref(target.path) : undefined}
+                active={landing ? normalize(urlPathname) === normalize(landing.path) : false}
+            >
+                {section.title}
+            </SidebarSectionHeading>
             <Stack gap="xs">
                 {section.links.map((link) => (
                     <SidebarNavLink
