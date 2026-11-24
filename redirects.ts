@@ -452,6 +452,7 @@ function sdkConceptRedirects(): Redirect[] {
     const moves: [string, string][] = [
         ["reference/rust/concepts/authenticating-users", "reference/rust/concepts/authentication"],
         ["reference/rust/concepts/working-with-types", "reference/rust/concepts/value-types"],
+        ["reference/rust/concepts/multi-tenancy", "reference/rust/concepts/multiple-sessions"],
         [
             "reference/mojo/methods/begin-transaction",
             "reference/mojo/concepts/transactions#begin-transaction",

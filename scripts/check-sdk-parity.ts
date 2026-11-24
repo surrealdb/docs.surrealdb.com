@@ -96,7 +96,6 @@ const KNOWN_GAPS: Record<string, Record<string, string>> = {
         swift: "Not written yet.",
     },
     "multiple-sessions": {
-        rust: "The Rust SDK has no multiple sessions API.",
         swift: "Not written yet.",
     },
     "import-and-export": {

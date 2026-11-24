@@ -113,6 +113,31 @@ duplicates, so two records named `'Alice'` in one group give
 actually performs. Where the unique values are wanted, `array::group()` is the
 function that gives them.
 
+### Say "manual transaction" for `BEGIN` and `COMMIT`
+
+Every statement in SurrealQL already runs in a transaction of its own, and so
+does every query that a client sends. So "transaction" alone does not say what
+the text means: a reader who sees "wrap the script in a transaction" can take
+the script to have none today, and "use a transaction to load faster" cannot be
+told apart from the default.
+
+A transaction that the author groups, with `BEGIN` and `COMMIT` or with a
+client's transaction handle such as `begin()` in the Rust SDK, is a **manual
+transaction**. Write "manual transaction" wherever the text means that, and
+"transaction" alone only where it means any transaction, such as the guarantee
+that a transaction commits as a whole or rolls back, or the fact that a
+transaction covers one instance.
+
+| Avoid                                       | Use                                                |
+| ------------------------------------------- | -------------------------------------------------- |
+| `Wrap the script in a transaction`          | `Wrap the script in a manual transaction`          |
+| `A transaction can include several databases` | `A manual transaction can include several databases` |
+| `Send a schema as one transaction`          | `Send a schema as one manual transaction`          |
+
+The exceptions are the statement names (`BEGIN TRANSACTION`, `COMMIT
+TRANSACTION`), the shared title `Transactions` of an SDK concept page, which
+covers both kinds, and a quotation.
+
 ### Plain English for an international audience
 
 Write for an international technical audience. Most readers are proficient in English
