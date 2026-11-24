@@ -19,9 +19,10 @@ bun run check:duplicates # warn about pages and examples this branch made repeat
 bun run check:content   # warn about added lines that break a mechanical writing rule
 bun run check:staleness # list pages whose content has not changed for 180 days
 bun run check:search-text # check that the search crawler extracts every page's text
+bun run check:sdk-snippets # check that the docs home page language tabs still match the quickstarts
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples). Also run `bun run check:content`, which CI runs as a warning: it lists the lines you added that break a mechanical rule in this guide (dashes, American spellings, idioms, Title Case headings, wrapped paragraphs, the old record ID brackets, `IF ... THEN ... END`, bare `//` comments, `Response` titles and `root` passwords), and the component rules (a `<SurrealistMini>` that renders empty, an `<iframe>`, an unknown callout kind, an image with no alt text, a misplaced `<Since>` badge, version tabs with the older version first, and a link repeated on a short page or in one section of a long one), and fixing them is part of the task. CI also fails when `public/llms.txt` differs from the output of `bun run generate:llms`, so run it and commit the result when a page is added, moved or retitled.
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples). Also run `bun run check:content`, which CI runs as a warning: it lists the lines you added that break a mechanical rule in this guide (dashes, American spellings, idioms, Title Case headings, wrapped paragraphs, the old record ID brackets, `IF ... THEN ... END`, bare `//` comments, `Response` titles and `root` passwords), and the component rules (a `<SurrealistMini>` that renders empty, an `<iframe>`, an unknown callout kind, an image with no alt text, a misplaced `<Since>` badge, version tabs with the older version first, and a link repeated on a short page or in one section of a long one), and fixing them is part of the task. CI also fails when `public/llms.txt` differs from the output of `bun run generate:llms`, so run it and commit the result when a page is added, moved or retitled. When the task changed the docs home page or a quickstart under `src/content/index/languages`, also run `bun run check:sdk-snippets`, which CI also runs: see [Language tabs on the docs home page](#language-tabs-on-the-docs-home-page).
 
 The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
 
@@ -1241,6 +1242,31 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 `Environment variable` columns render only when a row uses them, so a table never
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
+
+## Language tabs on the docs home page
+
+The "Connect from your language" section of `src/content/index/index.mdx` is a
+`<Tabs syncKey="language">` group with one tab for each SDK, labelled with the
+language: `Rust`, `JavaScript`, `Python`, `Go`, `.NET`, `Java`, `Kotlin`, `PHP`,
+`Swift` and `Mojo`. A tab holds the first connection and nothing more: the
+install command where the SDK has a single one, the code that connects, signs
+in and selects a namespace and database, and a sentence that links to the
+language's quickstart. The quickstart under `src/content/index/languages` stays
+the full guide, so the docs home page never repeats its later steps.
+
+A tab is a copy, and a copy drifts. `bun run check:sdk-snippets` fails when a
+line of code in a tab does not appear, after trimming its indentation, in a code
+block of a page the tab links to, and when a quickstart has no tab. The sources
+of a tab are the pages it links to, so a tab that shows an install command links
+to the installation page that the command comes from. To change a snippet,
+change the quickstart first and copy the lines across. A tab may show fewer
+lines than its quickstart, but it may not show a line that the quickstart does
+not have. Comment-only lines are not compared. The check reads the repository
+only, so CI runs it as a failing job.
+
+The shared `language` key makes the chosen tab follow the reader. A page that
+groups its own examples by language can reuse the key, with the same labels, so
+that one choice applies to all of them.
 
 ## Tested examples
 
