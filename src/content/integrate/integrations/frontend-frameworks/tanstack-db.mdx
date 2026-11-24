@@ -1,0 +1,126 @@
+---
+position: 1
+title: TanStack DB
+description: Use the pre-release @surrealdb/tanstack-db package to back TanStack DB collections with SurrealDB tables, with local-first writes and live query updates.
+---
+
+# TanStack DB
+
+[TanStack DB](https://tanstack.com/db) is a client-side store that keeps collections of records in memory, applies writes to them immediately and queries them reactively. The `@surrealdb/tanstack-db` package connects a TanStack DB collection to a SurrealDB table, so that local writes are saved to the database and changes made elsewhere reach the collection through a [live query](/docs/reference/query-language/statements/live-select).
+
+> [!WARNING]
+> `@surrealdb/tanstack-db` is a pre-release. The only version published to npm is `1.0.0-alpha.1`, and it depends on the release candidate of `@tanstack/db`. Behaviour and options can change before a stable release, and the limitations at the end of this page apply to it.
+
+## Before you start
+
+- A running SurrealDB instance, with the namespace and database you connect to already defined. See [installation](/docs/running/installation) if you do not have one yet.
+- A project that uses the [JavaScript SDK](/docs/reference/javascript), version 2.2.2 or later in the 2.x line.
+
+## Install
+
+Install the adapter next to the packages it lists as peer dependencies:
+
+```bash
+npm install @surrealdb/tanstack-db@alpha surrealdb @tanstack/db @tanstack/query-core @tanstack/query-db-collection @standard-schema/spec
+```
+
+## Create a collection
+
+A collection takes an open `Surreal` connection, the name of a table and a TanStack Query client. The `queryKey` identifies the collection and, together with the table name, gives it a stable id.
+
+```ts
+import { createCollection } from '@tanstack/db';
+import { QueryClient } from '@tanstack/query-core';
+import { Surreal } from 'surrealdb';
+import { surrealCollectionOptions } from '@surrealdb/tanstack-db';
+
+const db = new Surreal();
+await db.connect('ws://127.0.0.1:8000/rpc', {
+	namespace: 'test',
+	database: 'test',
+	authentication: { username: 'root', password: 'secret' },
+});
+
+type Product = { id: string; name: string; price: number };
+
+export const products = createCollection(
+	surrealCollectionOptions<Product>({
+		db,
+		table: { name: 'product' },
+		queryClient: new QueryClient(),
+		queryKey: ['product'],
+		syncMode: 'eager',
+	}),
+);
+```
+
+The `syncMode` option takes `'eager'`, `'on-demand'` or `'progressive'`. The examples on this page use `'eager'`, which delivers both the initial reads and live updates. See [Limitations](#limitations).
+
+## Write records
+
+A write updates the collection at once and returns a transaction. Wait for the `settled` state to know that SurrealDB has accepted the change:
+
+```ts
+await products.insert({ id: 'p1', name: 'Keyboard', price: 40 }).when('settled');
+
+await products.update('product:p1', (draft) => {
+	draft.price = 45;
+}).when('settled');
+
+await products.delete('product:p1').when('settled');
+```
+
+> [!WARNING]
+> In this pre-release, a `delete` can raise `DeleteOperationItemNotFoundError` after it settles, which ends a Node.js process unless the error is caught.
+
+A record written as `p1` into the `product` table is stored as `product:p1`, and the collection keys it by the full record ID, `'product:p1'`. Use that key for `update` and `delete`. To pass record IDs as values instead of strings, see the `RecordId` model example in the package README.
+
+## Read records with a live query
+
+A collection loads the records that a query asks for. Build the query with `createLiveQueryCollection`, and preload it:
+
+```ts
+import { createLiveQueryCollection, gt } from '@tanstack/db';
+
+const pricey = createLiveQueryCollection((q) =>
+	q
+		.from({ products })
+		.where(({ products }) => gt(products.price, 5))
+		.select(({ products }) => products),
+);
+
+await pricey.preload();
+console.log(pricey.toArray.map((product) => product.name));
+```
+
+The `where` condition is passed to SurrealDB as part of the query, so the collection holds only the matching records. In a framework, bind the same query to your components with the matching TanStack DB package, such as `@tanstack/react-db`.
+
+## Receive changes from other clients
+
+Once a collection is syncing, a change made by another client, a script or a SurrealQL statement is delivered through a live query and appears in the collection with `$origin` set to `'remote'`. Call `startSyncImmediate()` to start the collection without waiting for a subscriber:
+
+```ts
+products.startSyncImmediate();
+```
+
+## Other features
+
+The package README documents further options:
+
+- **Persistence:** `persistedSurrealCollectionOptions` stores a collection in a local SQLite database so that it survives a restart.
+- **End-to-end encryption:** the `e2ee` option stores records as encrypted envelopes, using a crypto provider such as the included `WebCryptoAESGCM`.
+- **CRDTs:** the `crdt` option keeps documents as [Loro](https://loro.dev) updates. Merging happens in the client. SurrealDB stores the encoded updates as ordinary records and passes them to other clients, and it does not merge or understand them.
+
+## Permissions and schema
+
+The adapter does not define tables or permissions. Define each table, with `DEFINE TABLE` and `DEFINE FIELD`, and its access rules in SurrealDB before the collection uses it. See [`DEFINE TABLE`](/docs/reference/query-language/statements/define/table) for the options.
+
+## Limitations
+
+These limitations apply to `@surrealdb/tanstack-db` `1.0.0-alpha.1` with `@tanstack/db` `1.0.0-rc.1.5`.
+
+- **Existing records load only through a query.** Calling `preload()` on the collection itself does nothing, even with `syncMode: 'eager'`, and logs a warning that names `'on-demand'`. Records already in the table appear once a live query collection, as shown above, reads them.
+- **`'on-demand'` mode misses new records.** With `syncMode: 'on-demand'`, a record created by another client after the query loaded did not reach the live query collection. `'eager'` and `'progressive'` delivered it.
+- **The table must exist.** Reading a table that has not been defined fails with a `table does not exist` error.
+- **A local delete can raise an unhandled error.** After `delete(...)` settles, the live query reports the same deletion, and the collection can throw `DeleteOperationItemNotFoundError` because the record is already gone. In Node.js this ends the process unless the error is caught.
+- **The peer dependency on `surrealdb` is `^2.2.2`.** The package works with the 2.x SDK only.

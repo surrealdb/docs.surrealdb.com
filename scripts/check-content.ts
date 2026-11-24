@@ -132,6 +132,8 @@ const NAMES = new Set([
     "Labs",
     "Skills",
     "Surrealist",
+    // Part of the names "VS Code" and "Claude Code".
+    "Code",
     "Server",
     "Context",
     "Rollouts",
