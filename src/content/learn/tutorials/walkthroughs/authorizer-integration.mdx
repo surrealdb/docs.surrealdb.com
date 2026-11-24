@@ -47,7 +47,7 @@ You will also need a running Authorizer instance, version `2.4.8` or later, reac
 
 ## Configuring Authorizer
 
-Authorizer is configured entirely with command-line flags. Its tokens are signed with an asymmetric key (RS256 or ES256) and the public keys are published at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`, which is what SurrealDB will use to verify them.
+Authorizer is configured entirely with command-line flags. Start it with an asymmetric signing key: `--jwt-type=RS256` (or `ES256`) together with `--jwt-private-key` and `--jwt-public-key`. Authorizer then publishes the public key at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`, which is what SurrealDB will use to verify tokens. Keys for HMAC algorithms such as `HS256` are never published, so SurrealDB cannot verify tokens signed with them.
 
 ### Adding the claims required by SurrealDB
 
@@ -69,7 +69,7 @@ Start Authorizer with the following flag, in addition to your usual configuratio
 
 Authorizer already includes `iss` (your Authorizer URL), `aud` and `client_id` (your client ID), `sub` (the user ID), `exp` and `roles` in every access token, so no further claims are needed.
 
-If you restrict `--allowed-origins` (the default is `*`), include the origin your application is served from, for example `http://localhost:5173`. Authorizer refuses sign-in requests from other origins.
+Add the origin your application is served from to `--allowed-origins`, for example `--allowed-origins=http://localhost:5173`. With the default value, `*`, Authorizer accepts sign-in requests only from its own origin, so a sign-in from your application would be refused.
 
 Take note of the following values:
 
@@ -78,7 +78,7 @@ Take note of the following values:
 
 ### Creating a test user
 
-To ensure this guide can be followed easily, create a test user by signing up through the Authorizer login page at `https://<YOUR_AUTHORIZER_URL>/app`, or through the dashboard at `https://<YOUR_AUTHORIZER_URL>/dashboard`. If you enabled email verification (`--enable-email-verification`), verify the address before continuing. If Authorizer offers to set up multi-factor authentication, skip it for this test user, so that the application below can sign in with just an email and password.
+To ensure this guide can be followed easily, create a test user by signing up through the Authorizer login page at `https://<YOUR_AUTHORIZER_URL>/app`. If you enabled email verification (`--enable-email-verification`), verify the address before continuing. If Authorizer offers to set up multi-factor authentication, skip it for this test user, so that the application below can sign in with just an email and password.
 
 ## Configuring SurrealDB
 
@@ -124,7 +124,7 @@ DEFINE FIELD nickname ON user TYPE option<string>;
 
 Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/reference/protocols/http-protocol) via the “Authorization” header or through any of the [SDKs](/docs/languages) via the “Authenticate” methods.
 
-To do that, we will use the [JWKS support in SurrealDB](/docs/reference/query-language/statements/define/access/jwt#json-web-key-set-jwks) in order to define a token verification mechanism pointing to the JWKS object served by Authorizer at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`. Pointing to a remote JWKS object ensures that token verification keeps working when you rotate Authorizer's signing key using its secondary key flags (`--jwt-secondary-type`, `--jwt-secondary-public-key`): both keys are published during the rotation, and tokens signed with either are accepted.
+To do that, we will use the [JWKS support in SurrealDB](/docs/reference/query-language/statements/define/access/jwt#json-web-key-set-jwks) in order to define a token verification mechanism pointing to the JWKS object served by Authorizer at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`. Because SurrealDB downloads the keys from Authorizer instead of storing a copy, a new signing key does not need any change in SurrealDB. See [Rotating the signing key](/docs/learn/tutorials/walkthroughs/authorizer-integration#rotating-the-signing-key) for how long SurrealDB takes to pick one up.
 
 We will also use the [`AUTHENTICATE`](/docs/reference/query-language/statements/define/access/record#with-authenticate-clause) clause in order to check that the token was issued by your Authorizer instance for your application, and to return the record user. Because the record identifier is the Authorizer user ID, the record can be created the first time a user authenticates, so the application does not need a separate step to create it.
 
@@ -175,7 +175,7 @@ In the example above, replace the placeholders with values applicable to your Au
 In order to allow SurrealDB to establish a connection with Authorizer to download the JWKS object, you will require running it with the network <a href="/docs/learn/security/authorization/capabilities">capability</a>. For the strongest security, provide only your Authorizer host when starting SurrealDB with `--allow-net`. For example: `--allow-net auth.example.com`.
 
 > [!IMPORTANT]
-> SurrealDB also checks the IP address that the host resolves to. If Authorizer runs on a private network, for example as another container next to SurrealDB, that address must be allowed too: `--allow-net auth.internal,10.0.0.12`. If the JWKS object cannot be downloaded, every token is refused with 401, and the reason is logged when SurrealDB runs with `--log debug`.
+> SurrealDB also checks the IP address that the host resolves to. If Authorizer runs on a private network, for example as another container next to SurrealDB, that address must be allowed too: `--allow-net auth.internal,10.0.0.12`. If the JWKS object cannot be downloaded, every token is refused with 401, and SurrealDB logs the reason, for example `Access to network target '10.0.0.12/32' is not allowed`.
 
 ### Using Authorizer roles in permissions
 
@@ -200,6 +200,17 @@ DEFINE FIELD title ON post TYPE string;
 ```
 
 Roles are managed in Authorizer (`--roles`, `--default-roles` and the dashboard), so a user's permissions in SurrealDB change as soon as they receive a new token.
+
+### Rotating the signing key
+
+SurrealDB keeps the JWKS object it downloads in a cache for up to 12 hours. When a token names a key identifier (`kid`) that is not in the cache, SurrealDB downloads the JWKS object again, but not if its cached copy is less than 5 minutes old.
+
+This has two consequences when you rotate Authorizer's signing key with its secondary key flags (`--jwt-secondary-type`, `--jwt-secondary-public-key` and `--jwt-secondary-private-key`):
+
+- After Authorizer starts signing with the new key, SurrealDB can refuse tokens signed with it for up to 5 minutes.
+- After you remove the old key from Authorizer, SurrealDB keeps accepting tokens signed with it until its cache is replaced, which can take up to 12 hours. Tokens signed with the old key still expire as usual, so this matters only when the old key has been compromised.
+
+To stop trusting a compromised key straight away, restart SurrealDB, which empties the cache. Both periods can also be shortened with the [`SURREAL_JWKS_CACHE_COOLDOWN_SECONDS` and `SURREAL_JWKS_CACHE_EXPIRATION_SECONDS`](/docs/reference/cli/db/environment-variables#security-config) environment variables.
 
 ## Creating a simple web application
 
@@ -242,4 +253,4 @@ curl -X POST http://localhost:8000/sql \
 ```
 
 > [!NOTE]
-> SurrealDB verifies tokens on its own and does not ask Authorizer whether a session is still active. Signing out of Authorizer therefore stops new tokens from being issued but does not invalidate a token already sent to SurrealDB until it expires. Authorizer access tokens expire after 30 minutes by default; keep them short-lived and refresh them with the Authorizer SDK.
+> SurrealDB verifies tokens on its own and does not ask Authorizer whether a session is still active. Signing out of Authorizer therefore stops new tokens from being issued but does not invalidate a token already sent to SurrealDB until it expires. Authorizer access tokens expire after 30 minutes; refresh them with the Authorizer SDK.
