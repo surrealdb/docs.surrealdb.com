@@ -1428,6 +1428,7 @@ function sharedSectionRedirects(): Redirect[] {
 /** The tutorials that have a page at `/learn/tutorials/walkthroughs/<slug>`. */
 const TUTORIAL_PAGES = [
     "auth0-integration",
+    "authorizer-integration",
     "aws-cognito-integration",
     "build-a-real-time-presence-app",
     "build-an-ai-agent",

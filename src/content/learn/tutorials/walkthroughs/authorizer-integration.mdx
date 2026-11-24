@@ -1,0 +1,245 @@
+---
+position: 14
+title: Integrate Authorizer with SurrealDB
+description: "Use Authorizer, an open-source and self-hosted authentication server, as the authentication provider for a client-side application backed only by SurrealDB."
+---
+
+# Integrate Authorizer as an authentication provider
+
+This guide will cover using [Authorizer](https://authorizer.dev) as the authentication provider for client-side web applications using SurrealDB as the only backend. Authorizer is an open-source (Apache 2.0), self-hosted authentication and authorization server, so both your users' identities and your application data can stay on infrastructure you control.
+
+This guide uses [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access), the method for every current version of SurrealDB.
+
+In this guide you will learn how to:
+
+- Configure Authorizer to issue tokens that can be used with SurrealDB.
+- Configure SurrealDB to accept tokens issued by Authorizer.
+- Define user-level authorization using SurrealDB [record users](/docs/learn/security/authentication/users#record-users), including role-based permissions from Authorizer roles.
+- Authenticate users with Authorizer in a client-side web application.
+- Retrieve and update information from SurrealDB using the authenticated user.
+
+This guide will cover the most general case, in which SurrealDB is the only backend for your application. You can still follow this guide even if you have additional backends.
+
+The figure below shows the flow that this guide builds, with the names from the Auth0 guide. Here the access method is `authorizer`, and the claims come from an Authorizer custom access token script.
+
+<img src="~/assets/img/diagrams/light/conn-jwt-idp-light.webp" darkSrc="~/assets/img/diagrams/conn-jwt-idp.webp" alt="A user signs in with an identity provider, which returns a signed JWT that carries ns, db and ac claims. The app sends the token to SurrealDB with authenticate() or a Bearer header. SurrealDB finds the access method that ns, db and ac name, verifies the signature with the keys published at its JWT URL, and checks exp and nbf. It then runs AUTHENTICATE, which checks claims such as the issuer and audience and returns the user record, and starts a session with $token set to the claims, $access to the access method and $auth to the user record. Table PERMISSIONS then apply to every query, so SELECT * FROM user returns only that user's record. If any check fails, the token is refused with 401." />
+
+## Prerequisites
+
+This guide assumes the following:
+
+- You have a [fresh instance of SurrealDB running](/docs/running/overview).
+
+- You can [use a local Docker container](/docs/running/docker) without volumes for the purposes of this guide. SurrealDB must be allowed to reach Authorizer to download its signing keys (see [below](/docs/learn/tutorials/walkthroughs/authorizer-integration#defining-a-token-verification-method-in-surrealdb)):
+
+```bash
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest \
+  start --user root --pass secret --allow-net auth.example.com
+```
+
+To run the SurrealQL statements mentioned in this guide, you will also need an interactive shell.
+
+```bash
+surreal db sql -u root -p secret --pretty
+```
+
+You will also need a running Authorizer instance, version `2.4.8` or later, reachable at a URL such as `https://auth.example.com`. Earlier versions did not include the `kid` header in their tokens, which SurrealDB needs to select the signing key from the JWKS. See the [Authorizer documentation](https://docs.authorizer.dev) for deployment options.
+
+## Configuring Authorizer
+
+Authorizer is configured entirely with command-line flags. Its tokens are signed with an asymmetric key (RS256 or ES256) and the public keys are published at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`, which is what SurrealDB will use to verify them.
+
+### Adding the claims required by SurrealDB
+
+SurrealDB expects tokens to carry the namespace, database and access method they are meant for. Authorizer lets you add claims to every access token with a [custom access token script](https://docs.authorizer.dev/core/server-config): a JavaScript function that receives the user and the default token payload, and returns the claims to add.
+
+Start Authorizer with the following flag, in addition to your usual configuration:
+
+```bash
+--custom-access-token-script='function(user, tokenPayload) {
+  return {
+    ns: "main",              // The namespace selected when calling DEFINE ACCESS.
+    db: "main",              // The database selected when calling DEFINE ACCESS.
+    ac: "authorizer",        // The access method that has been defined using DEFINE ACCESS.
+    email: user.email,
+    email_verified: user.email_verified
+  };
+}'
+```
+
+Authorizer already includes `iss` (your Authorizer URL), `aud` and `client_id` (your client ID), `sub` (the user ID), `exp` and `roles` in every access token, so no further claims are needed.
+
+If you restrict `--allowed-origins` (the default is `*`), include the origin your application is served from, for example `http://localhost:5173`. Authorizer refuses sign-in requests from other origins.
+
+Take note of the following values:
+
+- Your Authorizer URL, for example `https://auth.example.com`. This is the `--url` flag and the `iss` claim of every token.
+- Your client ID. This is the `--client-id` flag and the `aud` claim of every access token.
+
+### Creating a test user
+
+To ensure this guide can be followed easily, create a test user by signing up through the Authorizer login page at `https://<YOUR_AUTHORIZER_URL>/app`, or through the dashboard at `https://<YOUR_AUTHORIZER_URL>/dashboard`. If you enabled email verification (`--enable-email-verification`), verify the address before continuing. If Authorizer offers to set up multi-factor authentication, skip it for this test user, so that the application below can sign in with just an email and password.
+
+## Configuring SurrealDB
+
+### Defining permissions and fields in SurrealDB
+
+For this simple example, we will create a single table named “user”, where any user that authenticates through Authorizer using your application will be granted complete permissions over their data. Each record is identified by the Authorizer user ID (the `sub` claim), which, unlike an email address, never changes.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE user SCHEMAFULL
+  -- Authorised users can select, update, delete and create user records.
+  -- Records that do not match the permissions will not be modified nor returned.
+  PERMISSIONS FOR select, update, delete, create
+  WHERE
+    -- The access method must match the method that we will define.
+    $access = "authorizer"
+    -- The record identifier must match that of the authenticated user.
+    AND id = $auth
+;
+
+DEFINE FIELD email
+  ON user TYPE string ASSERT string::is_email($value);
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+-- We define some other information that the user can edit.
+DEFINE FIELD nickname ON user TYPE option<string>;
+```
+
+### Defining a token verification method in SurrealDB
+
+Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/reference/protocols/http-protocol) via the “Authorization” header or through any of the [SDKs](/docs/languages) via the “Authenticate” methods.
+
+To do that, we will use the [JWKS support in SurrealDB](/docs/reference/query-language/statements/define/access/jwt#json-web-key-set-jwks) in order to define a token verification mechanism pointing to the JWKS object served by Authorizer at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`. Pointing to a remote JWKS object ensures that token verification keeps working when you rotate Authorizer's signing key using its secondary key flags (`--jwt-secondary-type`, `--jwt-secondary-public-key`): both keys are published during the rotation, and tokens signed with either are accepted.
+
+We will also use the [`AUTHENTICATE`](/docs/reference/query-language/statements/define/access/record#with-authenticate-clause) clause in order to check that the token was issued by your Authorizer instance for your application, and to return the record user. Because the record identifier is the Authorizer user ID, the record can be created the first time a user authenticates, so the application does not need a separate step to create it.
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Specify the namespace and database that will be used.
+-- These values should match the custom claims that we configured before.
+USE NS main DB main;
+
+-- The name of the access method should match the custom claim that we configured before.
+DEFINE ACCESS authorizer ON DATABASE TYPE RECORD
+    -- We verify the token using the public keys published by Authorizer.
+    WITH JWT URL "https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json"
+    AUTHENTICATE {
+        IF (
+            -- The issuer claim must match the URL of your Authorizer instance.
+            $token.iss = "https://<YOUR_AUTHORIZER_URL>"
+            -- The audience claim must match your Authorizer client ID.
+            AND $token.aud = "<YOUR_AUTHORIZER_CLIENT_ID>"
+            -- The email address in the token must be verified as belonging to the user.
+            AND $token.email_verified = true
+        ) {
+            -- The record user is identified by the Authorizer user ID.
+            LET $user = type::record("user", $token.sub);
+            -- Create the record the first time this user authenticates.
+            IF !record::exists($user) {
+                CREATE $user SET email = $token.email;
+            };
+            RETURN $user;
+        }
+    }
+;
+```
+
+In the example above, replace the placeholders with values applicable to your Authorizer instance.
+
+In order to allow SurrealDB to establish a connection with Authorizer to download the JWKS object, you will require running it with the network <a href="/docs/learn/security/authorization/capabilities">capability</a>. For the strongest security, provide only your Authorizer host when starting SurrealDB with `--allow-net`. For example: `--allow-net auth.example.com`.
+
+> [!IMPORTANT]
+> SurrealDB also checks the IP address that the host resolves to. If Authorizer runs on a private network, for example as another container next to SurrealDB, that address must be allowed too: `--allow-net auth.internal,10.0.0.12`. If the JWKS object cannot be downloaded, every token is refused with 401, and the reason is logged when SurrealDB runs with `--log debug`.
+
+### Using Authorizer roles in permissions
+
+Every Authorizer access token carries a `roles` claim with the roles granted to the user. These can be used directly in table permissions. For example, the following table lets every authenticated user read posts, but only users with the `admin` role write them:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE post SCHEMAFULL
+  PERMISSIONS
+    FOR select WHERE $access = "authorizer"
+    FOR create, update, delete WHERE $access = "authorizer" AND $token.roles CONTAINS "admin"
+;
+DEFINE FIELD title ON post TYPE string;
+```
+
+Roles are managed in Authorizer (`--roles`, `--default-roles` and the dashboard), so a user's permissions in SurrealDB change as soon as they receive a new token.
+
+## Creating a simple web application
+
+For this guide, we will create a simple client-side web application that signs the user in with Authorizer and uses the returned access token to authenticate with SurrealDB. The first request creates the user record; later visits retrieve it.
+
+The application uses the [Authorizer JavaScript SDK](https://github.com/authorizerdev/authorizer-js) to sign in and the [SurrealDB JavaScript SDK](/docs/languages/javascript) to query the database:
+
+```ts
+import { Authorizer } from "@authorizerdev/authorizer-js";
+import { Surreal } from "surrealdb";
+
+const authorizer = new Authorizer({
+  authorizerURL: "https://<YOUR_AUTHORIZER_URL>",
+  redirectURL: window.location.origin,
+  clientID: "<YOUR_AUTHORIZER_CLIENT_ID>",
+});
+
+const { data, errors } = await authorizer.login({
+  email: "user@example.com",
+  password: "<PASSWORD>",
+});
+if (errors.length) throw errors[0];
+
+const db = new Surreal();
+await db.connect("ws://localhost:8000");
+// The token carries ns, db and ac, so no further selection is needed.
+await db.authenticate(data.access_token);
+
+// Only the authenticated user's own record is returned.
+console.log(await db.query("SELECT * FROM user"));
+```
+
+The same token can be sent to the HTTP REST API instead:
+
+```bash
+curl -X POST http://localhost:8000/sql \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  --data-binary 'SELECT * FROM user;'
+```
+
+> [!NOTE]
+> SurrealDB verifies tokens on its own and does not ask Authorizer whether a session is still active. Signing out of Authorizer therefore stops new tokens from being issued but does not invalidate a token already sent to SurrealDB until it expires. Authorizer access tokens expire after 30 minutes by default; keep them short-lived and refresh them with the Authorizer SDK.
