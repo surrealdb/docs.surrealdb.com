@@ -1302,7 +1302,10 @@ method reference is not copied into the guide.
 `bun run check:sdk-parity` fails when an SDK lacks a concept that every SDK has,
 when a page that most SDKs have is missing and `KNOWN_GAPS` in
 `scripts/check-sdk-parity.ts` does not give the reason, when a recorded gap has
-been filled, and when a page uses another spelling of a shared slug. The SDKs
+been filled, when a page uses another spelling of a shared slug, when a shared
+page has a title or sidebar position other than the one in `SHARED` in that
+script, and when two pages of one SDK have the same position. A concept that
+only one SDK needs takes a position after the shared ones, from 14 up. The SDKs
 that have not moved to this layout are listed there as well, so that the list
 shrinks as they move. When a page moves, add the redirect from its old address
 to the concept page, with the method's anchor where the old page was one method.

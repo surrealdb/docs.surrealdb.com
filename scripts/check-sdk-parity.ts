@@ -15,6 +15,11 @@
  * - An SDK folder has a concept page with a slug that another SDK spells
  *   differently (`ALIASES`), such as `writing-surrealql` where the others use
  *   `executing-queries`.
+ * - A shared concept page has a title or a sidebar position other than the one
+ *   in `SHARED`, so the sidebar lists the concepts in the same order in every
+ *   SDK.
+ * - Two pages of one SDK have the same position, because a tie falls back to
+ *   the order of the files.
  *
  * A page that only one SDK needs, such as `codecs` in the JavaScript SDK or
  * `dependency-injection` in the .NET SDK, is not a gap. PHP is checked at its
@@ -25,7 +30,7 @@
  * Usage: bun scripts/check-sdk-parity.ts
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -43,6 +48,20 @@ const SDKS: Record<string, string> = {
     rust: "rust",
     swift: "swift",
     php: "php/v2",
+};
+
+/** The title and the sidebar position of each shared concept page. */
+const SHARED: Record<string, { title: string; position: number }> = {
+    "connecting-to-surrealdb": { title: "Connecting to SurrealDB", position: 1 },
+    authentication: { title: "Authentication", position: 2 },
+    "executing-queries": { title: "Executing queries", position: 3 },
+    "data-manipulation": { title: "Data manipulation", position: 4 },
+    "value-types": { title: "Value types", position: 5 },
+    "live-queries": { title: "Live queries", position: 6 },
+    transactions: { title: "Transactions", position: 7 },
+    "error-handling": { title: "Error handling", position: 8 },
+    "multiple-sessions": { title: "Multiple sessions", position: 9 },
+    "import-and-export": { title: "Import and export", position: 13 },
 };
 
 /** Concept pages that every SDK has. */
@@ -120,6 +139,20 @@ function concepts(sdk: string): Set<string> {
     );
 }
 
+/** The title and position in the frontmatter of a concept page. */
+function frontmatter(sdk: string, slug: string): { title: string; position: number } {
+    const text = readFileSync(join(REFERENCE, SDKS[sdk], "concepts", `${slug}.mdx`), "utf8");
+    const block = text.split("---")[1] ?? "";
+    const title =
+        block
+            .match(/^title:\s*(.*)$/m)?.[1]
+            ?.trim()
+            .replace(/^"|"$/g, "") ?? "";
+    const position = Number(block.match(/^position:\s*(-?\d+)\s*$/m)?.[1] ?? Number.NaN);
+
+    return { title, position };
+}
+
 function main(): number {
     const problems: string[] = [];
     const sdks = Object.keys(SDKS);
@@ -170,6 +203,37 @@ function main(): number {
                 problems.push(
                     `${sdk}/concepts/${slug} covers the concept that the other SDKs call ${shared}. Rename the page so the address matches.`,
                 );
+            }
+        }
+    }
+
+    for (const sdk of sdks) {
+        const seen = new Map<number, string>();
+
+        for (const slug of have.get(sdk) ?? []) {
+            const { title, position } = frontmatter(sdk, slug);
+            const shared = SHARED[slug];
+
+            if (shared && title !== shared.title) {
+                problems.push(
+                    `${sdk}/concepts/${slug} is titled "${title}", not "${shared.title}".`,
+                );
+            }
+
+            if (shared && position !== shared.position) {
+                problems.push(
+                    `${sdk}/concepts/${slug} has position ${position}, not ${shared.position}.`,
+                );
+            }
+
+            if (Number.isNaN(position)) {
+                problems.push(`${sdk}/concepts/${slug} has no numeric position.`);
+            } else if (seen.has(position)) {
+                problems.push(
+                    `${sdk}/concepts/${slug} and ${seen.get(position)} both have position ${position}.`,
+                );
+            } else {
+                seen.set(position, slug);
             }
         }
     }
