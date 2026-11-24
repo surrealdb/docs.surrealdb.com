@@ -1,6 +1,6 @@
 import { Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { PageContentActions } from "~/components/ContentActions";
-import { PageAside } from "~/components/PageAside";
+import { PageAside, PageAsideCollapse } from "~/components/PageAside";
 import { RelatedContent } from "~/components/RelatedContent";
 import { SidebarToggle } from "~/components/SidebarToggle";
 import { useSidebarCollapsed } from "~/components/SidebarToggle/use-sidebar-collapsed";
@@ -36,6 +36,7 @@ export function DefaultLayout({
             <Shell sidebarCollapsed={sidebarCollapsed}>
                 <Sidebar
                     navigation={data.navigation}
+                    groups={data.sectionNavigation}
                     visibleFrom="lg"
                     versionSelector={versionSelector}
                 />
@@ -115,6 +116,7 @@ export function DefaultLayout({
                              * description restated the first H2 sitting
                              * directly beneath it.
                              */}
+                            {showToc && <PageAsideCollapse headings={data.headings} />}
                             <Box
                                 mt="xl"
                                 component="main"

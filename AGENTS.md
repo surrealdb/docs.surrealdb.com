@@ -16,10 +16,12 @@ bun run check:links     # check every internal link and anchor in src/content
 bun run check:doc-tests  # check that every SurrealQL example has a test config that matches its page
 bun run check:cli-reference # check the environment variables page and command pages against the release
 bun run check:duplicates # warn about pages and examples this branch made repeat another page
+bun run check:content   # warn about added lines that break a mechanical writing rule
+bun run check:staleness # list pages whose content has not changed for 180 days
 bun run check:search-text # check that the search crawler extracts every page's text
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples).
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist, on an anchor that names no heading on its page, so a renamed heading needs every link to it updated, and on a link that reaches its page only through a redirect - a moved page, a short URL, a trailing slash, a `.html` file in `public/` or a folder without a page - so a moved page needs the links to it updated too, not just a rule in `redirects.ts`. Write links as full `/docs/...` paths: a relative link fails as well. Then run `bun run check:doc-tests`, which CI also runs: it fails when a SurrealQL example has no test config or its config disagrees with the page. See [Tested examples](#tested-examples). Also run `bun run check:content`, which CI runs as a warning: it lists the lines you added that break a mechanical rule in this guide (dashes, American spellings, idioms, Title Case headings, wrapped paragraphs, the old record ID brackets, `IF ... THEN ... END`, bare `//` comments, `Response` titles and `root` passwords), and the component rules (a `<SurrealistMini>` that renders empty, an `<iframe>`, an unknown callout kind, an image with no alt text, a misplaced `<Since>` badge, version tabs with the older version first, and a link repeated on a short page or in one section of a long one), and fixing them is part of the task. CI also fails when `public/llms.txt` differs from the output of `bun run generate:llms`, so run it and commit the result when a page is added, moved or retitled.
 
 The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
 
@@ -1009,10 +1011,24 @@ neither suggests a step towards the other. The Agent Memory Integrate hub is
 hubs, because its pages live in the `integrations` and `cookbooks` collections.
 
 Each level of navigation appears in one place. The top bar lists the sections,
-a section's menu and hub page list its parts, and the sidebar lists the pages
-of the part you are in. The hub pages live in the root `index` collection, so
+a section's menu and hub page list its parts, and the sidebar lists the whole
+section as one tree: a group for each part, which is a collection, with the
+group you are in open and the others closed. A group's heading links to its
+landing page, and its arrow opens it in place. `buildSectionNavigation` builds
+the tree from the collections of a section, which `SECTION_COLLECTIONS` in
+`src/utils/navigation.ts` lists, so a new collection under `learn`,
+`integrate`, `operate` or `reference` joins its section's sidebar without a
+change there. The hub pages live in the root `index` collection, so
 `buildNavigation` leaves them out of the Get started sidebar, and a hub page
-shows its section's parts as its sidebar instead.
+shows the same tree as the pages of its section, with every group closed. The
+Get started sidebar of each product uses the groups too, and so does a section
+that is a single collection, such as Agent Memory's Integrate. Every row at the
+top of a sidebar is a group and no page stands alone: `groupsFromSections`
+makes the first page of the first section the heading's page and its other
+pages the group's rows, and a first section that is a single page becomes the
+heading of the section after it. The group that holds the current page is open. When no group does, as on a hub page, the first
+group opens as the place to start, if it has twelve rows or fewer, and so does
+the first part inside an open group.
 
 The product switch at the top of the sidebar goes to the other product's home,
 except on a page that `COUNTERPART_PAGES` in `src/utils/product-counterparts.ts`

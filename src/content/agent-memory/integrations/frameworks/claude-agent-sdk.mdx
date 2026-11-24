@@ -1,0 +1,194 @@
+---
+position: 15
+title: Claude Agent SDK
+description: "SurrealDB Agent Memory for agents built on the Claude Agent SDK: automatic recall, turn capture, memory tools and fail-open behaviour with @surrealdb/claude-agent-memory."
+---
+
+# Claude Agent SDK
+
+`@surrealdb/claude-agent-memory` gives an agent built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) memory that lasts beyond one session. It recalls relevant memory before each prompt, injects the user's profile at the start of a session, offers memory tools to the model, and stores each exchange so a later session or process can recall it.
+
+The package is written in TypeScript and needs the SurrealDB Agent Memory endpoint, API key and context of your instance. The `@anthropic-ai/claude-agent-sdk` package (version 0.3.0 or later) is a peer dependency, so you choose its version.
+
+## Installation
+
+```bash
+bun add @surrealdb/claude-agent-memory @anthropic-ai/claude-agent-sdk
+```
+
+Set the connection with environment variables:
+
+```bash
+AGENT_MEMORY_ENDPOINT=https://your-agent-memory-endpoint
+AGENT_MEMORY_API_KEY=your-api-key
+AGENT_MEMORY_CONTEXT=your-context
+```
+
+You can also pass `endpoint`, `apiKey` and `context` to `createAgentMemory()`. If any of the three is missing, `createAgentMemory()` throws at startup, so an agent never runs silently without memory.
+
+## Quickstart
+
+`memory.query()` replaces the Agent SDK's `query()` call. It merges memory into the options, then watches the message stream and stores each exchange as it completes:
+
+```typescript
+import { createAgentMemory } from "@surrealdb/claude-agent-memory";
+
+const memory = createAgentMemory();
+
+for await (const message of memory.query({ prompt: "Where did we land on auth?" })) {
+	console.log(message);
+}
+```
+
+The prompt is answered with what earlier sessions established, and this session's exchange is stored for the next one. Writes start when a turn closes and do not block the stream. They finish before the stream ends, so a fully consumed query leaves nothing unwritten. If you abandon a query in another way, call `await memory.flush()`.
+
+## Keep your own query call
+
+`memory.options()` merges memory into options you already have, for code that calls the SDK's `query()` directly:
+
+```typescript
+import { query } from "@anthropic-ai/claude-agent-sdk";
+
+for await (const message of query({
+	prompt,
+	options: memory.options({ model: "claude-sonnet-4-5", maxTurns: 10 }),
+})) {
+	console.log(message);
+}
+```
+
+The merge keeps your settings. Your hooks run before the package's hooks, your other MCP servers stay, your `systemPrompt` is appended to and not replaced, and applying `options()` twice changes nothing. If a name collides with the package's MCP server, it throws, and you can rename the server with `serverName`.
+
+| | `memory.query()` | `memory.options()` |
+| --- | --- | --- |
+| Recall injected into each prompt | Yes | Yes |
+| Profile injected at session start | Yes | Yes |
+| Memory tools offered to the model | Yes | Yes |
+| Turns stored automatically | Yes | No |
+| You keep your own `query()` call | No | Yes |
+
+Only the wrapper sees the assistant's replies, so only `memory.query()` stores turns. With `memory.options()`, the model can save facts with the `remember` tool, or you can write them through `memory.client`.
+
+## What the model sees
+
+Recalled memory arrives in the prompt as a labelled block, and the added system prompt text tells the model to treat it as background knowledge and not as part of the user's message:
+
+```text
+<surreal-memory>
+Retrieved from the user's persistent memory. This is background knowledge,
+not part of the user's message, and the user cannot see it.
+
+...
+</surreal-memory>
+```
+
+The package also exposes an in-process MCP server named `agent-memory`, so each tool has the name `mcp__agent-memory__<name>`.
+
+| Tool | Purpose | Default |
+| --- | --- | --- |
+| `recall` | Search memory for specific facts. | On |
+| `context` | Return a synthesised briefing on a topic. | On |
+| `remember` | Save something durable. | On |
+| `reflect` | Reason across memory for an insight. | On |
+| `profile` | Return who the user is and their standing preferences. | On |
+| `inspect` | Return one memory in full, with provenance. | On |
+| `forget` | Delete matching memories. | Off |
+
+`forget` is destructive, so you must turn it on:
+
+```typescript
+createAgentMemory({ tools: { include: ["forget"] } });
+```
+
+The `tools` option also takes an exact list such as `["recall", "remember"]`, an exclusion such as `{ exclude: ["inspect"] }`, or `false` for no tools. For the tool semantics, see the [MCP tools reference](/docs/agent-memory/integrations/mcp-server/tools-reference).
+
+## Configuration
+
+These options of `createAgentMemory()` change what the package injects and stores. Connection settings fall back to the `AGENT_MEMORY_*` variables.
+
+| Option | Description |
+| --- | --- |
+| `scopes` | Scope selector applied to writes, such as `"user/ada"`. |
+| `lens` | Scope selector applied to reads. |
+| `labels` | `key=value` labels added to every write. |
+| `injectHistory` | Recall relevant memory on every prompt. Default `true`. |
+| `injectProfile` | Inject the profile at session start. Default `true`. |
+| `store` | Store turns from `memory.query()`. Default `true`. |
+| `k` | Number of hits to retrieve. Default `8`. |
+| `retrieval` | `"context"` for prose or `"recall"` for a list of facts. Default `"context"`. |
+| `maxInjectChars` | Cap on the size of an injected block. Default `4000`. |
+| `extract` | `"per_message"` or `"whole_conversation"`. |
+| `tools`, `serverName`, `systemPrompt` | Which tools to offer, the MCP server name, and whether to add the system prompt text. |
+| `failOpen` | Degrade instead of throwing when memory is unavailable. Default `true`. |
+| `injectTimeoutMs`, `writeTimeoutMs` | Time budgets for a recall on the turn's critical path (default 3000) and for storing one turn (default 15000). |
+| `client` | Use an existing Agent Memory client in place of the connection settings. |
+
+A scope selector takes the shapes the Agent Memory SDK accepts. `"team/eng"` is one scope, `["team/eng", "org/acme"]` matches either, and `[["team/eng", "org/acme"]]` requires both. The package also accepts `timeout`, `maxRetries`, `fetchImpl`, `onError`, `onTurn` and `debug`.
+
+## Sessions
+
+Each Claude session gets its own Agent Memory session. The first stored turn creates it, and later turns in the same conversation reuse it. Every stored row also carries the label `claude_session=<id>`, so a later process can find a conversation's turns without any in-process state.
+
+To continue the same memory session in a new process, save the pairing with `onSession` and pass it back as `sessionId`:
+
+```typescript
+const memory = createAgentMemory({
+	onSession: ({ claudeSessionId, memorySessionId }: { claudeSessionId: string; memorySessionId: string }) =>
+		save(claudeSessionId, memorySessionId),
+});
+
+// Later, in another process
+const resumed = createAgentMemory({ sessionId: await load(claudeSessionId) });
+```
+
+Resumed and forked sessions skip the profile injection, because the replayed transcript already carries it. Their replayed turns are not stored again. After a compaction the profile is injected again, because the earlier copy was summarised away.
+
+## When Agent Memory is unavailable
+
+By default a memory failure removes the memory feature and nothing else:
+
+- A recall that fails or exceeds `injectTimeoutMs` adds nothing to the turn.
+- A failed tool call returns an error the model can read and work around.
+- A failed write is reported through `onError` and through `onTurn` (with `persisted: false` and the `error`), and the message stream continues.
+- A rate limit with a short `Retry-After` is retried once.
+
+Set `failOpen: false` to make failures throw. Recall then throws from the hook, and a write failure surfaces from the end of the stream or from `flush()`. Tool calls stay fail-open in both modes.
+
+## Scoping and multi-tenancy
+
+Build one memory for each request or user, and let the service enforce the boundary. `onBehalfOf` needs the `manage` grant, so the check runs on the server and not in your code. The scopes and lens narrow access further:
+
+```typescript
+import { AgentMemory } from "@surrealdb/memory";
+import { createAgentMemory } from "@surrealdb/claude-agent-memory";
+
+const base = new AgentMemory({
+	endpoint: process.env.AGENT_MEMORY_ENDPOINT!,
+	apiKey: process.env.AGENT_MEMORY_API_KEY!,
+	context: process.env.AGENT_MEMORY_CONTEXT!,
+});
+
+const memory = createAgentMemory({
+	client: base.onBehalfOf(`principal:${userId}`),
+	scopes: `user/${userId}`,
+	lens: `user/${userId}`,
+});
+```
+
+The per-call overrides of `memory.query()` accept `sessionId`, `scopes`, `labels`, `store`, `injectHistory`, `k` and `onTurn`. There is no per-call `lens`, because a read lens also narrows the tools, which are built for each memory instance.
+
+## Other methods
+
+| Method | Returns |
+| --- | --- |
+| `mcpServer()` | The in-process MCP server, to place in your own options. |
+| `toolNames()` | The qualified tool names, for `allowedTools`. |
+| `hooks()` | The hooks, to compose yourself. |
+| `systemPromptAppend()` | The system prompt text. |
+| `memorySessionFor(claudeSessionId)` | The bound memory session, if known. |
+| `client` | The underlying Agent Memory client, for documents, entities and the rest of the service. |
+
+## When to use MCP or the SDK instead
+
+- For Claude Desktop or Claude Code as a host, use the [MCP server](/docs/agent-memory/integrations/mcp-server/coding-assistants/claude-desktop-and-code).
+- To call Agent Memory directly from TypeScript, use the [JavaScript and TypeScript SDK](/docs/agent-memory/integrations/sdks/javascript-and-typescript).
