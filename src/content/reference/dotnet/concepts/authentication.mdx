@@ -1,0 +1,212 @@
+---
+position: 2
+title: Authentication
+description: Define record access, sign up and sign in users, authenticate with a token, read the signed-in user and end a session with the .NET SDK.
+---
+
+
+# Authentication
+
+SurrealDB is designed to be used in a distributed environment, so the database and the data stored in it need to be secured. SurrealDB provides a number of methods for authenticating users and securing the database.
+
+In your SurrealDB database, you can create authentication login using the [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access) statement which supports [JWT](/docs/reference/query-language/statements/define/access/jwt) and [Record](/docs/reference/query-language/statements/define/access/record) Access methods.
+
+The access method used will inform the input for `Access` in the `.SignUp()` and `.SignIn()` methods. This page follows a record user from sign-up to sign-out and shows every credential type. Every method takes an optional `cancellationToken`, which cancels the operation.
+
+> [!IMPORTANT]
+> If you are not on Version <Version /> of SurrealDB, you will use the `Scope` property instead of `Access`.
+
+| Method | Description |
+| --- | --- |
+| [`db.SignUp()`](#signup) | Signs up a new record user through an access method |
+| [`db.SignIn()`](#signin) | Signs in to a root, namespace, database or record user |
+| [`db.Authenticate()`](#authenticate) | Authenticates the current connection with a token |
+| [`db.Invalidate()`](#invalidate) | Invalidates the authentication for the current connection |
+| [`db.Info<T>()`](#info) | Returns the record of the signed-in record user |
+
+## Defining access in your application
+
+The .NET SDK has a [`.Query()` method](/docs/reference/dotnet/concepts/executing-queries) which allows you to write secure SurrealQL statements from within your application. Using this method, you can define access for your users and securely manage authentication. See the code example below:
+
+```csharp
+await db.Query(
+    $"""
+    DEFINE ACCESS account ON DATABASE TYPE RECORD
+		SIGNUP ( CREATE user SET email = $email,
+	    pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+    """
+);
+```
+
+> [!NOTE]
+> Depending on the connection protocol you choose, authentication tokens and sessions lifetime work differently. Refer to the [connection options](/docs/reference/dotnet/concepts/connecting-to-surrealdb#connection-options) documentation for more information.
+
+## Signing up a record user {#signup}
+
+A record user signs up with credentials that name the namespace, the database and the access method, together with every value the access method's `SIGNUP` clause reads. Define a class that extends `ScopeAuth` with those values as properties, and pass an instance to `.SignUp()`. The SDK sends each property under its C# name unless a `[CborProperty]` attribute (from `Dahomey.Cbor.Attributes`) names it, so give each property the name of the parameter the clause reads. For the `account` access method above, the clause reads `$email` and `$pass`:
+
+```csharp
+var authParams = new AuthParams
+{
+    Namespace = "main",
+    Database = "main",
+    Access = "account",
+    Email = "info@surrealdb.com",
+    Pass = "123456"
+};
+
+Jwt jwt = await db.SignUp(authParams);
+
+public class AuthParams : ScopeAuth
+{
+	[CborProperty("email")]
+	public string? Email { get; set; }
+
+	[CborProperty("pass")]
+	public string? Pass { get; set; }
+}
+```
+
+`.SignUp()` creates the user record, signs the connection in as that user and returns the token as a `Jwt`.
+
+```csharp title="Method Syntax"
+await db.SignUp(credentials)
+```
+
+## Signing in {#signin}
+
+A user who already exists signs in with `.SignIn()`. The credentials say what kind of user it is: root, namespace, database or record. A record user passes the same credentials as at sign-up, and the access method runs its `SIGNIN` clause instead.
+
+```csharp title="Method Syntax"
+await db.SignIn(credentials)
+```
+
+<Tabs syncKey="signin-example">
+<TabItem label="Root user">
+
+```csharp
+// Sign in as root user
+await db.SignIn(new RootAuth { Username = "root",
+    Password = "secret" });
+```
+
+</TabItem>
+
+<TabItem label="Namespace user">
+
+```csharp
+// Sign in using namespace auth
+await db.SignIn(
+    new NamespaceAuth
+    {
+        Namespace = "main", 
+        Username = "johndoe", 
+        Password = "password123" 
+    }
+);
+```
+
+</TabItem>
+
+<TabItem label="Database user">
+
+```csharp
+// Sign in using database auth
+await db.SignIn(
+    new DatabaseAuth
+    {
+        Namespace = "main", 
+        Database = "main", 
+        Username = "johndoe", 
+        Password = "password123" 
+    }
+);
+```
+
+</TabItem>
+
+<TabItem label="Record Access">
+
+```csharp
+// Sign in with Record Access
+// Pass every value the access method's SIGNIN clause reads
+var authParams = new AuthParams
+{
+    Namespace = "main",
+    Database = "main",
+    Access = "user",
+    Email = "info@surrealdb.com",
+    Pass = "123456"
+};
+
+Jwt jwt = await db.SignIn(authParams);
+
+public class AuthParams : ScopeAuth
+{
+	[CborProperty("email")]
+	public string? Email { get; set; }
+
+	[CborProperty("pass")]
+	public string? Pass { get; set; }
+}
+```
+
+</TabItem>
+
+<TabItem label="Scopes">
+
+Before SurrealDB 2.0, record users signed in through a scope rather than an access method. The credentials use the `AuthParams` class from the Record Access tab, with `Scope` set in place of `Access`:
+
+```csharp
+// Sign in as a scoped user
+var authParams = new AuthParams
+{
+    Namespace = "main",
+    Database = "main",
+    Scope = "user",
+    Email = "info@surrealdb.com",
+    Pass = "123456"
+};
+
+Jwt jwt = await db.SignIn(authParams);
+```
+
+</TabItem>
+</Tabs>
+
+## Authenticating with a token {#authenticate}
+
+A token returned by `.SignUp()` or `.SignIn()` can authenticate another connection, or the same connection later, without the user's credentials. Pass it to `.Authenticate()`:
+
+```csharp title="Method Syntax"
+await db.Authenticate(jwt)
+```
+
+The token is a `Jwt`, which can also be created from a token string that your application stored:
+
+```csharp
+var jwt = new Jwt("<token>");
+await db.Authenticate(jwt);
+```
+
+## Ending a session {#invalidate}
+
+`.Invalidate()` removes the authentication from the current connection, so later requests run without a signed-in user:
+
+```csharp
+await db.Invalidate();
+```
+
+## Reading the signed-in user {#info}
+
+`.Info<T>()` returns the record of the record user that the connection is signed in as.
+
+```csharp title="Method Syntax"
+await db.Info<T>()
+```
+
+```csharp
+var currentUser = await db.Info<User>();
+```
