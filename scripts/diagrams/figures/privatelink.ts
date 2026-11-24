@@ -134,7 +134,7 @@ const privatelinkFlow: Figure = {
             400,
             260,
             "Your instance",
-            ["Private traffic: on", "Public traffic: on (dual)", "or off (private)"],
+            ["Private traffic: on", "Public traffic: on", "or off"],
             { active: true },
         );
 
