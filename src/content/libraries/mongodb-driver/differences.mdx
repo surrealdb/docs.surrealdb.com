@@ -1,0 +1,95 @@
+---
+position: 5
+title: Differences from MongoDB
+description: How @surrealdb/mql stores ObjectId, Date and _id values in SurrealDB, which BSON types and methods are not available and what to use instead, how db.command and buildInfo answer, and the errors the driver raises.
+---
+
+# Differences from MongoDB
+
+The driver matches the MongoDB Node.js driver where SurrealDB can give the same answer. Where it cannot, the call raises an error that names the limit, so code never receives a quietly different result. This page lists what is stored differently, what is not available and what each error means.
+
+## How values are stored
+
+`ObjectId` and `Date` values come back as the same classes that you wrote, including inside sub-documents and arrays.
+
+| Value | Stored as | Read back as |
+| --- | --- | --- |
+| `ObjectId` | The object `{ "$oid": "<24 hex characters>" }` | `ObjectId` |
+| `Date` | A SurrealDB `datetime` | `Date`, to the millisecond |
+| String, number, boolean, `null`, array, sub-document | The SurrealQL equivalent | As written |
+
+MongoDB's `_id` is SurrealDB's `id`. The record is in the table that has the collection's name, and its id is the `_id`.
+
+| `_id` | Record id | Read back as |
+| --- | --- | --- |
+| `ObjectId` | ``users:{ "$oid": '6a7b933c2627a1d7fdb21827' }`` | `ObjectId` |
+| String | `` users:`the string` ``, stored exactly as given | The same string |
+| Number | `users:42` | The same number |
+| Anything else | The value as a string | A string |
+
+- **A string that looks like an ObjectId stays a string.** `_id: "6a7b…"` and `_id: new ObjectId("6a7b…")` are different records.
+- **An `_id` that is not a string, number or ObjectId is turned into a string**, because a record id must be one of SurrealDB's id types.
+- **In SurrealQL, quote the `$oid` key.** A bare `$oid` reads as a parameter, so write ``accounts:{ "$oid": '6a7b933c2627a1d7fdb21827' }``.
+- **A datetime is rounded to the millisecond.** SurrealDB keeps nanoseconds and a `Date` does not, so a datetime written by another client arrives rounded. A `Date` outside the years −262143 to 262142 is refused.
+- **`ObjectId` is the driver's own class.** Ids from the `bson` package and from Mongoose are accepted anywhere an id is. To pass this class to the official driver's serialiser, wrap it with `new bson.ObjectId(id)`.
+
+### BSON types with no SurrealDB type
+
+A value of these types throws a `MongoCompatibilityError` that names the type, because storing it would keep its internal fields instead of the value.
+
+| BSON type | Use instead |
+| --- | --- |
+| `Decimal128` | A `number`, a decimal string, or `Decimal` from the `surrealdb` package |
+| `Long`, `Int32`, `Double` | A `number` or a `bigint` |
+| `Binary` | A `Uint8Array`, which is stored as `bytes` and read back as an `ArrayBuffer` |
+| `UUID` | A string, or `Uuid` from the `surrealdb` package |
+| `Timestamp` | A `Date` or a number of milliseconds |
+| `Code`, `MinKey`, `MaxKey` | Nothing, because they have no equivalent |
+| `DBRef` | The `ObjectId` and the collection name as fields |
+
+Values from the `surrealdb` package, such as `Decimal`, `Uuid`, `Duration` and `RecordId`, pass through unchanged in both directions.
+
+## Methods that are not available
+
+Every MongoDB method exists on the driver. These raise a `MongoCompatibilityError` that says what is missing, so code that probes for a feature can fall back. The error extends `MongoDriverError` and has no `code`, because no server refused anything.
+
+| Methods | Use instead |
+| --- | --- |
+| `watch()` on a collection, database or client | A SurrealDB live query, because live queries carry no resume token for a change stream to use |
+| `rename()`, `renameCollection()` | Create the new collection, copy the documents, and drop the old one |
+| `createSearchIndex()`, `dropSearchIndex()`, `updateSearchIndex()`, `listSearchIndexes()` | `createIndex()` with a `text` key, searched with `$text` |
+| `initializeOrderedBulkOp()`, `initializeUnorderedBulkOp()` | `bulkWrite()` |
+| `Db.aggregate()` | `db.collection(name).aggregate(pipeline)` |
+
+A command sent to `db.command()` that the driver does not route throws the `MongoServerError` that MongoDB raises, with code `59` and the message `no such command`. This includes real MongoDB commands such as `serverStatus`, so match on the code and not on the wording.
+
+## Commands and server information
+
+`db.command()` answers `ping`, `buildInfo`, `dbStats`, `collStats`, `create`, `drop`, `listCollections`, `createIndexes` and `dropIndexes`. `listDatabases` is available from `db.admin()`, as MongoDB restricts it to the `admin` database.
+
+```ts
+await db.admin().buildInfo();
+```
+
+```ts title="Example output"
+{ version: "8.0.0", versionArray: [8, 0, 0, 0], surrealdbVersion: "3.2.4", ok: 1 }
+```
+
+`version` is the MongoDB version the driver is compatible with, because clients compare it to decide which features to use. A SurrealDB version number there would make a client think it talks to a very old MongoDB and stop using transactions. `surrealdbVersion` is the version of the instance.
+
+Replies leave out values that SurrealDB cannot give instead of filling them with zeros. Byte sizes, for example, are absent from `dbStats`, `collStats` and `listDatabases`.
+
+## Other differences
+
+- **Several databases from one client.** `client.db(name)` addresses any database in the namespace. A database other than the connected one that does not exist reads as empty. If the connected database is missing, the driver throws, so a mistyped connection string does not look like an empty dataset.
+- **`Collection.drop()` returns `false`** for a collection that was not there, where MongoDB returns `true`.
+- **`createCollection()` refuses `capped`, `validator`, `timeseries`, `viewOn` and similar options**, because `DEFINE TABLE` has no counterpart for them.
+- **Options that are not recognised at all are ignored**, so wrappers such as Mongoose can add their own. Options that MongoDB has and the driver cannot honour are refused with a reason, as listed in [Connection](/docs/libraries/mongodb-driver/connection#options) and in the sections of [Querying](/docs/libraries/mongodb-driver/querying).
+
+## Versions and compatibility
+
+The compatibility policy lists what a version number promises, over an API that is partly MongoDB's and partly the driver's. Correcting an answer so that it matches MongoDB is a minor release, and the changelog names each one.
+
+- [Compatibility policy](https://github.com/surrealdb/mql.js/blob/main/COMPATIBILITY.md)
+- [Changelog](https://github.com/surrealdb/mql.js/blob/main/CHANGELOG.md)
+- [Source and issues](https://github.com/surrealdb/mql.js)

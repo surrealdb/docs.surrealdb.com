@@ -356,6 +356,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         description:
                             "PostgreSQL and MySQL dialect clients for edge and serverless runtimes.",
                     },
+                    {
+                        label: "MongoDB driver for JavaScript",
+                        href: "/docs/libraries/mongodb-driver",
+                        description: "The MongoDB Node.js driver API on SurrealDB.",
+                    },
                 ],
             },
         ],

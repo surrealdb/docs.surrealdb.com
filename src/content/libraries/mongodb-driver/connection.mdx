@@ -1,0 +1,96 @@
+---
+position: 2
+title: MongoDB driver connection
+description: Connect @surrealdb/mql to SurrealDB with a MongoDB connection string or options, choose a root or database user, set timeouts, listen for connection events, and see which MongoDB client options have an effect.
+---
+
+# MongoDB driver connection
+
+`MongoClient` takes a MongoDB-style connection string, an options object, or both, and translates them into a SurrealDB connection. Options in the object win over the same setting in the string.
+
+## Connection strings
+
+```
+mongodb://[user:password@]host[:port]/[database][?namespace=ns&options]
+```
+
+| Connection string | Connects to |
+| --- | --- |
+| `mongodb://root:secret@localhost:8000/shop` | `ws://localhost:8000/rpc` |
+| `mongodb://localhost/shop` | `ws://localhost:8000/rpc` |
+| `mongodb://db.example.com/shop?tls=true` | `wss://db.example.com:443/rpc` |
+| `ws://localhost:8000/shop`, `wss://db.example.com/shop` | The same address over WebSocket |
+| `http://localhost:8000/shop`, `https://db.example.com/shop` | The same address over HTTP |
+
+- **Protocol:** `mongodb://` connects over WebSocket, and `tls=true` or `ssl=true` selects `wss://`. The `ws`, `wss`, `http` and `https` schemes are used as written.
+- **Port:** a missing port becomes `8000` for a plain connection and `443` for an encrypted one.
+- **Database:** the path of the URL. With no path the database is `test`, as in MongoDB.
+- **Namespace:** the `namespace` parameter, which is `default` when absent. MongoDB drivers reject this parameter, so a string that uses it does not work with the official driver.
+- **Credentials:** read from the URL and percent-decoded, so a password of `p@ssw/rd` is written `p%40ssw%2Frd`.
+
+```ts
+import { MongoClient } from "@surrealdb/mql";
+
+const client = new MongoClient("mongodb://localhost:8000/shop", {
+	namespace: "production",
+	database: "reports",
+	connectTimeoutMS: 5_000,
+});
+```
+
+The connection opens on the first operation, so `client.db()` can be called before `connect()`. Call `connect()` yourself to find out at once whether the instance is reachable, or use `MongoClient.connect(uri)` to create and connect in one step. After `close()`, operations fail with `MongoNotConnectedError` instead of opening the connection again.
+
+Three kinds of string fail when the client is created or connects:
+
+- **`mongodb+srv://`** needs a DNS lookup that the driver does not make. Use the address of the instance.
+- **A string with several hosts** asks for replica set discovery. The driver holds one connection to one instance.
+- **An unknown query parameter** is rejected, as in MongoDB. An unknown key in the options object is ignored, because wrappers such as Mongoose add keys of their own.
+
+## Authentication
+
+A user and password sign in as a SurrealDB root user, which is the level that corresponds to MongoDB's `admin` database. Add `authSource=<database>` to sign in as a user defined on that database, in the namespace of the connection.
+
+```ts
+// A root user, from DEFINE USER ... ON ROOT
+new MongoClient("mongodb://root:secret@localhost:8000/shop?namespace=docs");
+
+// A database user, from DEFINE USER ... ON DATABASE
+new MongoClient("mongodb://app:hunter123@localhost:8000/shop?namespace=docs&authSource=shop");
+```
+
+MongoDB uses the database in the connection string as the default `authSource`. The driver uses the root level instead, because SurrealDB rejects root credentials sent to a database. Namespace users cannot be selected with a connection string.
+
+## Options
+
+Options from the string and the options object are checked together. Each one has an effect, is accepted and does nothing, or is refused with a reason, and none is dropped without a message.
+
+| Option | Behaviour |
+| --- | --- |
+| `tls`, `ssl` | Selects `wss://` or `https://`. The two must agree. |
+| `connectTimeoutMS`, `serverSelectionTimeoutMS` | The shorter one limits the connection attempt. Both default to 30,000 ms, and `0` means no limit. |
+| `timeoutMS` | Becomes a SurrealQL `TIMEOUT` on every operation. An operation can set a shorter one. |
+| `ignoreUndefined` | The default for every operation. |
+| `authSource`, `namespace`, `database` | As described above. |
+| `reconnect` | Off by default, so a dropped connection is reported as an error. |
+| Pool, replica set, read preference, read and write concern, retry and compression options | Accepted with no effect, because there is one connection to one instance and writes wait for SurrealDB to confirm them. |
+| `w` above 1, `w: 0`, `readConcern: "linearizable"`, `socketTimeoutMS` | Refused. |
+| TLS certificate files, `tlsInsecure`, proxy and SRV options | Refused, because the runtime's own certificate store and network settings are used. |
+| `autoEncryption`, `pkFactory`, `monitorCommands` and the BSON serialisation options such as `raw` and `promoteLongs` | Refused, because the feature does not exist in the driver. |
+
+`client.options` reports the merged result. It shows a default only for options that have an effect.
+
+## Transports
+
+The WebSocket transport supports every feature. The HTTP transport has no sessions or transactions, because SurrealDB's HTTP endpoint cannot hold a transaction open, so `startSession()` throws a `MongoCompatibilityError` over `http://` and `https://`. Choose HTTP for runtimes without a global `WebSocket` and for stateless code that needs no transactions.
+
+## Connection events
+
+`MongoClient` emits three events, with the usual `on`, `once` and `off` methods.
+
+```ts
+client.on("open", (c) => console.log("connected to", c.databaseName));
+client.on("close", () => console.log("closed"));
+client.on("error", (error) => console.error("connection error", error));
+```
+
+The `open` event fires when the connection is established, including when the first operation opens it. An `error` event with no listener does not stop the process, because the error has already reached the code that called the failing operation. The events that describe a connection pool, replica set monitoring and command monitoring are not emitted, because the driver has none of those.
