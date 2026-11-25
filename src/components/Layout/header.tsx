@@ -106,8 +106,14 @@ const NAV_CLOSE_DELAY = 120;
  */
 const NAV_DROPDOWNS_ENABLED = false;
 
-const SIGN_IN_URL =
-    "https://studio.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
+/**
+ * Studio's sign-in, with the `cta` parameter naming the button that sent the
+ * reader. The Google tag's cross-domain linker adds its own `_gl` parameter to
+ * this link at click time, so the link itself carries no session values.
+ */
+function signInUrl(cta: string) {
+    return `https://studio.surrealdb.com/?signin=true&cta=${cta}`;
+}
 
 function normalizeHref(href: string) {
     return href.replace(/^\/docs/, "").replace(/\/$/, "") || "/";
@@ -675,12 +681,15 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     </ClientOnly>
                     <Button
                         component="a"
-                        href={SIGN_IN_URL}
+                        href={signInUrl("docs_header_signin")}
                         target="_blank"
                         rel="noopener noreferrer"
                         size="sm"
                         variant="gradient"
                         visibleFrom="sm"
+                        data-cta="docs_header_signin"
+                        data-cta-destination="studio"
+                        data-cta-placement="header"
                     >
                         Sign In
                     </Button>
@@ -732,6 +741,22 @@ export function MobileNav({ navLinks, pageNavigation }: MobileNavProps) {
             px="sm"
             py="sm"
         >
+            {/* The header has room for the sign-in button from `sm` up, so
+                phones reach it from here instead. */}
+            <Button
+                component="a"
+                href={signInUrl("docs_mobile_menu_signin")}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="gradient"
+                hiddenFrom="sm"
+                fullWidth
+                data-cta="docs_mobile_menu_signin"
+                data-cta-destination="studio"
+                data-cta-placement="mobile_menu"
+            >
+                Sign In
+            </Button>
             {/* The header search only has room from `sm` up, so phones reach
                 it from here instead. */}
             {product.id === "surrealdb" && (
