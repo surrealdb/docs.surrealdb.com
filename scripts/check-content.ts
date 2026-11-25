@@ -130,6 +130,7 @@ const NAMES = new Set([
     "Scale",
     "Free",
     "Labs",
+    "Marketplace",
     "Skills",
     "Surrealist",
     // Part of the names "VS Code" and "Claude Code".

@@ -942,7 +942,11 @@ function cloudAndDeploymentRedirects(): Redirect[] {
 
         // manage/cloud split into manage/instances and manage/organisations.
         ["manage/cloud/architecture", "operate/instances/architecture", "exact"],
-        ["manage/cloud/aws-marketplace", "operate/organisations/aws-marketplace", "exact"],
+        [
+            "manage/cloud/aws-marketplace",
+            "operate/organisations/cloud-marketplaces#aws-marketplace",
+            "exact",
+        ],
         ["manage/cloud/backups-and-recovery", "operate/instances/backups", "exact"],
         ["manage/cloud/billing-and-support", "operate/organisations/billing", "exact"],
         ["manage/cloud/high-availability", "operate/instances/high-availability", "exact"],
@@ -1211,6 +1215,27 @@ function timeSeriesGuideRedirects(): Redirect[] {
         { source, destination, statusCode: 301 },
         { source: `/docs${source}`, destination, statusCode: 301 },
     ];
+}
+
+/**
+ * The AWS and Azure Marketplace guides are sections of one page about cloud
+ * marketplaces, so each old address goes to its section.
+ */
+function cloudMarketplaceRedirects(): Redirect[] {
+    const destination = "/docs/operate/organisations/cloud-marketplaces";
+
+    return ["aws", "azure"].flatMap((provider) => {
+        const source = `/operate/organisations/${provider}-marketplace`;
+
+        return [
+            { source, destination: `${destination}#${provider}-marketplace`, statusCode: 301 },
+            {
+                source: `/docs${source}`,
+                destination: `${destination}#${provider}-marketplace`,
+                statusCode: 301,
+            },
+        ] as Redirect[];
+    });
 }
 
 /**
@@ -1621,6 +1646,7 @@ const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
     ...timeSeriesGuideRedirects(),
+    ...cloudMarketplaceRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
     // consolidated to three pages. The two survivors are named, and the rest go
