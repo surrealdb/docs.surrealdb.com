@@ -110,8 +110,10 @@ const NAV_DROPDOWNS_ENABLED = false;
  * reader. The Google tag's cross-domain linker adds its own `_gl` parameter to
  * this link at click time, so the link itself carries no session values.
  *
- * Links to Studio leave out `noreferrer`, so Studio can see that the visit came
- * from the docs.
+ * The `cta` parameter is what tells Studio the visit came from the docs. Links
+ * to Studio leave out `noreferrer` all the same, so Studio still receives the
+ * referrer the browser allows, which under the default
+ * `strict-origin-when-cross-origin` policy is the origin `https://surrealdb.com/`.
  */
 function signInUrl(cta: string) {
     return `https://studio.surrealdb.com/?signin=true&cta=${cta}`;
@@ -691,7 +693,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         visibleFrom="sm"
                         data-cta="docs_header_signin"
                         data-cta-destination="studio"
-                        data-cta-placement="header"
+                        data-cta-placement="nav"
                     >
                         Sign In
                     </Button>
@@ -755,7 +757,7 @@ export function MobileNav({ navLinks, pageNavigation }: MobileNavProps) {
                 fullWidth
                 data-cta="docs_mobile_menu_signin"
                 data-cta-destination="studio"
-                data-cta-placement="mobile_menu"
+                data-cta-placement="nav"
             >
                 Sign In
             </Button>
