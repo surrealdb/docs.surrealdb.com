@@ -78,37 +78,54 @@ export function SearchDocs(props: UnstyledButtonProps) {
         retry: false,
     });
 
-    // Each settled term is reported once. A search that finds nothing is
-    // recorded by the search API in the `search_miss` table, with the query.
+    // Each settled term is reported once, with its number of results, so a
+    // search that finds nothing counts once each time it happens. The search
+    // API also records the query of a search that finds nothing in the
+    // `search_miss` table, but only when the edge cache misses, so that table
+    // lists gaps without counting them.
     const reportSearch = useCallback(
-        (term: string) => {
+        (term: string, resultCount: number) => {
             if (term === lastReportedSearch.current) return;
             lastReportedSearch.current = term;
-            if (!term) return;
 
             trackEvent("search", {
                 search_term: term,
                 search_product: product,
+                result_count: resultCount,
             });
         },
         [product],
     );
 
+    // The results of the settled term, once they have arrived. Until then the
+    // list can still hold an earlier term's results.
+    const settledResults =
+        searchQuery.isSuccess &&
+        !searchQuery.isPlaceholderData &&
+        settledSearch.length > 0 &&
+        settledSearch === debouncedSearch
+            ? searchQuery.data
+            : undefined;
+
     useEffect(() => {
-        reportSearch(settledSearch);
-    }, [settledSearch, reportSearch]);
+        if (!settledSearch) {
+            lastReportedSearch.current = "";
+            return;
+        }
+        if (settledResults) reportSearch(settledSearch, settledResults.length);
+    }, [settledSearch, settledResults, reportSearch]);
 
     // A click can come before the term has settled, so it reports the
     // search first.
     const handleSelect = useCallback(
         (result: SearchResult) => {
-            reportSearch(debouncedSearch);
+            reportSearch(debouncedSearch, searchQuery.data?.length ?? 0);
             trackEvent("search_result_click", {
                 search_term: debouncedSearch,
                 link_url: linkUrl(String(result.url ?? "/")),
             });
         },
-        [debouncedSearch, reportSearch],
+        [debouncedSearch, reportSearch, searchQuery.data],
     );
 
     useHotkeys([["mod+K", openDocsSearch]]);
