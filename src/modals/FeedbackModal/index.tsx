@@ -1,5 +1,6 @@
 import { Button, Chip, Group, Modal, Stack, Text, Textarea } from "@mantine/core";
 import { useCallback, useState } from "react";
+import { trackEvent } from "~/utils/analytics";
 import { submitFeedback } from "~/utils/feedback";
 
 const HELPFUL_OPTIONS = [
@@ -51,6 +52,7 @@ export function FeedbackModal({ sentiment, opened, onClose, path }: FeedbackModa
         try {
             await submitFeedback({ path, sentiment, reasons, comment });
             setState("sent");
+            trackEvent("feedback_submitted", { sentiment, page: path });
         } catch {
             // The reader's text stays in the form, so they can retry
             // or copy it out rather than losing it.
