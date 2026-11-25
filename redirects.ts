@@ -1427,8 +1427,6 @@ function sharedSectionRedirects(): Redirect[] {
 
 /** The tutorials that have a page at `/learn/tutorials/walkthroughs/<slug>`. */
 const TUTORIAL_PAGES = [
-    "auth0-integration",
-    "aws-cognito-integration",
     "build-a-real-time-presence-app",
     "build-an-ai-agent",
     "connect-via-ngrok",
@@ -1437,9 +1435,19 @@ const TUTORIAL_PAGES = [
     "github-actions",
     "how-to-build-a-knowledge-graph-for-ai",
     "http-via-postman",
+    "identity-provider-integration",
     "minimal-langchain",
     "navigate-a-drone-without-gps",
     "semantic-search-in-rust",
+];
+
+/**
+ * The Auth0 and AWS Cognito guides are sections of one page about identity
+ * providers, so each old slug goes to its section on that page.
+ */
+const IDENTITY_PROVIDER_GUIDES: [string, string][] = [
+    ["auth0-integration", "auth0"],
+    ["aws-cognito-integration", "aws-cognito"],
 ];
 
 /**
@@ -1448,14 +1456,40 @@ const TUTORIAL_PAGES = [
  * section, and the slug directly under `/tutorials`, `/explore/tutorials`,
  * `/build/tutorials` or `/learn/tutorials`. Each goes to the page in one hop,
  * so these rules come before the prefix rules that would send them to
- * `/learn/tutorials/<slug>`, where no page exists.
+ * `/learn/tutorials/<slug>`, where no page exists. The Auth0 and AWS Cognito
+ * guides are now sections of one page, so their old slugs go to those sections.
  */
 function tutorialPathRedirects(): Redirect[] {
     const walkthroughs = "/docs/learn/tutorials/walkthroughs";
     const parents = ["tutorials", "explore/tutorials", "build/tutorials", "learn/tutorials"];
     const forms = (path: string) => [`/${path}`, `/docs/${path}`];
 
-    return parents.flatMap((parent) => [
+    const identityProviders = IDENTITY_PROVIDER_GUIDES.flatMap(([page, section]): Redirect[] =>
+        [
+            ...forms(`learn/tutorials/walkthroughs/${page}`),
+            ...parents.flatMap((parent) => [
+                ...forms(`${parent}/${page}`),
+                ...forms(`${parent}/tutorials/${page}`),
+            ]),
+        ].map((source) => ({
+            source,
+            destination: `${walkthroughs}/identity-provider-integration#${section}`,
+            statusCode: 301,
+        })),
+    );
+
+    return [
+        ...identityProviders,
+        ...parents.flatMap((parent) => tutorialParentRedirects(parent, walkthroughs, forms)),
+    ];
+}
+
+function tutorialParentRedirects(
+    parent: string,
+    walkthroughs: string,
+    forms: (path: string) => string[],
+): Redirect[] {
+    return [
         ...forms(`${parent}/tutorials`).flatMap((source): Redirect[] => [
             { source, destination: `${walkthroughs}/overview`, statusCode: 301 },
             { source: `${source}/:path*`, destination: `${walkthroughs}/:path*`, statusCode: 301 },
@@ -1469,7 +1503,7 @@ function tutorialPathRedirects(): Redirect[] {
                 }),
             ),
         ),
-    ]);
+    ];
 }
 
 /**

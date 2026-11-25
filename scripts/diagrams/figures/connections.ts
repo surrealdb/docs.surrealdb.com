@@ -783,7 +783,7 @@ const jwtIdp: Figure = {
             400,
             [
                 '"ns": "main", "db": "main",',
-                '"ac": "auth0",',
+                '"ac": "idp",',
                 '"email": "ana@example.com",',
                 '"aud": [...], "exp": ...',
             ],
@@ -793,14 +793,14 @@ const jwtIdp: Figure = {
             MONO,
         );
         s.push(
-            text(L.app, 590, "claims added by an Auth0 action", {
+            text(L.app, 590, "claims added by a hook of the provider,", {
                 size: 21,
                 fill: t.muted,
                 halo: t.panel,
             }),
         );
         s.push(
-            text(L.app, 618, "or a Cognito pre-token lambda", {
+            text(L.app, 618, "such as an action, lambda or script", {
                 size: 21,
                 fill: t.muted,
                 halo: t.panel,
@@ -843,7 +843,7 @@ const jwtIdp: Figure = {
         const steps: [string, string[], string][] = [
             [
                 "Find the access method",
-                ["ns, db and ac name it:", "DEFINE ACCESS auth0 ON DATABASE"],
+                ["ns, db and ac name it:", "DEFINE ACCESS idp ON DATABASE"],
                 "no such method",
             ],
             [
@@ -861,12 +861,12 @@ const jwtIdp: Figure = {
             ],
             [
                 "Start the session",
-                ["$token = the claims, $access = 'auth0',", "$auth = user:ana"],
+                ["$token = the claims, $access = 'idp',", "$auth = user:ana"],
                 "",
             ],
             [
                 "Apply table PERMISSIONS",
-                ["on every query: WHERE $access = 'auth0'", "AND id = $auth"],
+                ["on every query: WHERE $access = 'idp'", "AND id = $auth"],
                 "",
             ],
         ];
