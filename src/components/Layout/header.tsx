@@ -692,7 +692,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         visibleFrom="sm"
                         data-cta="docs_header_signin"
                         data-cta-destination="studio"
-                        data-cta-placement="header"
+                        data-cta-placement="nav"
                     >
                         Sign In
                     </Button>
@@ -756,7 +756,7 @@ export function MobileNav({ navLinks, pageNavigation }: MobileNavProps) {
                 fullWidth
                 data-cta="docs_mobile_menu_signin"
                 data-cta-destination="studio"
-                data-cta-placement="mobile_menu"
+                data-cta-placement="nav"
             >
                 Sign In
             </Button>

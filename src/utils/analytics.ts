@@ -25,3 +25,13 @@ export function trackEvent(name: string, params: AnalyticsParams = {}): void {
 
     window.gtag?.("event", name, params);
 }
+
+/**
+ * A link's address as analytics reports it: the origin and the path, without
+ * the query string or the fragment. A relative `href` resolves against the
+ * current page.
+ */
+export function linkUrl(href: string): string {
+    const url = new URL(href, window.location.origin);
+    return url.origin + url.pathname;
+}
