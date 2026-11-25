@@ -57,6 +57,22 @@ export function AgentBanner() {
                 />
             ),
         },
+        {
+            value: "skills",
+            label: "Agent skills",
+            text: [
+                "# Any agent, using the skills CLI",
+                "npx skills add surrealdb/agent-skills",
+                "",
+                "# Claude Code, as a plugin",
+                "/plugin marketplace add surrealdb/agent-skills",
+                "/plugin install surrealdb@surrealdb",
+                "",
+                "# Codex, as a plugin",
+                "codex plugin marketplace add surrealdb/agent-skills",
+            ].join("\n"),
+            caption: "Install SurrealDB's Agent Skills with the skills CLI, or as a plugin.",
+        },
         ...AGENTS.map((agent) => ({
             value: agent.id,
             label: (
