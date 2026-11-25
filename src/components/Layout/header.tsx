@@ -14,7 +14,6 @@ import {
     Stack,
     Text,
 } from "@mantine/core";
-import { spotlight } from "@mantine/spotlight";
 import { Icon, iconChevronDown, iconOpen, iconSearch } from "@surrealdb/ui";
 import {
     type CSSProperties,
@@ -30,7 +29,7 @@ import {
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { SurrealDBLogo } from "~/components/Logo";
-import { SearchDocs } from "~/components/SearchDocs";
+import { openDocsSearch, SearchDocs } from "~/components/SearchDocs";
 import { VersionMenu } from "~/components/VersionMenu";
 import type { NavSection } from "~/utils/navigation";
 import { ColorSchemeToggle, HEADER_CONTROL_SIZE } from "../ColorSchemeToggle";
@@ -659,7 +658,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         variant="subtle"
                         size={HEADER_CONTROL_SIZE}
                         aria-label="Search the docs"
-                        onClick={() => spotlight.open()}
+                        onClick={openDocsSearch}
                     >
                         <Icon path={iconSearch} />
                     </ActionIcon>

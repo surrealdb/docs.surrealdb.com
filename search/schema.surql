@@ -131,9 +131,9 @@ DEFINE INDEX OVERWRITE page_feedback_path ON page_feedback FIELDS path CONCURREN
 --
 -- One record per zero-result search, written by the search API.
 -- The cheapest missing-content signal there is: these are the
--- exact words readers used when the docs failed them. Client
--- analytics cannot be relied on for this (docs pages carry no
--- tag manager), so the API records it at the source.
+-- exact words readers used when the docs failed them. The API
+-- records it at the source, so it does not depend on the reader's
+-- browser loading analytics, and the browser does not report it.
 -- ────────────────────────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE search_miss SCHEMAFULL;
