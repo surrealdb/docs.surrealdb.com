@@ -1199,6 +1199,21 @@ function overviewConsolidationRedirects(): Redirect[] {
 }
 
 /**
+ * The time series guide that held the concepts, the IoT modelling and the
+ * aggregation pages in one document no longer exists, so its address goes to
+ * the entry page of the section that holds each part.
+ */
+function timeSeriesGuideRedirects(): Redirect[] {
+    const source = "/learn/data-models/time-series/using-as-time-series-database";
+    const destination = "/docs/learn/data-models/time-series/overview";
+
+    return [
+        { source, destination, statusCode: 301 },
+        { source: `/docs${source}`, destination, statusCode: 301 },
+    ];
+}
+
+/**
  * The Enterprise subtree, collapsed onto one page.
  *
  * Twelve of its thirteen pages were a title, a description and an H1 with no
@@ -1605,6 +1620,7 @@ function embeddingLanguageRedirects(): Redirect[] {
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
+    ...timeSeriesGuideRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
     // consolidated to three pages. The two survivors are named, and the rest go
