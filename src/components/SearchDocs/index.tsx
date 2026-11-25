@@ -16,6 +16,7 @@ import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
+import { trackEvent } from "~/utils/analytics";
 import { getProductFromPath, PRODUCT_META } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
@@ -31,10 +32,9 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
         component: "a",
         href: String(result.url ?? "/"),
         onClick: () => {
-            window.dataLayer?.push({
-                event: "search_result_click",
+            trackEvent("search_result_click", {
                 search_term: query,
-                result_url: result.url,
+                link_url: String(result.url ?? ""),
             });
         },
         children: (
@@ -61,8 +61,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
         queryFn: async ({ signal }) => {
             const results = await searchDocs(debouncedSearch, signal, product);
 
-            window.dataLayer?.push({
-                event: "search_query",
+            trackEvent("search", {
                 search_term: debouncedSearch,
                 search_product: product,
             });
@@ -70,8 +69,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             // Surface queries that find nothing so content gaps are
             // measurable rather than inferred from missing clicks.
             if (results.length === 0) {
-                window.dataLayer?.push({
-                    event: "search_no_results",
+                trackEvent("search_no_results", {
                     search_term: debouncedSearch,
                     search_product: product,
                 });
@@ -86,7 +84,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const openSearch = useCallback(() => {
         spotlight.open();
-        window.dataLayer?.push({ event: "search_opened" });
+        trackEvent("search_opened");
     }, []);
 
     useHotkeys([["mod+K", openSearch]]);

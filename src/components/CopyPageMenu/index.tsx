@@ -14,6 +14,7 @@ import {
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
 import { SETUP_PROMPT } from "~/utils/agents";
+import { trackEvent } from "~/utils/analytics";
 import classes from "./style.module.scss";
 
 const LLM_PREFIXES = {
@@ -40,8 +41,7 @@ export function CopyPageMenu() {
             const body = await response.text();
 
             copy(body);
-            window.dataLayer?.push({
-                event: "copy_page_markdown",
+            trackEvent("copy_page_markdown", {
                 page_path: window.location.pathname,
             });
         } catch (error) {
@@ -53,8 +53,7 @@ export function CopyPageMenu() {
 
     const handleCopySetupPrompt = useStable(() => {
         copy(SETUP_PROMPT);
-        window.dataLayer?.push({
-            event: "copy_setup_prompt",
+        trackEvent("copy_setup_prompt", {
             page_path: window.location.pathname,
         });
     });
