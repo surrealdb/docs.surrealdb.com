@@ -107,8 +107,9 @@ export async function handleSearchRequest(request: Request): Promise<Response> {
         // A zero-result search is the exact phrasing of a content gap, so it is
         // recorded at the source, where it does not depend on the reader's
         // browser loading analytics, and can be queried with the query text
-        // beside it. The browser does not report it again. Fire-and-forget:
-        // recording must never delay or fail the search response. Edge caching means each distinct
+        // beside it. Counting how often a gap is hit is left to the browser's
+        // `search` event and its `result_count`. Fire-and-forget: recording
+        // must never delay or fail the search response. Edge caching means each distinct
         // miss is logged roughly once per cache window, which is plenty for gap
         // discovery.
         if (results.length === 0) {

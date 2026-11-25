@@ -133,7 +133,9 @@ DEFINE INDEX OVERWRITE page_feedback_path ON page_feedback FIELDS path CONCURREN
 -- The cheapest missing-content signal there is: these are the
 -- exact words readers used when the docs failed them. The API
 -- records it at the source, so it does not depend on the reader's
--- browser loading analytics, and the browser does not report it.
+-- browser loading analytics. Edge caching means a query is recorded
+-- about once per cache window, so this table lists gaps; the browser's
+-- `search` event, with its `result_count`, counts how often they occur.
 -- ────────────────────────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE search_miss SCHEMAFULL;
