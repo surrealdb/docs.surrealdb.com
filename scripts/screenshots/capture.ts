@@ -240,6 +240,15 @@ for (const [image, { shot }] of shots) {
                 `landed on ${page.url()}; the session may have ended, so run --sign-in again`,
             );
         }
+        // Studio redirects a page the account may not open to the organisation's overview.
+        if (
+            new URL(page.url()).pathname.replace(/\/$/, "") !==
+            `/${org}${shot.path}`.replace(/\/$/, "")
+        ) {
+            throw new Error(
+                `landed on ${page.url()}, not ${shot.path}; the account may not open it`,
+            );
+        }
         await setTheme(page, shot.theme ?? "dark");
         await dismiss(page);
         for (const step of shot.steps ?? []) await run(page, step);
@@ -250,7 +259,23 @@ for (const [image, { shot }] of shots) {
         const text = await target.innerText();
         if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(text))
             throw new Error("an email address is visible, so nothing was saved");
-        await target.screenshot({ path: join(IMG, image), animations: "disabled" });
+        if (image.endsWith(".webp")) {
+            // Playwright writes PNG and JPEG only, so a WebP is converted with cwebp.
+            const png = join(STATE, "capture.png");
+            await target.screenshot({ path: png, animations: "disabled" });
+            const result = Bun.spawnSync([
+                "cwebp",
+                "-quiet",
+                "-q",
+                "90",
+                png,
+                "-o",
+                join(IMG, image),
+            ]);
+            if (result.exitCode !== 0) throw new Error("cwebp failed; is it installed?");
+        } else {
+            await target.screenshot({ path: join(IMG, image), animations: "disabled" });
+        }
         console.log(`Took ${image}`);
     } catch (err) {
         failed++;
