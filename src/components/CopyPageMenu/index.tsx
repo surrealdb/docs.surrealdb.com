@@ -194,6 +194,7 @@ export function CopyPageMenu() {
                         </ThemeIcon>
                     }
                     onClick={handleCopySetupPrompt}
+                    data-cta="docs_page_menu_setup_prompt"
                 >
                     <Stack gap={0}>
                         <Text
@@ -228,6 +229,8 @@ export function CopyPageMenu() {
                         />
                     }
                     onClick={() => handleOpenLLM("chatGpt")}
+                    data-cta="docs_page_menu_open_chatgpt"
+                    data-cta-destination="external"
                 >
                     <Stack gap={0}>
                         <Text
@@ -262,6 +265,8 @@ export function CopyPageMenu() {
                         />
                     }
                     onClick={() => handleOpenLLM("claude")}
+                    data-cta="docs_page_menu_open_claude"
+                    data-cta-destination="external"
                 >
                     <Stack gap={0}>
                         <Text

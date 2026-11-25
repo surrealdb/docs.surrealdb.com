@@ -19,7 +19,7 @@ import classes from "./style.module.scss";
 
 interface FooterColumn {
     heading: string;
-    links: { label: string; href: string }[];
+    links: { label: string; href: string; cta?: string }[];
 }
 
 /**
@@ -63,7 +63,7 @@ const COLUMNS: FooterColumn[] = [
     {
         heading: "Company",
         links: [
-            { label: "Contact us", href: "/contact" },
+            { label: "Contact us", href: "/contact", cta: "docs_footer_contact" },
             { label: "Careers", href: "/careers" },
             { label: "Open source", href: "/opensource" },
             { label: "Brand assets", href: "/brand" },
@@ -180,6 +180,7 @@ export function Footer() {
                                 <FooterLink
                                     key={link.label}
                                     href={link.href}
+                                    data-cta={link.cta}
                                 >
                                     {link.label}
                                 </FooterLink>

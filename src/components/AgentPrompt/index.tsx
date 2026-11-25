@@ -22,6 +22,7 @@ export function AgentPrompt({ text = SETUP_PROMPT }: AgentPromptProps) {
                     text,
                     prose: true,
                     copyLabel: "Copy prompt",
+                    cta: "docs_agent_prompt_copy",
                 },
             ]}
         />

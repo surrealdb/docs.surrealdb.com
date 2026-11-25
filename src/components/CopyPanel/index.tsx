@@ -27,10 +27,14 @@ export interface CopyPanelTab {
     copyLabel?: string;
     /** Shown below the caption, such as a link to the full steps. */
     footer?: ReactNode;
+    /** The `data-cta` ID of the copy button while this tab is on screen. */
+    cta?: string;
 }
 
 export interface CopyPanelProps {
     tabs: CopyPanelTab[];
+    /** Called after the copy button puts a tab's text on the clipboard. */
+    onCopy?: (tab: CopyPanelTab) => void;
 }
 
 /** Draws `text` with each URL in the accent colour. */
@@ -70,7 +74,7 @@ function withCode(text: string): ReactNode {
  * Several tabs share one panel, and the copy button copies the tab on screen. A
  * single tab is still drawn as a tab, so its label says what the text is.
  */
-export function CopyPanel({ tabs }: CopyPanelProps) {
+export function CopyPanel({ tabs, onCopy }: CopyPanelProps) {
     const [value, setValue] = useState<string | null>(tabs[0]?.value ?? null);
     const clipboard = useClipboard({ timeout: COPIED_TIMEOUT });
     const active = tabs.find((tab) => tab.value === value) ?? tabs[0];
@@ -118,7 +122,11 @@ export function CopyPanel({ tabs }: CopyPanelProps) {
                     >
                         <UnstyledButton
                             className={classes.copy}
-                            onClick={() => clipboard.copy(active.text)}
+                            data-cta={active.cta}
+                            onClick={() => {
+                                clipboard.copy(active.text);
+                                onCopy?.(active);
+                            }}
                         >
                             <Icon
                                 path={clipboard.copied ? iconCheck : iconCopy}
