@@ -22,6 +22,9 @@ const OUTPUT_FILE = "src/data/labs-blog.json";
 const AUTHORS_FILE = "src/data/labs-blog-authors.json";
 const CATEGORIES = ["tutorials", "engineering"];
 
+// Posts that teach a feature SurrealDB has removed. Labs lists what a reader can still do.
+const EXCLUDED_POSTS = ["what-is-surrealml-a-getting-started-guide"];
+
 const authors = JSON.parse(readFileSync(AUTHORS_FILE, "utf8"));
 
 const res = await fetch(BLOG_API, { headers: { Accept: "application/json" } });
@@ -30,7 +33,12 @@ if (!res.ok) throw new Error(`${BLOG_API} answered ${res.status}`);
 const posts = await res.json();
 
 const items = posts
-    .filter((p) => p.publish_date && p.categories?.some((c) => CATEGORIES.includes(c)))
+    .filter(
+        (p) =>
+            p.publish_date &&
+            !EXCLUDED_POSTS.includes(p.slug) &&
+            p.categories?.some((c) => CATEGORIES.includes(c)),
+    )
     .map((p) => ({
         slug: `blog-${p.slug}`,
         ...labSchema.parse({
