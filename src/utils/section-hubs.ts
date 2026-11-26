@@ -61,3 +61,17 @@ export function sectionHubNavigation(pathname: string): NavSection[] | undefined
         })),
     }));
 }
+
+/**
+ * The paths of a section's menu items, in the order the top bar lists them and
+ * without the `/docs` base. The section sidebar lists its groups in this order.
+ */
+export function sectionMenuPaths(hubPath: string): string[] {
+    const path = normalize(hubPath);
+    const group = SECTION_GROUPS.find((candidate) => stripBase(candidate.href ?? "") === path);
+
+    return (
+        group?.sections.flatMap((section) => section.items.map((item) => stripBase(item.href))) ??
+        []
+    );
+}

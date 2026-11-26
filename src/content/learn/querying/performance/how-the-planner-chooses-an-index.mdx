@@ -1,0 +1,236 @@
+---
+position: 2
+title: How the planner chooses an index
+description: "How the SurrealDB query planner chooses between a table scan, one index and several indexes for a SELECT, UPDATE, UPSERT or DELETE: fixed rules that rank index types, a bonus for ORDER BY, bitmap AND and OR, and the WITH INDEX and WITH NOINDEX hints."
+---
+
+# How the planner chooses an index
+
+When a `SELECT`, `UPDATE`, `UPSERT` or `DELETE` statement has a `WHERE` or `ORDER BY` clause, the query planner decides how to read the table. It can scan the whole table, read one index, or read several indexes and combine the results. This page lists the rules that it applies, so that you can predict which index a query uses and then check the answer with [`EXPLAIN`](/docs/reference/query-language/statements/explain).
+
+## Rules, not statistics
+
+The planner is rule-based. It does not read statistics about your data, such as the number of records in a table or the number of distinct values in an index, and it has no cost model that estimates the work for each plan. It looks at the shape of the condition and at the indexes that can serve it, and ranks them with fixed rules.
+
+Thus the planner cannot tell from the data which of two indexes is more selective. An equality on a field with two possible values ranks the same as an equality on a field with a million, except for the boolean case that is described under [`ORDER BY` and `LIMIT`](#order-by-and-limit). If you know that one index is better for a query, tell the planner with [`WITH INDEX`](#hints).
+
+## Order of preference
+
+When the planner chooses one index to read, it prefers the access types below, from the first to the last:
+
+1. An equality on every field of a `UNIQUE` index. It returns at most one record.
+2. A full-text match with `@@`, or a vector search with a KNN operator.
+3. A compound index whose leading fields are all matched by equality, when it matches three or more fields. A match on more fields ranks higher, and a range condition on the next field ranks a little higher still.
+4. An equality on a non-unique index. A compound index that matches two fields ranks level with it.
+5. A compound index that matches one leading field.
+6. A bounded range, such as `price > 5 AND price < 50`.
+7. A half-bounded range, such as `price > 5`.
+8. A scan of a whole index that is used only to deliver the `ORDER BY` order.
+
+When two candidates rank level, the planner uses the index that `INFO FOR TABLE` lists first, so the same query always uses the same index. An equality on a `UNIQUE` index ranks as a non-unique equality when the value can occur more than once. This is the case for `NONE`, and for `NULL` unless the index is defined with `NULLS NOT DISTINCT`.
+
+> [!NOTE]
+> A KNN operator in the `WHERE` clause always uses the vector index, whatever the rest of the condition is, and it overrides a `WITH INDEX` hint that names another index, because no other access type can evaluate the operator. The other conditions are applied as described under [filtered KNN](/docs/reference/query-language/statements/explain#filtered-knn-and-the-predicate-attribute-on-knnscan). See [Choosing HNSW or DISKANN](/docs/reference/query-language/statements/define/indexes#choosing-hnsw-or-diskann) for the vector indexes.
+
+## `ORDER BY` and `LIMIT`
+
+A candidate index that also delivers the `ORDER BY` order ranks higher, because the planner can then skip the sort. With a `LIMIT` the bonus is larger, because the query can stop reading after the last record that it needs. It lifts an index that covers the `ORDER BY` above a range on another index, but not above a selective equality, because the planner assumes that the records of an equality are few enough to sort.
+
+An equality on a boolean, or on a field that is declared as `bool` or `option<bool>`, is the one place where the planner treats a value as unselective. A statement with a `LIMIT` ranks that equality below an index that delivers the `ORDER BY` order, because one of the two values commonly holds most of a table.
+
+## Combining indexes
+
+From SurrealDB 3.3, when a `WHERE` clause joins two or more conditions with `AND`, and each of them can use an index, the planner reads each index into a bitmap of the matching records and keeps the records that are in all of the bitmaps. For an `OR` clause, it keeps the records that are in any of them. The `EXPLAIN` output shows this as a `BitmapScan` over `BitmapAnd` or `BitmapOr`, with a `BitmapIndexScan` for each index:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+{
+	attributes: { projections: '*' },
+	children: [
+		{
+			attributes: { predicate: "category = 'tools' AND price > 5" },
+			children: [
+				{
+					attributes: { table: 'product' },
+					children: [
+						{
+							children: [
+								{
+									attributes: { access: "= 'tools'", index: 'category' },
+									context: 'Db',
+									operator: 'BitmapIndexScan'
+								},
+								{
+									attributes: { access: '>5', index: 'price' },
+									context: 'Db',
+									operator: 'BitmapIndexScan'
+								}
+							],
+							context: 'Db',
+							operator: 'BitmapAnd'
+						}
+					],
+					context: 'Db',
+					operator: 'BitmapScan'
+				}
+			],
+			context: 'Db',
+			operator: 'Filter'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}'''
+
+*/
+-- Setup
+DEFINE INDEX category ON product FIELDS category;
+DEFINE INDEX price ON product FIELDS price;
+
+SELECT * FROM product WHERE category = 'tools' AND price > 5 EXPLAIN;
+```
+
+```surql title="Output"
+{
+	attributes: { projections: '*' },
+	children: [
+		{
+			attributes: { predicate: "category = 'tools' AND price > 5" },
+			children: [
+				{
+					attributes: { table: 'product' },
+					children: [
+						{
+							children: [
+								{
+									attributes: { access: "= 'tools'", index: 'category' },
+									context: 'Db',
+									operator: 'BitmapIndexScan'
+								},
+								{
+									attributes: { access: '>5', index: 'price' },
+									context: 'Db',
+									operator: 'BitmapIndexScan'
+								}
+							],
+							context: 'Db',
+							operator: 'BitmapAnd'
+						}
+					],
+					context: 'Db',
+					operator: 'BitmapScan'
+				}
+			],
+			context: 'Db',
+			operator: 'Filter'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
+```
+
+The planner keeps to a single index, and the order of preference above decides which one, in these cases:
+
+- An index delivers the `ORDER BY` order, so that the query can skip the sort or stop early.
+- The statement has a `LIMIT` and no `ORDER BY`, because a single index can stop after the limit while a bitmap must read every index first. The exception is a `WHERE` clause that has only full-text matches.
+- The statement has a `WITH` clause, as described below.
+- The statement reads a `VERSION` of the data.
+
+## Hints
+
+A [`WITH` clause](/docs/reference/query-language/clauses/with) overrides the ranking. It goes after the `FROM` clause and before `WHERE`:
+
+- `WITH INDEX @name` reads the index that you name, if a condition in the `WHERE` clause can use it. The other conditions then filter the records, and the planner does not combine indexes. If no condition can use the index, the planner logs a warning and chooses an index with the rules above.
+- `WITH NOINDEX` scans the table.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = '''
+{
+	attributes: { projections: '*' },
+	children: [
+		{
+			attributes: { predicate: "category = 'tools'" },
+			children: [
+				{
+					attributes: {
+						access: '>5',
+						direction: 'Forward',
+						index: 'price',
+						table: 'product'
+					},
+					context: 'Db',
+					operator: 'IndexScan'
+				}
+			],
+			context: 'Db',
+			operator: 'Filter'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}'''
+
+*/
+-- Setup
+DEFINE INDEX category ON product FIELDS category;
+DEFINE INDEX price ON product FIELDS price;
+
+SELECT * FROM product WITH INDEX price WHERE category = 'tools' AND price > 5 EXPLAIN;
+```
+
+```surql title="Output"
+{
+	attributes: { projections: '*' },
+	children: [
+		{
+			attributes: { predicate: "category = 'tools'" },
+			children: [
+				{
+					attributes: {
+						access: '>5',
+						direction: 'Forward',
+						index: 'price',
+						table: 'product'
+					},
+					context: 'Db',
+					operator: 'IndexScan'
+				}
+			],
+			context: 'Db',
+			operator: 'Filter'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
+```
+
+## Checking the plan
+
+Run the query with `EXPLAIN` to see the access type that the planner chose, and with `EXPLAIN ANALYZE` in front of it to see the number of records that each step returned. The output of `EXPLAIN` can change between releases. If the plan is not the one that you want, add the missing index, change the condition so that it matches an index, or add a hint.
+
+## See also
+
+- [Index types and strategies](/docs/learn/schema-management/indexes/index-types-and-strategies)
+- [Performance best practices](/docs/learn/querying/performance/performance-best-practices#using-indexes)
+- [`EXPLAIN` statement](/docs/reference/query-language/statements/explain)
+- [`WITH` clause](/docs/reference/query-language/clauses/with)

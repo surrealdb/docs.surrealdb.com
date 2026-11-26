@@ -6,8 +6,12 @@
  * described a navigation we replaced. Since agents now read this file as a
  * primary way into the docs, it has to be derived rather than remembered.
  *
- * Two things are generated:
+ * Four things are generated:
  *
+ *   - the current release in the version notes, from the newest stable tag in
+ *     `public/cli-history/data.json`
+ *   - the list of corpus bundles, from `src/utils/llms-bundles.ts`, with a
+ *     token estimate for each from the content it holds
  *   - the section map, from each collection's `__category.json`
  *   - the links, from every page's frontmatter title and description
  *
@@ -21,9 +25,18 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
-import { byDepthThenUrl, CONTENT_DIR, pagesFor, readCollections, SITE } from "./lib/docs-pages.mjs";
+import { bundleFor, LLMS_BUNDLES } from "../src/utils/llms-bundles.ts";
+import {
+    byDepthThenUrl,
+    CONTENT_DIR,
+    pagesFor,
+    readCollections,
+    SITE,
+    slugify,
+    walk,
+} from "./lib/docs-pages.mjs";
 
 const OUTPUT_FILE = "public/llms.txt";
 
@@ -77,18 +90,148 @@ const EXTRA_PAGES = {
  */
 const PREAMBLE = `# SurrealDB Documentation
 
-SurrealDB is a [multi-model database](${SITE}/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, as a distributed cluster, or serverless on [SurrealDB Earth](${SITE}/docs/operate/instances/earth), and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
+SurrealDB is a [multi-model database](${SITE}/surrealdb/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, as a distributed cluster, or serverless on [SurrealDB Earth](${SITE}/docs/operate/instances/earth), and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
 
-> Markdown for agents: every documentation page is also available as markdown. Append ".md" to any page path to fetch it directly, for example "${SITE}/docs/reference/query-language/statements/select.md". The same document is served on the page's own URL to a request sending an "Accept: text/markdown" header, with "Content-Type: text/markdown" and an "x-markdown-tokens" estimate. HTML stays the default for browsers. Links inside a markdown page already point at the ".md" variants, so following them keeps an agent in markdown. The complete documentation is also available as a single markdown document at "${SITE}/docs/llms-full.txt".
+> Markdown for agents: every documentation page is also available as markdown. Append ".md" to any page path to fetch it directly, for example "${SITE}/docs/reference/query-language/statements/select.md". The same document is served on the page's own URL to a request sending an "Accept: text/markdown" header, with "Content-Type: text/markdown" and an "x-markdown-tokens" estimate. HTML stays the default for browsers. Links inside a markdown page already point at the ".md" variants, so following them keeps an agent in markdown. The complete documentation is also available as markdown in bundles of one section or one SDK each, listed under "Documentation bundles" below, and as a single document at "${SITE}/docs/llms-full.txt".
 
-This index lists every documentation page. Section landing pages carry a short description; the rest are titles only, so that the whole site fits in one index rather than a curated part of it. A missing description means nothing about the page - fetch any entry with ".md" appended to read it, or "${SITE}/docs/llms-full.txt" for everything at once.
+This index lists every documentation page. Descriptions are added shallowest-first while the file has room for them, so entries can be titles only: the whole site fits in one index rather than a curated part of it. A missing description means nothing about the page - fetch any entry with ".md" appended to read it, or a bundle below for a whole section at once.
 
 Working notes:
 
-- SurrealQL is the native query language. [GraphQL](${SITE}/docs/learn/querying/graphql/overview), [HTTP](${SITE}/docs/reference/rest-api/http-protocol), [RPC](${SITE}/docs/reference/rest-api/rpc-protocol) and [CBOR](${SITE}/docs/reference/rest-api/cbor-protocol) are also available.
+- SurrealQL is the native query language. [GraphQL](${SITE}/docs/learn/querying/graphql/overview), [HTTP](${SITE}/docs/reference/protocols/http-protocol), [RPC](${SITE}/docs/reference/protocols/rpc-protocol) and [CBOR](${SITE}/docs/reference/protocols/cbor-protocol) are also available.
 - Live queries push changes to subscribers rather than requiring polling.
 - The same database serves documents, graphs, vectors and time series inside one ACID transaction, so joins across models do not need a second store.
 `;
+
+/**
+ * The newest stable release, from the tags the version history chart is built
+ * from. `bun run generate:cli-history` refreshes them after a release.
+ */
+function currentRelease() {
+    const { tags } = JSON.parse(readFileSync("public/cli-history/data.json", "utf8"));
+    const parse = (name) => name.replace(/^v/, "").split(".").map(Number);
+    const newer = (a, b) => {
+        const [x, y] = [parse(a.name), parse(b.name)];
+        const at = x.findIndex((part, index) => part !== y[index]);
+        return at === -1 ? a : x[at] > y[at] ? a : b;
+    };
+
+    return tags
+        .filter((tag) => tag.released && !tag.pre)
+        .reduce(newer)
+        .name.replace(/^v/, "");
+}
+
+/** The major versions the docs describe, newest first, from `src/utils/major-version.ts`. */
+function documentedMajors() {
+    const source = readFileSync("src/utils/major-version.ts", "utf8");
+    return [...source.matchAll(/\{\s*major:\s*(\d+)/g)].map((match) => Number(match[1]));
+}
+
+const UPGRADES = `${SITE}/docs/operate/upgrading`;
+const [LATEST_MAJOR, ...OLDER_MAJORS] = documentedMajors();
+
+/**
+ * What changed between major versions, for an agent holding code or knowledge
+ * from an older release. Prose, so it stays hand-written: each point is taken
+ * from the upgrade guide it links, and belongs there first.
+ */
+const VERSION_NOTES = `
+## Version notes for agents
+
+The current release is SurrealDB ${currentRelease()}. These pages describe ${LATEST_MAJOR}.x, and show ${OLDER_MAJORS.map((major) => `${major}.x`).join(" or ")} in tabs where it differs. Code written for an older release can need these changes:
+
+- 3.x to 4.0 ([guide](${UPGRADES}/3x-to-4x)): RocksDB, IndexedDB and SurrealML (\`DEFINE MODEL\`, \`ml::\`) are removed, and a 3.x datastore upgrades in place only with \`SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true\`. Without \`ORDER BY\`, results come in no particular order. \`DEFINE BUCKET\` needs \`BACKEND\`. \`LET\` cannot be a branch of \`IF ... THEN ... END\`; \`IF cond { ... }\` takes a block.
+- 2.x to 3.x ([guide](${UPGRADES}/2x-to-3x)): \`COMPUTED\` fields replace \`<future>\`. \`::is::\` and \`::from::\` become \`::is_\` and \`::from_\` (\`string::is_alpha\`), \`type::thing\` becomes \`type::record\`, \`rand::guid()\` becomes \`rand::id()\`. Parameters need \`LET\`. The \`~\` operators are removed (use \`string::distance\` or \`string::similarity\`), \`SEARCH ANALYZER\` is \`FULLTEXT ANALYZER\`, and \`HNSW\` replaces \`MTREE\`.
+- 1.x to 2.x ([guide](${UPGRADES}/1x-to-2x)): \`UPDATE\` no longer creates records; \`UPSERT\` does. \`DEFINE ACCESS ... TYPE RECORD\` replaces \`DEFINE SCOPE\`. \`meta::id()\` is \`record::id()\`. Authentication is on by default, and HTTP headers take a \`surreal-\` prefix.
+- All guides, including 2.6 to 2.7 and 3.2 to 3.3: [Upgrading](${UPGRADES}/overview).
+`;
+
+/** Roughly four characters to a token, as `estimateTokens` counts them for `x-markdown-tokens`. */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * The size of each bundle, in characters, estimated from the content it holds.
+ *
+ * A bundle is composed at request time from collection entries, which a
+ * script cannot reach, so its size is estimated from the source files with the
+ * parts the composer drops - frontmatter, test configs and railroad diagrams -
+ * left out. That comes within a few per cent of the served size, which each
+ * response states exactly in its `x-markdown-tokens` header.
+ */
+function bundleSizes() {
+    const sizes = new Map();
+    const add = (path, chars) => {
+        const { slug } = bundleFor(path);
+        sizes.set(slug, (sizes.get(slug) ?? 0) + chars);
+    };
+
+    for (const [id, prefix] of readCollections()) {
+        const root = join(CONTENT_DIR, id);
+
+        if (!existsSync(root)) continue;
+
+        for (const file of walk(root)) {
+            const rel = relative(root, file).replace(/\.(mdx|md)$/, "");
+
+            if (rel.includes("__category")) continue;
+
+            const segments = rel.split("/").map(slugify);
+
+            if (segments.at(-1) === "index") segments.pop();
+
+            const text = readFileSync(file, "utf8")
+                .replace(/^---\n[\s\S]*?\n---\n/, "")
+                .replace(/\/\*\*\[test\][\s\S]*?\*\/\n?/g, "")
+                .replace(/<RailroadDiagram[\s\S]*?\/>/g, "");
+
+            // The `Source:` line and separator each page opens with.
+            add(`/${[prefix, ...segments].filter(Boolean).join("/")}`, text.length + 60);
+        }
+    }
+
+    // Labs is listed from data files rather than written as a page.
+    const labs = ["src/data/labs.json", "src/data/labs-blog.json"].flatMap((file) =>
+        JSON.parse(readFileSync(file, "utf8")),
+    );
+    add(
+        "/labs",
+        labs.reduce((n, item) => n + item.title.length + (item.description ?? "").length + 80, 0),
+    );
+
+    return sizes;
+}
+
+function formatTokens(chars) {
+    const tokens = chars / CHARS_PER_TOKEN;
+
+    if (tokens >= 1_000_000) return `~${(tokens / 1_000_000).toFixed(1)}M tokens`;
+    if (tokens >= 100_000) return `~${Math.round(tokens / 10_000) * 10}k tokens`;
+
+    return `~${Math.max(1, Math.round(tokens / 1000))}k tokens`;
+}
+
+/**
+ * The bundles, with what each holds and its size, so an agent can choose the
+ * one it needs and know whether it fits before fetching it.
+ */
+function bundleSection() {
+    const sizes = bundleSizes();
+    const total = [...sizes.values()].reduce((a, b) => a + b, 0);
+    const lines = LLMS_BUNDLES.map(
+        (bundle) =>
+            `- [${bundle.title}](${SITE}/docs/llms-full/${bundle.slug}.txt): ${formatTokens(sizes.get(bundle.slug) ?? 0)}. ${bundle.description}\n`,
+    );
+
+    return `
+## Documentation bundles
+
+All pages in one file, [llms-full.txt](${SITE}/docs/llms-full.txt), are ${formatTokens(total)}. The same pages in bundles of one section or SDK, with estimated sizes:
+
+${lines.join("")}`;
+}
+
+const VERSION_AND_BUNDLES = `${VERSION_NOTES}${bundleSection()}`;
 
 /** Longest description this file will carry for one entry. */
 const DESCRIPTION_BUDGET = 70;
@@ -283,7 +426,7 @@ function describableUrls() {
         0,
     );
 
-    let spent = PREAMBLE.length + headings + bare;
+    let spent = PREAMBLE.length + VERSION_AND_BUNDLES.length + headings + bare;
     const chosen = new Set();
 
     const candidates = rendered
@@ -305,7 +448,7 @@ function describableUrls() {
 
 const described = describableUrls();
 
-let out = PREAMBLE;
+let out = `${PREAMBLE}${VERSION_AND_BUNDLES}`;
 let count = 0;
 
 for (const section of rendered) {

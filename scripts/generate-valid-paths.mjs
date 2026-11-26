@@ -8,7 +8,6 @@ const URL_PREFIX = {
     "doc-surrealdb": "surrealdb",
     "doc-cloud": "cloud",
     "doc-surrealist": "surrealist",
-    "doc-surrealml": "surrealml",
     "doc-surrealql": "surrealql",
     "doc-integrations": "integrations",
     "doc-tutorials": "tutorials",

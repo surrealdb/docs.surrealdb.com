@@ -1,7 +1,9 @@
 import { Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { PageContentActions } from "~/components/ContentActions";
-import { PageAside } from "~/components/PageAside";
+import { PageAside, PageAsideCollapse } from "~/components/PageAside";
 import { RelatedContent } from "~/components/RelatedContent";
+import { SidebarToggle } from "~/components/SidebarToggle";
+import { useSidebarCollapsed } from "~/components/SidebarToggle/use-sidebar-collapsed";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { useMobilePageNavigation } from "./mobile-menu";
@@ -13,7 +15,6 @@ import classes from "./style.module.scss";
 export interface DefaultLayoutProps {
     data: PageData;
     children: React.ReactNode;
-    lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
 }
@@ -28,11 +29,14 @@ export function DefaultLayout({
     // this page's part of the docs above the list of sections.
     useMobilePageNavigation(data.navigation);
 
+    const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
+
     return (
         <>
-            <Shell>
+            <Shell sidebarCollapsed={sidebarCollapsed}>
                 <Sidebar
                     navigation={data.navigation}
+                    groups={data.sectionNavigation}
                     visibleFrom="lg"
                     versionSelector={versionSelector}
                 />
@@ -46,9 +50,14 @@ export function DefaultLayout({
                         <Box
                             flex={1}
                             miw={0}
-                            maw={832}
+                            maw={sidebarCollapsed ? undefined : 832}
+                            pos="relative"
                             className={classes.contentColumn}
                         >
+                            <SidebarToggle
+                                collapsed={sidebarCollapsed}
+                                onToggle={toggleSidebar}
+                            />
                             <Group
                                 align="center"
                                 gap="sm"
@@ -107,6 +116,7 @@ export function DefaultLayout({
                              * description restated the first H2 sitting
                              * directly beneath it.
                              */}
+                            {showToc && <PageAsideCollapse headings={data.headings} />}
                             <Box
                                 mt="xl"
                                 component="main"
@@ -117,7 +127,10 @@ export function DefaultLayout({
                             </Box>
                             <RelatedContent items={data.related ?? []} />
                             <Divider my="3xl" />
-                            <PageContentActions contentPath={data.contentPath} />
+                            <PageContentActions
+                                contentPath={data.contentPath}
+                                lastModified={data.lastModified}
+                            />
                             <PageNavigation navigation={data.navigation} />
                         </Box>
                         {showToc && <PageAside headings={data.headings} />}

@@ -5,9 +5,24 @@ import labsBlog from "~/data/labs-blog.json";
 import type { SdkVersionMap } from "~/lib/versions";
 import { LLMS_TXT_URL } from "./agent-markdown";
 import { labStages } from "./labs";
+import { bundleFor, LLMS_BUNDLES, type LlmsBundle } from "./llms-bundles";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
-import { flattenMdxComponents } from "./mdx-to-markdown";
+import { type FolderCardsMap, flattenMdxComponents, type SectionHub } from "./mdx-to-markdown";
+import {
+    buildNavigation,
+    buildSectionNavigation,
+    groupsFromSections,
+    type HubCard,
+    hubCards,
+    hubPages,
+    type NavGroup,
+    type NavLink,
+    SECTION_HUBS,
+    SOLO_SECTIONS,
+    sectionOfHub,
+} from "./navigation";
 import type { LabSchema } from "./schema";
+import { sectionMenuPaths } from "./section-hubs";
 
 /**
  * Maps a URL prefix to the content collection that serves it.
@@ -51,7 +66,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "reference/php", id: "reference/php" },
     { prefix: "reference/python", id: "reference/python" },
     { prefix: "reference/query-language", id: "reference/query-language" },
-    { prefix: "reference/rest-api", id: "reference/rest-api" },
+    { prefix: "reference/protocols", id: "reference/protocols" },
     { prefix: "reference/rust", id: "reference/rust" },
     { prefix: "reference/swift", id: "reference/swift" },
     { prefix: "agent-memory/cookbooks", id: "agent-memory/cookbooks" },
@@ -64,17 +79,164 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "", id: "index" },
 ];
 
-type CollectionEntry = NonNullable<ReturnType<typeof getCollectionEntry>>;
+/**
+ * Adds each page's description to the rows of a hub's groups, so that a card
+ * for a page can say what the page covers. Only a hub's own data carries them:
+ * on every page they would grow the sidebar of the whole collection.
+ */
+function withPageDescriptions(groups: NavGroup[], collectionId: string): NavGroup[] {
+    const route = COLLECTION_ROUTES.find((candidate) => candidate.id === collectionId);
+
+    if (!route) return groups;
+
+    const descriptions = new Map<string, string>();
+
+    for (const entry of getCollection(collectionId as keyof CollectionMap)) {
+        const { description } = entry.metadata as { description?: string };
+
+        if (description && !entry.slug.endsWith("__category")) {
+            descriptions.set(
+                `/${[route.prefix, entry.slug].filter(Boolean).join("/")}`,
+                description,
+            );
+        }
+    }
+
+    const describe = (link: NavLink): NavLink => ({
+        ...link,
+        description: descriptions.get(link.path),
+        children: link.children?.map(describe),
+    });
+
+    return groups.map((group) => ({
+        ...group,
+        landing: group.landing && describe(group.landing),
+        links: group.links.map(describe),
+    }));
+}
 
 /**
- * Resolve a URL pathname to its content collection entry, using the same
- * prefix-to-collection mapping the page routes use.
+ * The groups of the sidebar that a section hub page shows, which its
+ * `<SectionCards>` draws as cards. A section of several collections has one
+ * group for each collection; a section that is a single collection has one for
+ * each of its folders, and its pages carry their descriptions. Undefined for
+ * any page that is not a section hub.
+ *
+ * @param pathname - The page's path without the `/docs` base, such as `/learn`.
+ */
+export function sectionGroupsOfHub(pathname: string): NavGroup[] | undefined {
+    const section = sectionOfHub(pathname);
+
+    if (section) {
+        return buildSectionNavigation(
+            section,
+            COLLECTION_ROUTES.map((route) => route.id),
+            sectionMenuPaths(SECTION_HUBS[section]),
+        );
+    }
+
+    const solo = SOLO_SECTIONS[pathname.replace(/\/$/, "")];
+
+    return solo ? withPageDescriptions(groupsFromSections(buildNavigation(solo)), solo) : undefined;
+}
+
+/**
+ * The pages directly inside a folder, as cards for `<FolderCards>`: each page's
+ * title, and the `picto` and `pictoDark` of its frontmatter. Sorted by
+ * `position`, as the sidebar lists them.
+ *
+ * @param path - The folder as the sidebar writes paths, such as `/agent-memory/integrations/frameworks`.
+ */
+export function folderCards(path: string): HubCard[] {
+    const folder = path.replace(/^\/|\/$/g, "");
+    const route = COLLECTION_ROUTES.filter(
+        (candidate) => folder === candidate.prefix || folder.startsWith(`${candidate.prefix}/`),
+    ).sort((a, b) => b.prefix.length - a.prefix.length)[0];
+
+    if (!route) return [];
+
+    const within = folder.slice(route.prefix.length).replace(/^\//, "");
+
+    return [...getCollection(route.id as keyof CollectionMap)]
+        .filter((entry) => {
+            const rest = within ? entry.slug.slice(within.length + 1) : entry.slug;
+
+            return (
+                (!within || entry.slug.startsWith(`${within}/`)) &&
+                rest !== "" &&
+                !rest.includes("/") &&
+                rest !== "index" &&
+                !entry.slug.endsWith("__category")
+            );
+        })
+        .map((entry) => {
+            const meta = entry.metadata as {
+                title?: string;
+                position?: number;
+                picto?: string;
+                pictoDark?: string;
+            };
+
+            return {
+                position: meta.position ?? 0,
+                card: {
+                    title: meta.title ?? entry.slug,
+                    path: `/${[route.prefix, entry.slug].filter(Boolean).join("/")}`,
+                    picto: meta.picto,
+                    pictoDark: meta.pictoDark,
+                } satisfies HubCard,
+            };
+        })
+        .sort((a, b) => a.position - b.position || a.card.title.localeCompare(b.card.title))
+        .map(({ card }) => card);
+}
+
+/**
+ * The cards of every `<FolderCards path="...">` in a page, keyed by folder, or
+ * undefined when the page has none.
+ */
+export function folderCardsIn(content: string): Record<string, HubCard[]> | undefined {
+    const paths = [...content.matchAll(/<FolderCards\b[^>]*?\bpath="([^"]+)"/g)].map(
+        (match) => match[1] as string,
+    );
+
+    return paths.length > 0
+        ? Object.fromEntries(paths.map((path) => [path, folderCards(path)]))
+        : undefined;
+}
+
+/** A section hub page's cards, as the `.md` rendering of `<SectionCards>` needs them. */
+export function sectionHubOf(pathname: string): SectionHub | undefined {
+    const groups = sectionGroupsOfHub(pathname);
+
+    return groups
+        ? { cards: hubCards(groups, pathname), pages: hubPages(groups, pathname) }
+        : undefined;
+}
+
+type CollectionEntry = NonNullable<ReturnType<typeof getCollectionEntry>>;
+
+/** A content entry, with the collection and URL prefix that serve it. */
+export interface CollectionMatch {
+    entry: CollectionEntry;
+    /** The collection id, such as `reference/javascript`. */
+    id: string;
+    /** The URL prefix the collection is served under, without `/docs`. */
+    prefix: string;
+    /** The entry's slug inside its collection. */
+    slug: string;
+}
+
+/**
+ * Resolve a URL pathname to its content collection entry and the collection
+ * that serves it, using the same prefix-to-collection mapping the page routes
+ * use.
  *
  * @param pathname - Docs pathname without the `/docs` base (leading/trailing
  *   slashes are tolerated), e.g. `reference/query-language/statements/select`.
- * @returns The matching entry, or `undefined` if none resolves.
+ * @returns The match, or `undefined` if none resolves.
  */
-export function resolveCollectionEntry(pathname: string): CollectionEntry | undefined {
+export function resolveCollectionMatch(pathname: string): CollectionMatch | undefined {
     const path = pathname.replace(/^\/+/, "").replace(/\/+$/, "");
 
     for (const { prefix, id } of COLLECTION_ROUTES) {
@@ -86,11 +248,16 @@ export function resolveCollectionEntry(pathname: string): CollectionEntry | unde
         const entry = getCollectionEntry(id, slug);
 
         if (entry) {
-            return entry;
+            return { entry, id, prefix, slug };
         }
     }
 
     return undefined;
+}
+
+/** Resolve a URL pathname to its content collection entry; see `resolveCollectionMatch`. */
+export function resolveCollectionEntry(pathname: string): CollectionEntry | undefined {
+    return resolveCollectionMatch(pathname)?.entry;
 }
 
 /**
@@ -138,12 +305,19 @@ export function suffixDocsLinks(markdown: string): string {
  * `sdkVersions` resolves `<Version>` markers to the version numbers the
  * rendered page shows; without it they fall back to "latest".
  */
-export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVersionMap): string {
+export function composeRawMarkdown(
+    entry: CollectionEntry,
+    sdkVersions?: SdkVersionMap,
+    sectionHub?: SectionHub,
+    folders?: FolderCardsMap,
+): string {
     const metadata = entry.metadata as { title?: string; description?: string };
     const heading = metadata.title ? `# ${metadata.title}` : undefined;
     const body = flattenMdxComponents(
         stripLanguageTestComments(stripLeadingH1(entry.content)),
         sdkVersions,
+        sectionHub,
+        folders,
     );
 
     const document = [heading, metadata.description, body].filter(Boolean).join("\n\n");
@@ -168,6 +342,42 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
  */
 export function withIndexPointer(markdown: string): string {
     return `> Full SurrealDB documentation index: ${LLMS_TXT_URL}\n\n${markdown}`;
+}
+
+/** The fields a page's markdown rendering opens with, in YAML frontmatter. */
+export interface MarkdownFrontmatter {
+    title: string;
+    description?: string;
+    canonical_url: string;
+    /** The SDK an SDK reference page documents, such as "JavaScript SDK". */
+    sdk?: string;
+    /** The released SDK version that page describes, when it is known. */
+    sdk_version?: string;
+    /** The section or product any other page sits in. */
+    section?: string;
+    /** The SurrealDB major version the documentation describes, such as "4.x". */
+    surrealdb_version: string;
+    /** When the page's source last changed, as an ISO 8601 date. */
+    last_modified?: string;
+}
+
+/**
+ * Prepend YAML frontmatter to a page's markdown rendering, so an agent that
+ * fetched one page knows what it is, where it lives, which SDK or section and
+ * version it describes, and how recent it is, without parsing the prose.
+ *
+ * Applied at the response, like `withIndexPointer`, and outside it, because
+ * frontmatter has to be the first thing in the document. Every value is
+ * written as a JSON string, which is also a valid YAML scalar, so a colon or
+ * a quote in a title cannot break the block. Fields without a value are left
+ * out.
+ */
+export function withFrontmatter(fields: MarkdownFrontmatter, markdown: string): string {
+    const lines = Object.entries(fields)
+        .filter(([, value]) => value)
+        .map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+
+    return `---\n${lines.join("\n")}\n---\n\n${markdown}`;
 }
 
 /**
@@ -226,10 +436,23 @@ export function composeLabsMarkdown(): string {
 
 const DOCS_ORIGIN = "https://surrealdb.com";
 
+/** One page of the corpus, composed for `llms-full.txt` and its bundles. */
+export interface CorpusPage {
+    /** The page's path without `/docs`, the docs root being `/`. */
+    path: string;
+    /** The page as markdown, opening with its `Source:` line. */
+    markdown: string;
+}
+
 /**
- * Build the full documentation corpus served at `/docs/llms-full.txt`: every
- * page of every collection as one markdown document, in the llms-full.txt
- * convention. Each page opens with a `Source:` line naming its canonical URL,
+ * How to read the code examples in a corpus, said once at the top of each
+ * corpus file rather than on every page.
+ */
+const CORPUS_CONVENTIONS = `Each page starts with a "Source:" line naming its canonical URL, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`;
+
+/**
+ * Every page of every collection, composed once, in the order `llms-full.txt`
+ * lists them. Each page opens with a `Source:` line naming its canonical URL,
  * so an agent can cite or re-fetch the page it is quoting.
  *
  * Pages are composed with the same `composeRawMarkdown` pipeline as the
@@ -237,11 +460,8 @@ const DOCS_ORIGIN = "https://surrealdb.com";
  * and `.md`-suffixed internal links all match what a single-page fetch returns.
  * `__category` entries are folder metadata, not pages, and are skipped.
  */
-export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
-    const sections: string[] = [
-        "# SurrealDB documentation - full corpus",
-        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
-    ];
+export function composeCorpusPages(sdkVersions?: SdkVersionMap): CorpusPage[] {
+    const pages: CorpusPage[] = [];
 
     for (const { prefix, id } of COLLECTION_ROUTES) {
         const entries = [...getCollection(id as keyof CollectionMap)]
@@ -251,13 +471,60 @@ export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
         for (const entry of entries) {
             const path = [prefix, entry.slug].filter(Boolean).join("/");
             const url = path ? `${DOCS_ORIGIN}/docs/${path}` : `${DOCS_ORIGIN}/docs`;
-            const page = composeRawMarkdown(entry, sdkVersions).trimEnd();
+            const page = composeRawMarkdown(
+                entry,
+                sdkVersions,
+                sectionHubOf(`/${path}`),
+                folderCardsIn(entry.content),
+            ).trimEnd();
 
-            sections.push(`---\n\nSource: ${url}\n\n${page}`);
+            pages.push({ path: `/${path}`, markdown: `Source: ${url}\n\n${page}` });
         }
     }
 
-    sections.push(`---\n\nSource: ${DOCS_ORIGIN}/docs/labs\n\n${composeLabsMarkdown().trimEnd()}`);
+    pages.push({
+        path: "/labs",
+        markdown: `Source: ${DOCS_ORIGIN}/docs/labs\n\n${composeLabsMarkdown().trimEnd()}`,
+    });
+
+    return pages;
+}
+
+function joinCorpus(header: string[], pages: CorpusPage[]): string {
+    const sections = [...header, ...pages.map((page) => `---\n\n${page.markdown}`)];
 
     return `${sections.join("\n\n")}\n`;
+}
+
+/** The address a bundle is served at. */
+export function bundleUrl(bundle: LlmsBundle): string {
+    return `${DOCS_ORIGIN}/docs/llms-full/${bundle.slug}.txt`;
+}
+
+/**
+ * The full documentation corpus served at `/docs/llms-full.txt`: every page
+ * as one markdown document, in the llms-full.txt convention.
+ */
+export function composeFullCorpusMarkdown(pages: CorpusPage[]): string {
+    return joinCorpus(
+        [
+            "# SurrealDB documentation - full corpus",
+            `> The complete SurrealDB documentation as a single markdown document. The page index is at ${LLMS_TXT_URL}, which also lists the same pages split into ${LLMS_BUNDLES.length} smaller bundles, one per section or SDK, such as ${bundleUrl(LLMS_BUNDLES[0] as LlmsBundle)}. ${CORPUS_CONVENTIONS}`,
+        ],
+        pages,
+    );
+}
+
+/**
+ * One bundle of the corpus, served at `/docs/llms-full/<slug>.txt`: the pages
+ * `bundleFor` assigns to it, in the order `llms-full.txt` lists them.
+ */
+export function composeBundleMarkdown(bundle: LlmsBundle, pages: CorpusPage[]): string {
+    return joinCorpus(
+        [
+            `# SurrealDB documentation - ${bundle.title}`,
+            `> ${bundle.description} This is one of the bundles the SurrealDB documentation is split into. The page index at ${LLMS_TXT_URL} lists every bundle, and ${DOCS_ORIGIN}/docs/llms-full.txt holds every page. ${CORPUS_CONVENTIONS}`,
+        ],
+        pages.filter((page) => bundleFor(page.path).slug === bundle.slug),
+    );
 }

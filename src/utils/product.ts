@@ -25,7 +25,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
         label: "Database",
         shortLabel: "Database",
         description: "Database, query language, SDKs, and tooling.",
-        homeHref: "/docs/",
+        homeHref: "/docs",
         pathPrefix: "/",
     },
     "agent-memory": {
@@ -52,7 +52,7 @@ export function isAgentFilesystemPath(urlPathname: string): boolean {
 
 /**
  * Resolve which product a given URL belongs to. Drives top nav,
- * wordmark, search filter, and meta title suffix. Vike's
+ * wordmark, search filter, and the qualifier in an Agent Memory page's title. Vike's
  * `urlPathname` does not include the `/docs` base, so this matches
  * against the in-app pathname (e.g. `/agent-memory/quickstarts/surrealist-dashboard`).
  *
@@ -71,7 +71,7 @@ export function getProductFromPath(urlPathname: string): ProductId {
 }
 
 /**
- * The name that closes a page title, where it is not the product's own label.
+ * The name that qualifies a page title, where it is not the product's own label.
  *
  * The Agent Filesystem docs share the Agent Memory product but are not Agent
  * Memory, and would otherwise be titled as if they were. Every other page

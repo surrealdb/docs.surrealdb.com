@@ -25,21 +25,28 @@
 </p>
 
 <p align="center">
-    <a href="https://surrealdb.com/blog"><img height="25" src="src/assets/img/logo/dark/blog.svg" alt="Blog"></a>
+    <a href="https://surrealdb.com/blog"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/blog-dark.svg"><img height="24" src=".github/readme/blog-light.svg" alt="Blog"></picture></a>
     &nbsp;
-    <a href="https://github.com/surrealdb/surrealdb"><img height="25" src="src/assets/img/logo/dark/github.svg" alt="Github	"></a>
     &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="src/assets/img/logo/dark/linkedin.svg" alt="LinkedIn"></a>
+    <a href="https://github.com/surrealdb/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/github-dark.svg"><img height="24" src=".github/readme/github-light.svg" alt="GitHub"></picture></a>
     &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="src/assets/img/logo/dark/twitter.svg" alt="Twitter"></a>
     &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="src/assets/img/logo/dark/youtube.svg" alt="Youtube"></a>
+    <a href="https://www.linkedin.com/company/surrealdb/"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/linkedin-dark.svg"><img height="24" src=".github/readme/linkedin-light.svg" alt="LinkedIn"></picture></a>
     &nbsp;
-    <a href="https://dev.to/surrealdb"><img height="25" src="src/assets/img/logo/dark/dev.svg" alt="Dev"></a>
     &nbsp;
-    <a href="https://surrealdb.com/discord"><img height="25" src="src/assets/img/logo/dark/discrod.svg" alt="Discord"></a>
+    <a href="https://twitter.com/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/x-dark.svg"><img height="24" src=".github/readme/x-light.svg" alt="X"></picture></a>
     &nbsp;
-    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="src/assets/img/logo/dark/stack-overflow.svg" alt="StackOverflow"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/youtube-dark.svg"><img height="24" src=".github/readme/youtube-light.svg" alt="YouTube"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://dev.to/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/dev-dark.svg"><img height="24" src=".github/readme/dev-light.svg" alt="DEV"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://surrealdb.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/discord-dark.svg"><img height="24" src=".github/readme/discord-light.svg" alt="Discord"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/stack-overflow-dark.svg"><img height="24" src=".github/readme/stack-overflow-light.svg" alt="Stack Overflow"></picture></a>
 </p>
 
 <br>
@@ -80,8 +87,15 @@ The style guide, the conventions for SurrealQL examples, and how the site is put
 | `bun run qa` | Format and fix what Biome can fix safely. |
 | `bun run qc` | Check formatting and lint without changing anything. |
 | `bun run qts` | Type-check with TypeScript. |
-| `bun run check:links` | Check every internal link, anchor and short URL in `src/content`. |
+| `bun run check:links` | Check every internal link, anchor and short URL in `src/content`, including links that only reach their page through a redirect, the pages the product switch links to, and the cards of each section hub. |
 | `bun run check:doc-tests` | Check that every SurrealQL example carries a test config that agrees with the result its page shows. `--fix` adds a config to each example without one. |
+| `bun run check:cli-reference` | Check the environment variables page and the command pages against the newest stable release in the version history data: every setting has a row, every row names a real setting, or says with a `<Since>` badge which newer version it is for, and the defaults agree. |
+| `bun run check:duplicates` | List the pages and examples that this branch made repeat another page, compared with `main`. `--all` lists every similar pair in the docs, and `--base REF` compares with another branch. It only warns. |
+| `bun run check:sdk-parity` | Check that the SDK references share the addresses of their concept pages, so the language in `/docs/reference/<sdk>/concepts/<concept>` can be swapped: every SDK needs the concepts that all of them have, and a missing page that most SDKs have must be recorded as a gap with its reason in `scripts/check-sdk-parity.ts`. Shared pages need the same title and sidebar position in every SDK, and no two pages of one SDK may share a position. |
+| `bun run check:sdk-snippets` | Check that the language tabs on the docs home page still match the quickstarts they copy: every line of code in a tab has to appear in a page the tab links to, and every quickstart needs a tab. |
+| `bun run check:search-text` | Check that the search crawler extracts the text of every page, so search matches what pages say and not only their titles. |
+| `bun run check:content` | Warn about the lines this branch added that break a mechanical writing rule from `AGENTS.md`: dashes, American spellings, idioms, Title Case headings, wrapped paragraphs, the old record ID brackets, `IF ... THEN ... END`, bare `//` comments, `Response` titles on SurrealQL results, `root` passwords, `<SurrealistMini>` embeds that render empty, an `<iframe>`, an unknown callout kind, an image with no alt text, a misplaced `<Since>` badge, version tabs with the older version first, and a link repeated on a short page or in one section of a long one. `--all` reads every page, `--base REF` compares with another ref, and `--strict` exits 1 when anything is found. |
+| `bun run check:staleness` | List the pages whose content has not changed for 180 days, by section, with the oldest first. `--days N` changes the age, `--limit N` the length of the list and `--exclude PREFIX` leaves a part of `src/content` out. A commit that changes more than 40 pages counts as a sweep and does not date a page, and `--bulk N` changes that number. |
 | `bun run build` | Build the site. |
 | `bun run preview` | Build the site and serve the build. |
 
@@ -115,6 +129,7 @@ These write files that are committed, so run them and commit the result with the
 | `bun run search:index` | Index the content into the search database. Needs the search database credentials. |
 | `bun run build:cloudflare` | Build the Cloudflare Worker. Vercel serves production, and the Worker serves previews. |
 | `bun run test:routes` | Check the route table compiled from `vercel.ts` and `redirects.ts`. |
+| `bun run generate:last-modified` | Write `generated/last-modified.json`, the date each page last changed, from the git history. `prebuild` runs it, so run it by hand only to see the dates in `bun run dev`. |
 
 `bun run build` ends with `postbuild`, which indexes the content for search. It skips itself on Vercel previews and in CI. On your own machine, without the search database credentials, it reports an error after the build has finished, and the build output is still complete.
 
@@ -127,6 +142,12 @@ bun run qa
 bun run qc
 bun run check:links
 bun run check:doc-tests
+bun run check:cli-reference
+bun run check:duplicates
+bun run check:content
+bun run check:search-text
+bun run check:sdk-snippets
+bun run check:sdk-parity
 bun run diagrams:check
 ```
 
@@ -141,10 +162,18 @@ The CI workflow runs on every push, including pushes to a pull request's branch.
 | Code Quality | `bun run qau` | Biome finds a formatting or lint error that it cannot fix itself. | Run `bun run qa`, then `bun run qc`, and fix what remains. |
 | Build docs | `bun run build` | A page does not build: for example a frontmatter key that `src/utils/schema.ts` does not allow, an `icon` that does not exist, or a component used wrongly. | Run `bun run build` and read the first error. |
 | Route table | `bun run test:routes` | A rule in `redirects.ts` or `vercel.ts` compiles to a route that the Worker would serve differently from Vercel. | Run `bun run test:routes`. |
-| Internal links | `bun run check:links` | A link points at a page that does not exist, an anchor names no heading on its page, or a short URL is broken or missing. | Fix the link. A renamed heading changes its anchor, so update every link to it. |
-| Internal links | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
+| Content checks | `bun run check:links` | A link points at a page that does not exist, or at an address that redirects: a moved page, a short URL, a trailing slash, a `.html` file, or a folder with no page of its own. Also when a link is relative, an anchor names no heading on its page, a short URL is broken or missing, a pair in `src/utils/product-counterparts.ts` names a page that does not exist, or a section hub's cards drift from its sidebar: a group with no card, a card for a group that does not exist, or a card with no `description` or `picto`. | Link the address the message names. A renamed heading changes its anchor, so update every link to it. A moved page in a product switch pair needs its new path in that file. A new collection under a section needs its `description` and `picto` in `__category.json`, and a hub that lists its groups by `paths` needs the new group added there. |
+| Content checks | `bun run check:doc-tests` | A SurrealQL example has no test config, or its config expects a different result from the one its page shows. | Run `bun run check:doc-tests --fix` for a missing config. For a disagreement, run the example and correct whichever of the two is wrong. |
+| Content checks | `bun run check:cli-reference` | A `SURREAL_` variable or a flag in the newest stable release is not documented, a row names a variable no release has had and its `<Since>` badge does not name a newer version, a row for a removed variable gives no version, or a documented default differs from the source. Also when an entry in one of the script's lists no longer applies. | Add the row or mention the flag. A variable or flag that is not a setting for users goes in `INTERNAL` or `HIDDEN_FLAGS` in `scripts/check-cli-reference.ts`, with the reason. |
+| Content checks | `bun run check:duplicates` | Fails only when the committed `public/llms.txt` differs from the one regenerated from the content. The content rules never fail: they warn, as an annotation on the changed file, when the change adds a page whose prose mostly appears on another page, or copies an example from another page. | Link to the page that already covers it, or merge the two. Leave the warning where the two pages are meant to match, such as the `ALTER` pages for a database and a namespace. |
+| Content checks | `bun run check:content`, and `bun run generate:llms` followed by `git diff --exit-code public/llms.txt` | Never: it warns, as an annotation on the changed line, when a line the change adds breaks one of the writing rules that `AGENTS.md` states mechanically. | For `llms.txt`, run `bun run generate:llms` and commit the result. For a content warning, fix the line it names. A rule can bend where a page quotes something, and the person making the change decides. `bun run check:content --all` shows every line in the docs that breaks a rule. |
+| Content checks | `bun run check:sdk-parity` | An SDK lacks a concept page that every SDK has, a gap is not recorded in `scripts/check-sdk-parity.ts`, a recorded gap has been filled, a page uses another spelling of a shared slug, a shared page has a different title or position, or two pages of one SDK share a position. | Write the page, or rename it to the shared slug. Record a gap only with its reason. |
+| Content checks | `bun run check:sdk-snippets` | A line of code in a language tab on the docs home page is not in a page the tab links to, a tab links to no quickstart, or a quickstart has no tab. | Change the quickstart first, then copy the lines to the tab in `src/content/index/index.mdx`. |
+| Content checks | `bun run check:search-text` | A fixed markdown sample no longer extracts to the expected text, or a page yields no text for the search index. | Fix the text extraction in `search/scripts/crawler.ts`. The message shows what the sample extracted to. |
 
 A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
+
+The **Stale pages** workflow runs every Monday, and by hand from the Actions tab. It runs `bun run check:staleness` and shows the pages unchanged for 180 days in the job summary. It reports and never fails.
 
 ## Writing documentation
 

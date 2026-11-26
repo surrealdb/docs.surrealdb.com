@@ -1,0 +1,251 @@
+---
+position: 14
+title: Set up AWS PrivateLink
+description: "Step-by-step AWS PrivateLink setup for SurrealDB Cloud: request access, create an interface VPC endpoint, enable private DNS, turn on private traffic in Studio, and test the connection."
+---
+
+# Set up AWS PrivateLink
+
+This guide connects an AWS VPC to a SurrealDB Cloud instance over [AWS PrivateLink](https://aws.amazon.com/privatelink/). When you finish, applications in your VPC reach the instance on a private hostname, and the traffic stays on the AWS network.
+
+For how PrivateLink works with SurrealDB Cloud and what the **Public** and **Private** access options do, see [Private connectivity](/docs/operate/instances/private-connectivity).
+
+<img src="~/assets/img/diagrams/light/aws-privatelink-flow-light.webp" darkSrc="~/assets/img/diagrams/aws-privatelink-flow.webp" alt="An application in your VPC connects to the instance's private hostname. Private DNS resolves the hostname to an interface VPC endpoint, which has a network interface in each of the availability zones use1-az1, use1-az4 and use1-az6 and a security group that allows TCP 443. The traffic crosses AWS PrivateLink, on the AWS network, to the SurrealDB endpoint service, which accepts approved AWS accounts and endpoints that SurrealDB has accepted. A PrivateLink gateway in each zone routes it by hostname to the instance, which has Private traffic on. A separate, dashed public path from clients on the internet reaches the instance only while Public traffic is on." />
+
+## Before you start
+
+You need:
+
+- An instance in a region from the [table below](#supported-regions). Your VPC must be in the same AWS region as the instance.
+- An AWS account with a VPC, and IAM permissions to create and modify interface VPC endpoints and security groups.
+- DNS resolution and DNS hostnames turned on for the VPC. Private DNS does not work without both.
+- An organisation on an enterprise plan. PrivateLink is an enterprise feature.
+
+## Supported regions
+
+One endpoint service serves every PrivateLink instance in a region. Create your endpoint with the service name for the region your instance runs in.
+
+| Region | Endpoint service name | Availability zone IDs | Private hostnames |
+| --- | --- | --- | --- |
+| US East (N. Virginia), `us-east-1` | `com.amazonaws.vpce.us-east-1.vpce-svc-05edc1d596d6e2ed2` | `use1-az1`, `use1-az4`, `use1-az6` | `*.privatelink.aws-use1.surreal.cloud` |
+| US West (Oregon), `us-west-2` | `com.amazonaws.vpce.us-west-2.vpce-svc-0383e386bbcafdc69` | `usw2-az1`, `usw2-az2`, `usw2-az3` | `*.privatelink.aws-usw2.surreal.cloud` |
+
+The service accepts connections only from AWS accounts that SurrealDB has approved, so the service name on its own gives no access.
+
+> [!NOTE]
+> AWS gives availability zone names, such as `us-east-1a`, a different meaning in each account. Availability zone IDs, such as `use1-az1`, are the same in every account. Match your subnets to the service by zone ID.
+
+## Step 1: Request access
+
+Contact [SurrealDB support](/docs/operate/organisations/support) or your account manager, and send:
+
+- The AWS account ID of each account that will create an endpoint.
+- The region.
+- The organisation and the instances to connect.
+
+SurrealDB approves the accounts on the endpoint service and enables PrivateLink for your organisation. After that, the **Network Access** options appear in Studio for your instances.
+
+## Step 2: Create the VPC endpoint
+
+Create one interface VPC endpoint in each VPC that needs access. One endpoint gives the VPC access to every PrivateLink instance in that region, so you do not need one endpoint for each instance.
+
+The endpoint's security group must allow inbound TCP on port `443` from the addresses of the clients that connect to SurrealDB, such as your application subnets. You can create a security group for the endpoint, or use an existing one. If you select none, AWS attaches the default security group of the VPC, which usually allows inbound traffic only from resources in that same group.
+
+Then create the endpoint in the AWS console:
+
+1. Open the [Amazon VPC console](https://console.aws.amazon.com/vpc/) in the region of your instance, and select **Endpoints** > **Create endpoint**.
+2. Enter a **Name tag**, such as `surrealdb-privatelink`.
+3. For **Type**, select **Endpoint services that use NLBs and GWLBs**.
+
+<img src="~/assets/img/image/cloud/aws-privatelink-endpoint-type.png" alt="The Endpoint settings section of the Create endpoint page in the Amazon VPC console. The Name tag field holds surreal-private-link-testing, and under Type the option Endpoint services that use NLBs and GWLBs is selected, among options such as AWS services, PrivateLink Ready partner services and AWS Marketplace services." />
+
+4. In **Service name**, enter the endpoint service name for your region, and select **Verify service**. The console shows **Service name verified**.
+5. In **Network settings**, select your **VPC**. Open **Additional settings**, and clear **Enable private DNS name**, which the console selects by default. You turn on private DNS in [step 4](#step-4-enable-private-dns), after SurrealDB accepts the connection.
+
+<img src="~/assets/img/image/cloud/aws-privatelink-service-network.png" alt="The Service settings and Network settings sections of the Create endpoint page. The Service name field holds com.amazonaws.vpce.us-east-1.vpce-svc-05edc1d596d6e2ed2 with a green Service name verified message below it. A VPC is selected, its ID blacked out. Under Additional settings, Enable private DNS name is cleared and DNS record IP type is IPv4." />
+
+6. In **Subnets**, select one subnet in each availability zone the console offers. The console lists only the zones that the service supports. Select all three zones for the best availability. If your VPC has no subnet in any of these zones, add a subnet in one of them first. Clients in other zones of the same VPC can still use the endpoint.
+7. For **IP address type**, select **IPv4**.
+8. In **Security groups**, select a security group that allows port `443` from your clients, or select none to use the default security group of the VPC.
+
+<img src="~/assets/img/image/cloud/aws-privatelink-subnets.png" alt="The Subnets, Security groups and Tags sections of the Create endpoint page. Subnets lists the zones use1-az6 and use1-az1, each selected with a subnet whose ID is blacked out, and use1-az4 with No subnet available. IP address type is IPv4. The Security groups table lists the default group of the VPC, not selected. The Create endpoint button is at the bottom right." />
+
+9. Select **Create endpoint**.
+10. Copy the **VPC endpoint ID**, such as `vpce-0a1b2c3d4e5f67890`. Its **Status** is **Pending acceptance**.
+
+The commands on this page use `us-east-1`. For another region, change `--region` and use the service name from the [region table](#supported-regions).
+
+To create the endpoint with the AWS CLI instead, run the command below with your own VPC, subnet and security group IDs:
+
+```bash
+aws ec2 create-vpc-endpoint \
+  --region us-east-1 \
+  --vpc-endpoint-type Interface \
+  --service-name com.amazonaws.vpce.us-east-1.vpce-svc-05edc1d596d6e2ed2 \
+  --vpc-id vpc-0123456789abcdef0 \
+  --subnet-ids subnet-0aaaaaaaaaaaaaaaa subnet-0bbbbbbbbbbbbbbbb subnet-0cccccccccccccccc \
+  --security-group-ids sg-0123456789abcdef0 \
+  --no-private-dns-enabled \
+  --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=surrealdb-privatelink}]'
+```
+
+To check which availability zone ID each of your subnets uses, run:
+
+```bash
+aws ec2 describe-subnets \
+  --region us-east-1 \
+  --filters Name=vpc-id,Values=vpc-0123456789abcdef0 \
+  --query "Subnets[].[SubnetId,AvailabilityZone,AvailabilityZoneId]" \
+  --output table
+```
+
+In Terraform or another infrastructure as code tool, create the endpoint with private DNS off, and turn it on in a second change after SurrealDB accepts the connection: setting it on the endpoint at creation fails, as it does in the console. In the Terraform AWS provider, use `private_dns_enabled = false` on `aws_vpc_endpoint`, then add an `aws_vpc_endpoint_private_dns` resource, available from provider version 5.51.
+
+## Step 3: Send the endpoint ID to SurrealDB
+
+Send each VPC endpoint ID to SurrealDB support or your account manager, and say which instances it is for. SurrealDB accepts the connection.
+
+When the connection is accepted, the endpoint **Status** changes from **Pending acceptance** to **Available**. Refresh the endpoint in the console, or run:
+
+```bash
+aws ec2 describe-vpc-endpoints \
+  --region us-east-1 \
+  --vpc-endpoint-ids vpce-0a1b2c3d4e5f67890 \
+  --query "VpcEndpoints[].State" \
+  --output text
+```
+
+```text title="Expected output"
+available
+```
+
+<img src="~/assets/img/image/cloud/aws-privatelink-available.png" alt="The Endpoints page of the Amazon VPC console with one interface endpoint named surreal-private-link-testing, its Status Available. The Details tab below shows Status Available, the service name com.amazonaws.vpce.us-east-1.vpce-svc-05edc1d596d6e2ed2, service region us-east-1 and Private DNS names enabled No. The endpoint ID, VPC ID and DNS names are blacked out." />
+
+## Step 4: Enable private DNS
+
+Private DNS makes the `*.privatelink.<region>.surreal.cloud` hostnames resolve to the endpoint inside your VPC. AWS lets you turn it on only after the connection is accepted.
+
+1. In the Amazon VPC console, select **Endpoints**, then select your endpoint.
+2. Select **Actions** > **Modify private DNS name**.
+
+<img src="~/assets/img/image/cloud/aws-privatelink-actions-menu.png" alt="The Endpoints page with the endpoint surreal-private-link-testing selected and the Actions menu open. Modify private DNS name is highlighted among actions such as Manage subnets, Manage security groups and Delete VPC endpoints." />
+
+3. Select **Enable for this endpoint**, and select **Save changes**.
+
+<img src="~/assets/img/image/cloud/aws-privatelink-modify-private-dns.png" alt="The Modify private DNS name page for the endpoint, showing the service name com.amazonaws.vpce.us-east-1.vpce-svc-05edc1d596d6e2ed2. Under Enable private DNS names, Enable for this endpoint is selected, and a note says the VPC attributes Enable DNS hostnames and Enable DNS Support must be true. Save changes is at the bottom right. The endpoint ID and VPC ID are blacked out." />
+
+4. On the endpoint's **Details** tab, check that **Private DNS names enabled** is **Yes** and that **DNS names** includes `*.privatelink.<region>.surreal.cloud` for your region.
+
+With the AWS CLI, run:
+
+```bash
+aws ec2 modify-vpc-endpoint \
+  --region us-east-1 \
+  --vpc-endpoint-id vpce-0a1b2c3d4e5f67890 \
+  --private-dns-enabled
+```
+
+Wait about five minutes after the connection becomes **Available** before you test it. Connections in the first few minutes can time out.
+
+## Step 5: Turn on private traffic in Studio
+
+Each instance has its own **Public** and **Private** options. You choose them when you create the instance, and you can change them at any time in its settings. Turn on **Private** for each instance that clients will reach over PrivateLink.
+
+For an existing instance:
+
+1. Open the instance in [SurrealDB Studio](/docs/reference/studio).
+2. Open the instance **Settings**, and go to **Capabilities** > **Network**.
+3. Turn on **Private**. Leave **Public** on while you move clients across.
+4. Select **Apply network access**, and confirm with **Apply changes**.
+
+<img src="~/assets/img/image/cloud/privatelink-network-settings.png" alt="The Network section at the bottom of the Capabilities settings of an instance in SurrealDB Studio, headed Configure public and private network access. It has two cards: Public, which allows public traffic to access your instance, and Private, which allows private traffic to access your instance. Both cards are switched to Enabled, so the instance takes both public and private traffic." />
+
+For a new instance, the **Network Access** section of the deploy form has the same **Public** and **Private** options. Turn on both. An instance created with **Private** alone takes no public traffic from the start, so Studio can only connect to it from a machine that can reach the VPC. See [step 7](#step-7-turn-off-public-traffic).
+
+<img src="~/assets/img/image/cloud/privatelink-deploy-network-public.png" alt="The Network Access section of the Deploy an instance form in SurrealDB Studio, with a Public card and a Private card. Public is switched to Enabled and Private to Disabled, which is how the form starts. Turn on Private as well to create the instance with both." />
+
+When the change is applied, the instance **Overview** shows the address under **Private endpoint**, below the **Public endpoint**. Use the copy menu beside it to copy the WebSocket URL, the HTTP base URL or the hostname only.
+
+<img src="~/assets/img/image/cloud/privatelink-endpoints.png" alt="The endpoint rows on the Overview of an instance in SurrealDB Studio. Public endpoint shows wss://bright-shadow-06h0rko5g5r15bhgga6c6es8i8.aws-usw2.surreal.cloud/rpc and Private endpoint shows wss://bright-shadow-06h0rko5g5r15bhgga6c6es8i8.privatelink.aws-usw2.surreal.cloud/rpc. Each row has a copy button and a menu." />
+
+You can also set the options with the CLI, where `--access-type` takes `public`, `private`, or `dual` for both: see [`surreal cloud instance update`](/docs/reference/cli/cloud/commands/instance#instance-update).
+
+## Step 6: Test the connection
+
+Run these checks from a host inside the VPC, such as an EC2 instance in one of the endpoint's subnets.
+
+The private hostname must resolve to one or more private IP addresses in your VPC. On Amazon Linux, `dig` is in the `bind-utils` package.
+
+```bash
+dig +short my-instance-06abcdefghijklmnopqrstuvwx.privatelink.aws-use1.surreal.cloud
+```
+
+```text title="Example output"
+10.0.1.25
+10.0.2.41
+10.0.3.17
+```
+
+If the command returns nothing, or returns public addresses, see [Troubleshooting](#troubleshooting).
+
+Then check that the instance answers:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://my-instance-06abcdefghijklmnopqrstuvwx.privatelink.aws-use1.surreal.cloud/health
+```
+
+```text title="Expected output"
+200
+```
+
+The status `200` means that the path works end to end. Connect your applications with the private endpoint from Studio, in the same way as with the public endpoint. See [Connect to an instance](/docs/operate/instances/connect).
+
+## Step 7: Turn off public traffic
+
+When every client connects over PrivateLink, you can turn off public traffic. In **Settings** > **Capabilities** > **Network**, turn off **Public**, select **Apply network access**, and confirm with **Apply changes**. The instance then takes private traffic only, and its public hostname no longer routes to it.
+
+> [!WARNING]
+> With **Public** off, only clients inside a connected VPC can reach the instance. This includes Studio: to query the instance from Studio, open Studio from a machine that can reach the VPC, such as through a VPN or a bastion host. Keep **Public** on if you also connect from developer machines or from CI outside AWS.
+
+## Connect several VPCs through a hub
+
+If several VPCs reach AWS services through a central VPC, for example with AWS Transit Gateway, you can create the endpoint once in the central VPC. The private DNS that the endpoint creates in step 4 works only inside the VPC of the endpoint, so leave it off and make the hostnames resolve in each VPC yourself:
+
+1. Create a Route 53 private hosted zone for the hostname suffix of your region, such as `privatelink.aws-use1.surreal.cloud`.
+2. Add a wildcard record `*` in the zone: an alias `A` record to the regional DNS name of the endpoint, which is the first name under **DNS names** on the endpoint and has no availability zone in it.
+3. Associate the zone with the central VPC and with each VPC whose clients connect to SurrealDB.
+
+Skip step 4 for this endpoint: AWS does not allow private DNS on an endpoint in a VPC that already has a private hosted zone for the same domain. Traffic from the other VPCs must be able to route to the endpoint's subnets, and the endpoint's security group must allow port `443` from them.
+
+For clients in an on-premises network connected over AWS Direct Connect or a VPN, create a Route 53 Resolver inbound endpoint in the central VPC, and forward queries for the hostname suffix from your DNS servers to it.
+
+## What goes over PrivateLink
+
+PrivateLink carries every connection to an instance that uses its private hostname: the SDKs, [`surreal db sql`](/docs/reference/cli/db/commands/sql) and other clients over WebSocket or HTTP, and Studio for an instance with **Public** off. Managing SurrealDB Cloud, in Studio, through the Cloud API or with `surreal cloud`, uses the public internet, so the machines that do it need internet access.
+
+## Troubleshooting
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| **Verify service** fails | Your AWS account is not approved on the endpoint service yet | Complete [step 1](#step-1-request-access), and wait for SurrealDB to confirm that the account is approved. |
+| **Verify service** fails for an approved account | The service name is for another region, or the console is open in another region | Use the service name for the region of your instance, with the console in that region. |
+| The console offers no subnet, or fewer zones than you expect | The VPC has no subnet in the availability zone IDs the service supports | Add a subnet in one of the zone IDs from the [region table](#supported-regions). |
+| The endpoint stays in **Pending acceptance** | SurrealDB has not accepted the connection yet | Send the endpoint ID to SurrealDB support or your account manager. |
+| Creating the endpoint fails with `Private DNS can only be enabled after the endpoint connection is accepted` | **Enable private DNS name** was selected when the endpoint was created | Create the endpoint without it, then follow [step 4](#step-4-enable-private-dns). |
+| **Modify private DNS name** fails because the domain is in use | Another endpoint or a private hosted zone in the VPC already serves the same domain | Use one endpoint for each VPC, or remove the conflicting private hosted zone. |
+| The private hostname does not resolve, or resolves to public addresses | Private DNS is off, the VPC has DNS resolution or DNS hostnames turned off, or the client uses a resolver outside the VPC | Enable private DNS on the endpoint, turn on both VPC DNS settings, and use the VPC resolver. For other VPCs, see [Connect several VPCs through a hub](#connect-several-vpcs-through-a-hub). |
+| The hostname resolves, but connections time out | The security group does not allow port `443` from the client, or the connection was accepted less than five minutes ago | Allow inbound TCP `443` from the client addresses, and wait a few minutes after acceptance. |
+| The connection succeeds, but the instance returns a not-found error | Private traffic is off for the instance | Turn on **Private** in [step 5](#step-5-turn-on-private-traffic-in-studio). |
+| Long-lived WebSocket connections close | The connection was idle for 350 seconds | Send a keepalive, such as a WebSocket ping, more often than every 350 seconds, or reconnect when the connection closes. |
+
+## Limits
+
+- The endpoint must be in the same AWS region as the instance. Cross-region endpoints are not supported.
+- The endpoint service supports IPv4 only.
+- AWS closes a connection that is idle for 350 seconds. See [troubleshooting](#troubleshooting).
+
+## Related pages
+
+- **[Private connectivity](/docs/operate/instances/private-connectivity):** public and private access, and how PrivateLink works with SurrealDB Cloud.
+- **[Connect to an instance](/docs/operate/instances/connect):** connection URLs and SDKs.
+- **[`surreal cloud instance`](/docs/reference/cli/cloud/commands/instance):** set public and private access from the command line.

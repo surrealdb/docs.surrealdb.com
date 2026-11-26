@@ -247,6 +247,57 @@ function agentPicker(): string {
     return `\n\n${items.join("\n")}\n\n`;
 }
 
+/** A card of a section hub page, as `<SectionCards>` draws it. */
+export interface SectionCard {
+    title: string;
+    /** The page the card links to, as the sidebar writes paths, without the `/docs` base. */
+    path: string;
+    description?: string;
+}
+
+/** The pages of each folder a `<FolderCards>` lists, keyed by the folder's path. */
+export type FolderCardsMap = Record<string, SectionCard[]>;
+
+/** The cards of a section hub page: one for each group, and one for each page of a flat section. */
+export interface SectionHub {
+    cards: SectionCard[];
+    pages: SectionCard[];
+}
+
+/** Whether a page path is the section path or lies under it. */
+function inside(pagePath: string, sectionPath: string): boolean {
+    return pagePath === sectionPath || pagePath.startsWith(`${sectionPath}/`);
+}
+
+/**
+ * Renders `<SectionCards>` as the list of groups it draws, which the page's
+ * data supplies. With `paths`, only those groups and in that order, as the
+ * component does; without it, every group in the order of the sidebar.
+ */
+function sectionCards(attrs: Record<string, string>, hub: SectionHub | undefined): string {
+    const cards = attrs.pages === "true" ? hub?.pages : hub?.cards;
+
+    if (!cards?.length) return "";
+
+    let chosen = cards;
+
+    if (attrs.paths) {
+        try {
+            const paths = JSON.parse(attrs.paths) as string[];
+            chosen = paths.flatMap((path) => cards.find((card) => inside(card.path, path)) ?? []);
+        } catch {
+            return "";
+        }
+    }
+
+    const items = chosen.map(
+        (card) =>
+            `- [${card.title}](/docs${card.path})${card.description ? ` - ${card.description}` : ""}`,
+    );
+
+    return items.length > 0 ? `\n\n${items.join("\n")}` : "";
+}
+
 /** Resolves `<Version>` against the same SDK version map the pages render. */
 function version(attrs: Record<string, string>, versions: SdkVersionMap): string {
     const resolved = versions[attrs.sdk ?? "surrealdb"];
@@ -269,7 +320,12 @@ const VERDICT_LABELS: Record<string, string> = {
     "not-applicable": "Not applicable",
 };
 
-export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMap = {}): string {
+export function flattenMdxComponents(
+    markdown: string,
+    sdkVersions: SdkVersionMap = {},
+    sectionHub?: SectionHub,
+    folders?: FolderCardsMap,
+): string {
     const { text, blocks } = maskCode(markdown);
     let out = text;
 
@@ -329,6 +385,20 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
     });
     out = out.replace(/<\/Details>/g, "");
     out = out.replace(wrapper("Boxes"), "");
+    // The cards of a section hub: the groups of its sidebar, followed by any
+    // extra `<IconBox>` the tag wraps, which the pass below turns into items.
+    out = out.replace(tag("SectionCards"), (_match, raw: string) =>
+        sectionCards(parseAttrs(raw), sectionHub),
+    );
+    out = out.replace(/<\/SectionCards>/g, "");
+    // The pages of a folder, as the list of links the cards are.
+    out = out.replace(tag("FolderCards"), (_match, raw: string) => {
+        const cards = folders?.[parseAttrs(raw).path ?? ""] ?? [];
+
+        return cards.length > 0
+            ? `\n\n${cards.map((card) => `- [${card.title}](/docs${card.path})`).join("\n")}`
+            : "";
+    });
 
     // Components that emit links or code, applied last so the markdown they
     // introduce is not itself a candidate for rewriting.

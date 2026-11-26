@@ -1,0 +1,312 @@
+---
+position: 2
+title: Choosing a multi-tenant layout
+description: Compare a database, a namespace or an instance for each tenant on access, deleting and exporting a tenant, manual transactions across tenants and schema changes, and roll one schema change out to many tenant databases.
+---
+
+A multi-tenant application keeps the data of many customers apart. In SurrealDB you can give each tenant a database, a namespace or an instance of its own. The choice decides who can reach a tenant, how you delete or export one, whether a single manual transaction can cover several tenants, and how a schema change reaches all of them. This page compares the three layouts and shows how to apply one schema change to many tenants.
+
+Tenants that share tables and are separated by permissions are a different design, covered in the [multi-tenant RBAC cookbook](/docs/learn/tutorials/cookbook/multi-tenant-rbac). The layouts below suit data that must stay unreachable from other tenants. [Namespace and database architecture](/docs/learn/schema-management/multi-tenancy/namespace-and-database-architecture) explains what each level holds.
+
+## The three layouts
+
+| | Database for each tenant | Namespace for each tenant | Instance for each tenant |
+| --- | --- | --- | --- |
+| What separates tenants | A database in one namespace | A namespace, which can hold several databases | A separate instance, such as an [Earth](/docs/operate/instances/earth) instance, with its own storage and commit log |
+| Where the data is placed | The region of the instance, which every tenant in it shares | The region of the instance, which every tenant in it shares | A region chosen for each instance |
+| Who can reach a tenant | A database user reaches only its database, and a namespace user reaches every tenant's database | A namespace user reaches only that tenant's databases, and can define new ones in it | The users of that instance |
+| Delete a tenant | `REMOVE DATABASE` | `REMOVE NAMESPACE` | Delete the instance |
+| Export a tenant | `surreal db export` for the database | `surreal db export` for each database in the namespace | `surreal db export` for each database in the instance |
+| One manual transaction across tenants | Yes | Yes | No, a transaction covers one instance |
+| One schema change across tenants | One script, with `USE` before each tenant | One script, with `USE` before each tenant | One run for each instance, which SurrealKit can repeat across the targets in a file |
+
+## How tenants are stored
+
+Namespaces and databases are levels of one keyspace. A namespace, the databases in it and their tables all sit beneath the root of the same key-value store, so a new tenant adds definitions and keys and does not start a storage engine or a process of its own. A tenant that is idle holds its stored data and its definitions.
+
+There is no documented limit on the number of namespaces or databases. For a very large number of tenants, contact SurrealDB about your plan before you choose a layout.
+
+On Earth, an idle instance stops using compute about 60 seconds after its last request, and the next request starts it again. An idle tenant instance therefore adds no active hours, and it still counts towards storage. The organisation's plan limits how many instances it can hold: 100 on Earth Free and no limit on Earth Pro. Check the [features that Earth does not offer yet](/docs/operate/instances/earth#features-not-available-yet) before you choose it.
+
+## Choose a region
+
+A region belongs to an instance, so every tenant in an instance is placed in the same region. That can be a reason to give a tenant an instance of its own when tenants are in different parts of the world and each tenant's data should be close to its users.
+
+On a dedicated instance, the region sets where the instance runs and where its data resides, and the [deploy page](/docs/operate/instances/create) advises choosing the same region as your application where you can. On Earth, the data residency (Worldwide, European Union or United States) and the preferred location tell Earth where to place storage and compute. The storage of an Earth instance stays in one location while queries arrive through the nearest location, so choose a fixed location when you know where most of a tenant's traffic comes from. See [deploy an Earth instance](/docs/operate/instances/earth#deploy-an-earth-instance) for the settings.
+
+Neither the region of a dedicated instance nor the residency and preferred location of an Earth instance can be changed after the instance is created. A tenant that may need to move therefore needs a new instance in the new region, with its data moved by [export and import](/docs/operate/instances/import-and-export). An Earth residency is a placement and not a guarantee of where data is stored or processed, so do not rely on it alone to meet a legal or regulatory requirement.
+
+## Delete or export a tenant
+
+`REMOVE DATABASE` takes the database out of the catalogue at once and deletes its keys later in the background, so it returns quickly even for a large tenant. A database created again with the same name is empty. `REMOVE NAMESPACE` does the same for every database in the namespace. On a versioned SurrealKV datastore, add `AND EXPUNGE` to delete earlier versions of the data too. [Behaviour after removal](/docs/reference/query-language/statements/remove#behaviour-after-removal) has the details.
+
+An export covers one database, so a tenant is exported with its namespace and database:
+
+```bash
+surreal db export --endpoint http://localhost:8000 --user root --pass secret --ns platform --db tenant_a tenant_a.surql
+```
+
+## Access and administration
+
+The practical difference between a database and a namespace for each tenant is who can reach what. A namespace user can read and administer every database in its namespace, and a database user cannot switch to another database. With a database for each tenant, give tenant staff database users or record users, and keep namespace users for your own operators. With a namespace for each tenant, a tenant administrator can be a namespace user who manages several databases of their own, such as production and staging.
+
+## Work across tenants
+
+A statement runs against the namespace and database that were selected before it, so a script reads from several tenants by selecting each one with `USE`. Inside one instance, a manual transaction can include statements for several databases, or for several namespaces, and they commit together or not at all. A shared database and the private database of each tenant can sit in the same namespace, and an application can then write to both in one manual transaction. An Earth instance has its own commit log, so no transaction spans two instances.
+
+## Apply one schema change to many tenants
+
+Each tenant database has its own definitions, so a schema change has to reach every one of them.
+
+### In one script
+
+`USE` changes where the following statements run, so one script can apply the same change to several databases, and to databases in more than one namespace:
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE NAMESPACE platform;
+USE NS platform;
+DEFINE DATABASE tenant_a;
+DEFINE DATABASE tenant_b;
+
+USE NS platform DB tenant_a;
+DEFINE TABLE invoice SCHEMAFULL;
+DEFINE FIELD total ON invoice TYPE number;
+
+USE NS platform DB tenant_b;
+DEFINE TABLE invoice SCHEMAFULL;
+DEFINE FIELD total ON invoice TYPE number;
+```
+
+The names can come from parameters. `USE NS $namespace DB $tenant` selects the namespace and database that the parameters name, and `DEFINE NAMESPACE` and `DEFINE DATABASE` accept parameters too:
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+LET $namespace = 'platform';
+LET $tenant = 'tenant_a';
+
+DEFINE NAMESPACE $namespace;
+USE NS $namespace;
+DEFINE DATABASE $tenant;
+
+USE NS $namespace DB $tenant;
+DEFINE TABLE invoice SCHEMAFULL;
+DEFINE FIELD total ON invoice TYPE number;
+```
+
+A `FOR` loop can create the tenants from a list, using a parameter for each name:
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE NAMESPACE platform;
+USE NS platform;
+
+FOR $tenant IN ['tenant_a', 'tenant_b', 'tenant_c'] {
+	DEFINE DATABASE $tenant;
+};
+```
+
+A loop cannot move from one tenant to the next. `USE` is a statement of its own and cannot sit inside a block, so `FOR $tenant IN [...] { USE NS platform DB $tenant; ... }` is a parse error, and `eval::surql()` rejects `USE` as well. To apply one schema to many tenants, generate the script in your application with a `USE` before the statements for each tenant, or run the same schema script once for each tenant.
+
+A script can also run as one manual transaction. Wrap it in `BEGIN` and `COMMIT`, and the change applies to every database in it or to none, even when the databases are in different namespaces. This works across tenants because a manual transaction in one instance can include statements for several databases. A manual transaction over a very large number of tenants succeeds or fails as a whole, so for many tenants apply the change in batches, as described in [roll out in phases](#roll-out-in-phases).
+
+On Earth, a manual transaction also makes a schema load faster. Each statement outside one is a commit of its own, and every commit waits for durable storage, so a schema of many `DEFINE` statements loads faster as one manual transaction.
+
+### Track which tenants have the change
+
+Keep a control database with one record for each tenant and the schema version that tenant has. A query on that database then says how many tenants are on each version, without connecting to every tenant. In one instance, the change and its record commit in the same manual transaction:
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+value = "[{ id: tenant:a, schema_version: 2 }]"
+
+*/
+-- Setup: a control database and a tenant database
+DEFINE NAMESPACE platform;
+USE NS platform;
+DEFINE DATABASE control;
+DEFINE DATABASE tenant_a;
+USE NS platform DB tenant_a;
+DEFINE TABLE invoice SCHEMAFULL;
+DEFINE FIELD total ON invoice TYPE number;
+USE NS platform DB control;
+UPSERT tenant:a SET schema_version = 1;
+
+BEGIN;
+USE NS platform DB tenant_a;
+DEFINE FIELD note ON invoice TYPE option<string>;
+USE NS platform DB control;
+UPSERT tenant:a SET schema_version = 2;
+COMMIT;
+
+SELECT * FROM tenant;
+```
+
+```surql title="Output"
+[{ id: tenant:a, schema_version: 2 }]
+```
+
+With one instance for each tenant there is no manual transaction across them. Apply the change first and record it afterwards, and make the change safe to repeat so that a tenant whose record was not updated can run it again.
+
+### Roll out in phases
+
+Apply a change to a few tenants first, such as tenants that have been idle for a while, and look for failures before the rest. SurrealKit supports this in two ways:
+
+- [`surrealkit sync --all --keep-going`](/docs/operate/schema-migration/modules-and-targets) applies every module to every target declared in `surrealkit.toml`, one target at a time, and continues after a failure. A target can name its own `host`, so a run can cover several instances. The list of targets is written in the file, so for tenants that change, generate the `[target.*]` tables from the control database before each run.
+- [Rollouts](/docs/operate/schema-migration/rollouts) split a change into start, complete and rollback phases for one database, which suits a change that old and new code must both run against.
+
+### Apply the schema when a tenant first opens
+
+An application written in Rust can use [SurrealKit as a library](/docs/operate/schema-migration/library) and apply the schema to a tenant's database the first time that tenant connects, with no rollout across all tenants. `Sync` records each schema file by its `path` and its content, and applies a file again only when its content changes, so it is safe to call on every connection. By default `Sync` also removes objects that are not in the schema, so a tenant database should hold only objects that the schema defines, or `.prune(false)` should be set:
+
+```rust
+use surrealkit::engine::any::Any;
+use surrealkit::{EmbeddedSchemaFile, Surreal, Sync};
+
+static SCHEMA: &[EmbeddedSchemaFile] = &[EmbeddedSchemaFile {
+    path: "schema/invoice.surql",
+    sql: "DEFINE TABLE invoice SCHEMAFULL;",
+}];
+
+// `db` has already selected the tenant's namespace and database.
+async fn prepare_tenant(db: &Surreal<Any>) -> anyhow::Result<()> {
+    Sync::embedded(SCHEMA).run(db).await?;
+    Ok(())
+}
+```
+
+Clone the `Surreal` client for each tenant, as in [multiple sessions in the Rust SDK](/docs/reference/rust/concepts/multiple-sessions). A clone is a session of its own, so selecting a tenant's namespace and database on it does not change the database that another request uses.
+
+## Choose a layout
+
+- **A database for each tenant in one instance** keeps operations in one place: one set of credentials for operators, one scope for a manual transaction and one place to run a schema change. Namespaces stay free for environments such as staging and production.
+- **A namespace for each tenant** suits tenants whose administrators manage several databases of their own, or where credentials must stop at the tenant's boundary at the namespace level.
+- **An instance for each tenant** suits tenants that need their own storage, a region of their own or usage limits. No manual transaction spans instances, and a schema change is one run for each instance.

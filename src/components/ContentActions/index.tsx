@@ -6,7 +6,25 @@ import { usePageContext } from "vike-react/usePageContext";
 import { GITHUB_BASE, GITHUB_ISSUES } from "~/components/PageAside";
 import { FeedbackModal, type Sentiment } from "~/modals/FeedbackModal";
 
-export function PageContentActions({ contentPath }: { contentPath: string }) {
+/** A date as the docs show it to a reader, such as "3 November 2026". */
+function formatDate(date: string): string {
+    // Fixed to UTC so the server and the browser render the same day.
+    return new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+    }).format(new Date(date));
+}
+
+export interface PageContentActionsProps {
+    /** The page's source file, relative to `src/content`. */
+    contentPath: string;
+    /** When the page's source last changed, as an ISO 8601 date, if known. */
+    lastModified?: string;
+}
+
+export function PageContentActions({ contentPath, lastModified }: PageContentActionsProps) {
     const { urlPathname } = usePageContext();
     const editUrl = `${GITHUB_BASE}${contentPath}`;
 
@@ -53,6 +71,20 @@ export function PageContentActions({ contentPath }: { contentPath: string }) {
                     </Group>
                 </Box>
                 <Spacer />
+                {lastModified && (
+                    <Text
+                        fz="sm"
+                        c="dimmed"
+                    >
+                        Last updated{" "}
+                        <Box
+                            component="time"
+                            dateTime={lastModified}
+                        >
+                            {formatDate(lastModified)}
+                        </Box>
+                    </Text>
+                )}
                 <Anchor
                     href={editUrl}
                     target="_blank"

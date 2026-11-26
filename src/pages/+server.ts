@@ -16,13 +16,24 @@ import {
     MARKDOWN_CONTENT_TYPE,
 } from "~/utils/agent-markdown";
 import {
+    type CollectionMatch,
+    type CorpusPage,
+    composeBundleMarkdown,
+    composeCorpusPages,
     composeFullCorpusMarkdown,
     composeLabsMarkdown,
     composeRawMarkdown,
-    resolveCollectionEntry,
+    folderCardsIn,
+    resolveCollectionMatch,
+    sectionHubOf,
     suffixDocsLinks,
+    withFrontmatter,
     withIndexPointer,
 } from "~/utils/collections";
+import { lastModifiedFor } from "~/utils/last-modified";
+import { bundleBySlug } from "~/utils/llms-bundles";
+import { MAJOR_VERSIONS } from "~/utils/major-version";
+import { documentQualifier } from "~/utils/page-title";
 import { withRelated } from "~/utils/related";
 import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
@@ -66,35 +77,74 @@ app.use("*", async (c, next) => {
 });
 
 /**
- * The full documentation corpus as one markdown document, following the
- * llms-full.txt convention. The hand-maintained index at `/docs/llms.txt`
- * links pages individually; this endpoint serves every page in one response
- * for agents that prefer a single fetch over walking the index.
- *
- * Composed once per server instance: the content is fixed at build time, and
- * SDK versions come from the same file-backed cache the page render uses. A
- * failed compose is not memoised, so the next request retries.
+ * Every page composed for the corpus files, once per server instance: the
+ * content is fixed at build time, and SDK versions come from the same
+ * file-backed cache the page render uses. A failed compose is not memoised,
+ * so the next request retries.
  */
-let fullCorpus: Promise<string> | undefined;
+let corpusPages: Promise<CorpusPage[]> | undefined;
 
-app.get(`${BASE}/llms-full.txt`, async (c) => {
-    if (!fullCorpus) {
-        fullCorpus = fetchAllSdkVersions().then(composeFullCorpusMarkdown);
-        fullCorpus.catch(() => {
-            fullCorpus = undefined;
+function getCorpusPages(): Promise<CorpusPage[]> {
+    if (!corpusPages) {
+        corpusPages = fetchAllSdkVersions().then(composeCorpusPages);
+        corpusPages.catch(() => {
+            corpusPages = undefined;
         });
     }
 
-    const markdown = await fullCorpus;
+    return corpusPages;
+}
 
-    return c.body(markdown, 200, {
-        "Content-Type": MARKDOWN_CONTENT_TYPE,
-        "Cache-Control": MARKDOWN_CACHE_CONTROL,
-        "X-Markdown-Tokens": String(estimateTokens(markdown)),
-        // One giant concatenation of pages that are all indexed at their own
-        // URLs; keep it out of search results as a duplicate.
-        "X-Robots-Tag": "noindex",
+/** A corpus file's response. Each one repeats pages indexed at their own URLs. */
+function corpusResponse(markdown: string): Response {
+    return new Response(markdown, {
+        status: 200,
+        headers: {
+            "Content-Type": MARKDOWN_CONTENT_TYPE,
+            "Cache-Control": MARKDOWN_CACHE_CONTROL,
+            "X-Markdown-Tokens": String(estimateTokens(markdown)),
+            // Pages that are all indexed at their own URLs; keep the
+            // concatenation out of search results as a duplicate.
+            "X-Robots-Tag": "noindex",
+        },
     });
+}
+
+const corpusFiles = new Map<string, string>();
+
+/**
+ * The full documentation corpus as one markdown document, following the
+ * llms-full.txt convention. The index at `/docs/llms.txt` links pages
+ * individually and lists the bundles below; this endpoint serves every page in
+ * one response for agents that prefer a single fetch over walking the index.
+ */
+app.get(`${BASE}/llms-full.txt`, async () => {
+    const markdown = corpusFiles.get("") ?? composeFullCorpusMarkdown(await getCorpusPages());
+
+    corpusFiles.set("", markdown);
+
+    return corpusResponse(markdown);
+});
+
+/**
+ * The corpus split into bundles, one per section or SDK, at
+ * `/docs/llms-full/<slug>.txt`. The full corpus is more than any agent's
+ * context, so `llms.txt` lists these with their sizes. The slugs are in
+ * `~/utils/llms-bundles`; an unknown one is a 404.
+ */
+app.get(`${BASE}/llms-full/:file`, async (c) => {
+    const slug = c.req.param("file").replace(/\.txt$/, "");
+    const bundle = c.req.param("file").endsWith(".txt") ? bundleBySlug(slug) : undefined;
+
+    if (!bundle) {
+        return c.text("Not Found", 404);
+    }
+
+    const markdown = corpusFiles.get(slug) ?? composeBundleMarkdown(bundle, await getCorpusPages());
+
+    corpusFiles.set(slug, markdown);
+
+    return corpusResponse(markdown);
 });
 
 /**
@@ -129,6 +179,33 @@ app.get(`${BASE}/agents/instructions.md`, (c) =>
     }),
 );
 
+/** The major version the documentation describes, such as "4.x". */
+const DOCUMENTED_VERSION = `${MAJOR_VERSIONS[0]?.major}.x`;
+
+/** The `fetchAllSdkVersions` key of each SDK reference collection's package. */
+const SDK_VERSION_KEYS: Record<string, string> = {
+    "reference/dotnet": ".net",
+    "reference/golang": "golang",
+    "reference/java": "java",
+    "reference/javascript": "javascript",
+    "reference/php": "php",
+    "reference/python": "python",
+    "reference/rust": "rust",
+};
+
+/**
+ * The SDK release a page describes: the newest one its registry reports,
+ * unless the page belongs to an older major version's tree, such as "PHP SDK
+ * v1" while the newest release is 2.x, or the registry could not be reached.
+ */
+function releasedVersion(sdk: string, version: string | undefined): string | undefined {
+    if (!version || version === "unknown") return undefined;
+
+    const major = sdk.match(/ v(\d+)$/)?.[1];
+
+    return major && !version.startsWith(`${major}.`) ? undefined : version;
+}
+
 /**
  * The Agent Memory setup instructions, served the same way. The prompt on the
  * Agent Memory Get started page quotes this URL, so it is a stable address too.
@@ -145,19 +222,47 @@ app.get(`${BASE}/agent-memory/agents/instructions.md`, (c) =>
 
 /**
  * A page's markdown representation, as both the `.md` URLs and the agent
- * guides serve it: the page with its related lessons and posts, below a
- * pointer to the documentation index.
+ * guides serve it: frontmatter naming the page, then a pointer to the
+ * documentation index, then the page with its related lessons and posts.
  *
  * SDK versions come from the same file-backed cache the page render uses, so
  * `<Version>` markers report what the HTML reports.
  */
-async function composePageMarkdown(
-    entry: NonNullable<ReturnType<typeof resolveCollectionEntry>>,
-    docsPath: string,
-): Promise<string> {
+async function composePageMarkdown(match: CollectionMatch): Promise<string> {
+    const { entry, id, prefix, slug } = match;
     const sdkVersions = await fetchAllSdkVersions();
+    const path = `/${[prefix, slug].filter(Boolean).join("/")}`;
+    const docsPath = path === "/" ? "/docs" : `/docs${path}`;
+    const metadata = entry.metadata as { title?: string; description?: string };
+    const { sdk, section } = documentQualifier(id, prefix, slug);
+    const sdkVersion = sdk
+        ? releasedVersion(sdk, sdkVersions[SDK_VERSION_KEYS[id] ?? ""])
+        : undefined;
+    const page = withIndexPointer(
+        withRelated(
+            composeRawMarkdown(
+                entry,
+                sdkVersions,
+                sectionHubOf(path),
+                folderCardsIn(entry.content),
+            ),
+            docsPath,
+        ),
+    );
 
-    return withIndexPointer(withRelated(composeRawMarkdown(entry, sdkVersions), docsPath));
+    return withFrontmatter(
+        {
+            title: metadata.title ?? "",
+            description: metadata.description,
+            canonical_url: `https://surrealdb.com${docsPath}`,
+            sdk,
+            sdk_version: sdkVersion,
+            section,
+            surrealdb_version: DOCUMENTED_VERSION,
+            last_modified: lastModifiedFor(path),
+        },
+        page,
+    );
 }
 
 /**
@@ -170,13 +275,13 @@ async function composePageMarkdown(
  */
 app.get(`${BASE}/llms/guides/:slug`, async (c) => {
     const path = agentGuidePath(c.req.param("slug"));
-    const entry = path === undefined ? undefined : resolveCollectionEntry(path);
+    const match = path === undefined ? undefined : resolveCollectionMatch(path);
 
-    if (path === undefined || !entry) {
+    if (!match) {
         return c.text("Not Found", 404);
     }
 
-    const markdown = await composePageMarkdown(entry, `/docs${path}`);
+    const markdown = await composePageMarkdown(match);
 
     return c.body(markdown, 200, {
         "Content-Type": MARKDOWN_CONTENT_TYPE,
@@ -224,7 +329,16 @@ app.get("*", async (c, next) => {
     if (path === "/labs") {
         // Wrapped like every other page: an agent that reaches this listing
         // from a search result learns the index exists the same way.
-        const labs = withIndexPointer(composeLabsMarkdown());
+        const labs = withFrontmatter(
+            {
+                title: "SurrealDB Labs",
+                canonical_url: "https://surrealdb.com/docs/labs",
+                section: "Explore",
+                surrealdb_version: DOCUMENTED_VERSION,
+                last_modified: lastModifiedFor("/labs"),
+            },
+            withIndexPointer(composeLabsMarkdown()),
+        );
 
         return c.body(labs, 200, {
             "Content-Type": MARKDOWN_CONTENT_TYPE,
@@ -236,9 +350,9 @@ app.get("*", async (c, next) => {
 
     // The docs root cannot carry the suffix on its own path, so `/docs/index.md`
     // addresses it - the same convention the apex site uses for its homepage.
-    const entry = resolveCollectionEntry(path.replace(/^\/?index$/, ""));
+    const match = resolveCollectionMatch(path.replace(/^\/?index$/, ""));
 
-    if (!entry) {
+    if (!match) {
         // A negotiated request is for the page's own URL, which the redirect
         // layer has already had its chance at, and may be for an asset or a
         // non-content route - so let Vike answer it.
@@ -276,11 +390,7 @@ app.get("*", async (c, next) => {
         return c.text("Not Found", 404);
     }
 
-    const docsPath = `/docs/${path.replace(/^\/?index$/, "").replace(/^\/+|\/+$/g, "")}`.replace(
-        /\/$/,
-        "",
-    );
-    const markdown = await composePageMarkdown(entry, docsPath);
+    const markdown = await composePageMarkdown(match);
 
     return c.body(markdown, 200, {
         "Content-Type": MARKDOWN_CONTENT_TYPE,

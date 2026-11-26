@@ -1,11 +1,18 @@
-import { Anchor, Box, Flex, Stack, Text } from "@mantine/core";
-import { Icon, iconText } from "@surrealdb/ui";
+import { Anchor, Box, Collapse, Flex, Stack, Text, UnstyledButton } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import { Icon, iconChevronDown, iconText } from "@surrealdb/ui";
 import { useEffect, useState } from "react";
 import { TABS_CHANGE_EVENT } from "~/components/Tabs";
 import type { DocHeading } from "~/utils/markdown";
 import classes from "./style.module.scss";
 export const GITHUB_BASE = "https://github.com/surrealdb/docs.surrealdb.com/edit/main/src/content/";
 export const GITHUB_ISSUES = "https://github.com/surrealdb/docs.surrealdb.com/issues/new";
+
+/** The first entry of the list: the top of the page, above its first heading. */
+const OVERVIEW_LABEL = "Overview";
+
+/** How long the list takes to open and close, in milliseconds. */
+const COLLAPSE_MS = 200;
 
 function isShown(el: HTMLElement | null): el is HTMLElement {
     return el !== null && el.getClientRects().length > 0;
@@ -51,7 +58,7 @@ function useActiveHeading(shown: { heading: DocHeading; el: HTMLElement | null }
                 if (el && el.getBoundingClientRect().top <= 120) current = index;
             });
 
-            setActiveIndex(current ?? 0);
+            setActiveIndex(current);
         }
 
         window.addEventListener("scroll", onScroll, true);
@@ -79,7 +86,7 @@ export function PageAside({ headings }: PageAsideProps) {
             px="md"
             pb="md"
             w={275}
-            mah="stretch"
+            mah="calc(100vh - var(--docs-header-height) - 48px)"
             pos="sticky"
             top="calc(var(--docs-header-height) + 24px)"
             right="2rem"
@@ -115,6 +122,21 @@ export function PageAside({ headings }: PageAsideProps) {
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
+                <Box
+                    component="li"
+                    className={classes.tocItem}
+                    data-active={activeIndex === null || undefined}
+                >
+                    <Anchor
+                        href="#top"
+                        className={classes.tocLink}
+                        underline="never"
+                        data-active={activeIndex === null || undefined}
+                        style={{ paddingLeft: "20px" }}
+                    >
+                        {OVERVIEW_LABEL}
+                    </Anchor>
+                </Box>
                 {shown.map(({ heading }, index) => (
                     <Box
                         component="li"
@@ -137,5 +159,118 @@ export function PageAside({ headings }: PageAsideProps) {
                 ))}
             </Box>
         </Stack>
+    );
+}
+
+/**
+ * The same list as `PageAside`, for widths below `md`, where the aside beside
+ * the page has no room. It closes under a button above the page and closes
+ * again when a heading is chosen, so the heading is not left behind the list.
+ */
+export function PageAsideCollapse({ headings }: PageAsideProps) {
+    const shown = useShownHeadings(headings);
+    const [opened, { toggle, close }] = useDisclosure(false);
+    const minDepth = Math.min(...shown.map(({ heading }) => heading.depth));
+
+    if (shown.length === 0) return null;
+
+    return (
+        <Box
+            hiddenFrom="md"
+            mt="md"
+            className={classes.mobileToc}
+        >
+            <UnstyledButton
+                className={classes.mobileToggle}
+                onClick={toggle}
+                aria-expanded={opened}
+                aria-controls="mobile-toc-list"
+            >
+                <Flex
+                    align="center"
+                    gap={8}
+                >
+                    <Icon
+                        path={iconText}
+                        size="sm"
+                        color="bright"
+                    />
+                    <Text
+                        c="bright"
+                        fw={700}
+                        flex={1}
+                    >
+                        On this page
+                    </Text>
+                    <Icon
+                        path={iconChevronDown}
+                        size="sm"
+                        color="bright"
+                        className={classes.mobileChevron}
+                        data-open={opened || undefined}
+                    />
+                </Flex>
+            </UnstyledButton>
+            <Collapse
+                expanded={opened}
+                transitionDuration={COLLAPSE_MS}
+            >
+                <Box
+                    component="ul"
+                    id="mobile-toc-list"
+                    className={classes.mobileList}
+                >
+                    <Box
+                        component="li"
+                        className={classes.tocItem}
+                    >
+                        <Anchor
+                            href="#top"
+                            className={classes.tocLink}
+                            underline="never"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                close();
+                                setTimeout(() => {
+                                    document.getElementById("top")?.scrollIntoView();
+                                    history.replaceState(null, "", "#top");
+                                }, COLLAPSE_MS + 50);
+                            }}
+                            style={{ paddingLeft: "20px" }}
+                        >
+                            {OVERVIEW_LABEL}
+                        </Anchor>
+                    </Box>
+                    {shown.map(({ heading }, index) => (
+                        <Box
+                            component="li"
+                            key={`mobile-toc-item-${heading.id}-${index}`}
+                            className={classes.tocItem}
+                        >
+                            <Anchor
+                                href={`#${heading.id}`}
+                                className={classes.tocLink}
+                                underline="never"
+                                onClick={(event) => {
+                                    // The list closes first, because closing it moves the
+                                    // page, and the jump to the heading comes after.
+                                    event.preventDefault();
+                                    close();
+                                    setTimeout(() => {
+                                        document.getElementById(heading.id)?.scrollIntoView();
+                                        history.replaceState(null, "", `#${heading.id}`);
+                                    }, COLLAPSE_MS + 50);
+                                }}
+                                style={{
+                                    paddingLeft: `${(heading.depth - minDepth) * 12 + 20}px`,
+                                }}
+                            >
+                                {heading.text}
+                            </Anchor>
+                        </Box>
+                    ))}
+                </Box>
+            </Collapse>
+        </Box>
     );
 }

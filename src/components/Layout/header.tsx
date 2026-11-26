@@ -98,6 +98,14 @@ const NAV_PANEL_ID = "docs-nav-panel";
 /** Grace period for the pointer to cross from a label into the panel. */
 const NAV_CLOSE_DELAY = 120;
 
+/**
+ * Whether the section labels open a menu. With this off, hovering, focusing or
+ * pressing a label opens nothing, the chevron is hidden, and each label is a
+ * plain link to its hub page. The menu code stays, so turning this on brings
+ * the menus back.
+ */
+const NAV_DROPDOWNS_ENABLED = false;
+
 const SIGN_IN_URL =
     "https://studio.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
 
@@ -230,11 +238,13 @@ function NavDropdown({ group, activeHref, open, panelId, onOpen, onClose }: NavD
                 gap={4}
             >
                 {label}
-                <Icon
-                    path={iconChevronDown}
-                    size="xs"
-                    className={classes.navLinkChevron}
-                />
+                {NAV_DROPDOWNS_ENABLED && (
+                    <Icon
+                        path={iconChevronDown}
+                        size="xs"
+                        className={classes.navLinkChevron}
+                    />
+                )}
             </Flex>
         </Anchor>
     );
@@ -493,6 +503,8 @@ function useOpenMenu() {
 
     const open = useCallback(
         (label: string) => {
+            if (!NAV_DROPDOWNS_ENABLED) return;
+
             cancel();
             setOpenLabel(label);
         },

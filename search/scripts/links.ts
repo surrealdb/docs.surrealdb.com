@@ -6,6 +6,7 @@
 //
 // Usage: bun run search:links
 
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
@@ -29,6 +30,145 @@ const COMPONENT_LINKS: { tag: string; targets: () => string[] }[] = [
         targets: () => ["/docs/agents", ...AGENTS.map((a) => `/docs/agents/${a.id}`)],
     },
 ];
+
+/**
+ * The pages a `<SectionCards>` links to. The component draws cards from the
+ * sidebar's groups, which are built at render time, so the source names them
+ * only through its `paths`. Without `paths` the cards are the folders of the
+ * hub's section that are not hidden, which is what the sidebar lists, each
+ * linking to the first page of its folder, as the sidebar heading does. With
+ * `pages={true}` they are the pages of the hub's collection other than the hub.
+ */
+const SECTION_CARDS = /<SectionCards\b((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/g;
+
+/** The collection folders that are sections of a hub, and the pages of the hubs that list their collection. */
+const HUB_SECTIONS: Record<string, { folders: string[]; extra?: string[] }> = {
+    "index:learn": { folders: ["learn"] },
+    "index:integrate": { folders: ["integrate"] },
+    "index:operate": { folders: ["operate"] },
+    "index:reference": { folders: ["reference"] },
+    "agent-memory/learn:index": {
+        folders: ["agent-memory/learn"],
+        extra: ["/docs/agent-memory/cookbooks"],
+    },
+    "agent-memory/operate:index": { folders: ["agent-memory/operate"] },
+    "agent-memory/reference:index": { folders: ["agent-memory/reference"] },
+    "agent-memory/index:integrate": {
+        folders: ["agent-memory/integrations"],
+        extra: ["/docs/agent-memory/integrations"],
+    },
+};
+
+/** The pages a `<FolderCards path="...">` lists: those directly inside the folder. */
+const FOLDER_CARDS = /<FolderCards\b[^>]*?\bpath="([^"]+)"/g;
+
+function folderCardTargets(path: string): string[] {
+    const dir = join(CONTENT_DIR, path);
+
+    return existsSync(dir)
+        ? readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+              entry.isFile() && /\.mdx?$/.test(entry.name) && !/^index\.mdx?$/.test(entry.name)
+                  ? [`/docs${path}/${entry.name.replace(/\.mdx?$/, "")}`]
+                  : [],
+          )
+        : [];
+}
+
+function frontmatterPosition(file: string): number {
+    return (matter(readFileSync(file, "utf-8")).data.position as number | undefined) ?? 0;
+}
+
+/** The URL of the first page under a folder, by `position`, as a sidebar heading would link to it. */
+function firstPageUrl(dir: string, url: string): string | undefined {
+    const entries = readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        if (entry.isFile() && /\.mdx?$/.test(entry.name)) {
+            const slug = entry.name.replace(/\.mdx?$/, "");
+
+            return [
+                {
+                    position: frontmatterPosition(join(dir, entry.name)),
+                    url: slug === "index" ? url : `${url}/${slug}`,
+                },
+            ];
+        }
+
+        const category = join(dir, entry.name, "__category.json");
+
+        if (!entry.isDirectory() || !existsSync(category)) return [];
+
+        const meta = JSON.parse(readFileSync(category, "utf-8")) as {
+            hidden?: boolean;
+            position?: number;
+        };
+
+        return meta.hidden
+            ? []
+            : [
+                  {
+                      position: meta.position ?? 0,
+                      url: firstPageUrl(join(dir, entry.name), `${url}/${entry.name}`),
+                  },
+              ];
+    });
+
+    return entries.sort((a, b) => a.position - b.position).find((entry) => entry.url)?.url;
+}
+
+/** Every page under a folder, as URLs. */
+function pagesUnder(dir: string, url: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        if (entry.isDirectory()) return pagesUnder(join(dir, entry.name), `${url}/${entry.name}`);
+        if (!/\.mdx?$/.test(entry.name)) return [];
+
+        const slug = entry.name.replace(/\.mdx?$/, "");
+
+        return [slug === "index" ? url : `${url}/${slug}`];
+    });
+}
+
+function sectionCardTargets(attrs: string, pageId: string): string[] {
+    const paths = /\bpaths=\{(\[[^\]]*\])\}/.exec(attrs)?.[1];
+
+    if (paths) return (JSON.parse(paths) as string[]).map((path) => `/docs${path}`);
+
+    const hub = HUB_SECTIONS[pageId];
+
+    if (!hub) return [];
+
+    if (/\bpages=\{true\}/.test(attrs)) {
+        const [folder] = hub.folders;
+        const hubUrl = `/docs/${pageId.split(":")[0]}`;
+
+        return folder
+            ? pagesUnder(join(CONTENT_DIR, folder), `/docs/${folder}`).filter(
+                  (url) => url !== hubUrl,
+              )
+            : [];
+    }
+
+    const targets = hub.folders.flatMap((folder) => {
+        const dir = join(CONTENT_DIR, folder);
+
+        return existsSync(dir)
+            ? readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+                  const category = join(dir, entry.name, "__category.json");
+
+                  if (!entry.isDirectory() || !existsSync(category)) return [];
+
+                  const { hidden } = JSON.parse(readFileSync(category, "utf-8")) as {
+                      hidden?: boolean;
+                  };
+                  const url = hidden
+                      ? undefined
+                      : firstPageUrl(join(dir, entry.name), `/docs/${folder}/${entry.name}`);
+
+                  return url ? [url] : [];
+              })
+            : [];
+    });
+
+    return [...targets, ...(hub.extra ?? [])];
+}
 
 /** A reader sees roughly this much of a page without scrolling. */
 const FIRST_SCREEN_CHARS = 2000;
@@ -110,7 +250,7 @@ function classify(body: string, index: number): LinkKind {
     return "prose";
 }
 
-function extract(body: string): Extracted[] {
+function extract(body: string, pageId: string): Extracted[] {
     const found: Extracted[] = [];
     const length = Math.max(body.length, 1);
 
@@ -118,6 +258,36 @@ function extract(body: string): Extracted[] {
         const at = body.indexOf(tag);
         if (at < 0) continue;
         for (const target of targets()) {
+            found.push({
+                toUrl: target,
+                text: "",
+                kind: "card",
+                offsetRatio: Number((at / length).toFixed(4)),
+                offsetChars: at,
+                firstScreen: at < FIRST_SCREEN_CHARS,
+            });
+        }
+    }
+
+    for (const match of body.matchAll(SECTION_CARDS)) {
+        const at = match.index ?? 0;
+
+        for (const target of sectionCardTargets(match[1] ?? "", pageId)) {
+            found.push({
+                toUrl: target,
+                text: "",
+                kind: "card",
+                offsetRatio: Number((at / length).toFixed(4)),
+                offsetChars: at,
+                firstScreen: at < FIRST_SCREEN_CHARS,
+            });
+        }
+    }
+
+    for (const match of body.matchAll(FOLDER_CARDS)) {
+        const at = match.index ?? 0;
+
+        for (const target of folderCardTargets(match[1] ?? "")) {
             found.push({
                 toUrl: target,
                 text: "",
@@ -178,7 +348,7 @@ async function main() {
     const unresolved = new Map<string, number>();
 
     for (const { pageId, body } of bodies) {
-        for (const link of extract(body)) {
+        for (const link of extract(body, pageId)) {
             const toId = idByUrl.get(link.toUrl);
             if (!toId) {
                 unresolved.set(link.toUrl, (unresolved.get(link.toUrl) ?? 0) + 1);

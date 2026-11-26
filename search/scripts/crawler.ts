@@ -180,6 +180,10 @@ const SKIP_MARKS = new Set([
     "HeaderMark",
     "HardBreak",
     "Comment",
+    "ListMark",
+    "QuoteMark",
+    "TaskMarker",
+    "TableDelimiter",
 ]);
 
 function headingLevel(name: string): number {
@@ -194,52 +198,40 @@ function headingLevel(name: string): number {
     return 0;
 }
 
-function readTagName(node: MarkdownNode, source: MarkdownSource): string | null {
-    const text = source.slice(node.from, node.to).trim();
-    const match = /^<\/?([A-Za-z][\w-]*)/.exec(text);
-    return match?.[1] ?? null;
+function isTagNode(node: MarkdownNode): boolean {
+    return node.name === "HTMLTag" || node.name === "SelfClosingTag";
 }
 
-function isJsxNode(node: MarkdownNode, source: MarkdownSource): boolean {
-    if (node.name !== "HTMLTag" && node.name !== "SelfClosingTag") return false;
-    const tag = readTagName(node, source);
-    return tag ? /^[A-Z]/.test(tag) : false;
+function shouldSkipNode(node: MarkdownNode): boolean {
+    return node.name === "FencedCode" || node.name === "HTMLBlock" || isTagNode(node);
 }
 
-function shouldSkipNode(node: MarkdownNode, source: MarkdownSource): boolean {
-    if (node.name === "FencedCode" || node.name === "HTMLBlock") return true;
-    return isJsxNode(node, source);
-}
-
+/**
+ * The readable text of a node. The parser gives plain text no node of its own:
+ * it is the source between a node's children, such as the words around an
+ * emphasis or the code between the backticks of inline code. So the walk takes
+ * those gaps, and leaves out marks, code fences, HTML blocks and inline tags,
+ * keeping the text between a pair of tags.
+ */
 function collectPlainText(node: MarkdownNode, source: MarkdownSource): string {
     const parts: string[] = [];
 
     function walk(current: MarkdownNode): void {
-        if (shouldSkipNode(current, source)) return;
+        if (shouldSkipNode(current) || SKIP_MARKS.has(current.name)) return;
 
-        if (current.name === "Text" || current.name === "Escape") {
-            parts.push(source.slice(current.from, current.to));
-            return;
-        }
-
-        if (SKIP_MARKS.has(current.name)) return;
-
-        if (current.name === "InlineCode") {
-            let child = current.firstChild;
-            while (child) {
-                if (child.name === "CodeText") {
-                    parts.push(source.slice(child.from, child.to));
-                }
-                child = child.nextSibling;
-            }
-            return;
-        }
-
+        let position = current.from;
         let child = current.firstChild;
+
         while (child) {
-            walk(child);
+            if (child.from > position) parts.push(source.slice(position, child.from));
+            // A tag such as <br/> separates the words either side of it
+            if (isTagNode(child)) parts.push(" ");
+            else walk(child);
+            position = child.to;
             child = child.nextSibling;
         }
+
+        if (current.to > position) parts.push(source.slice(position, current.to));
     }
 
     walk(node);
@@ -247,8 +239,13 @@ function collectPlainText(node: MarkdownNode, source: MarkdownSource): string {
 }
 
 function blockNodeToPlainText(node: MarkdownNode, source: MarkdownSource): string {
-    if (shouldSkipNode(node, source)) return "";
+    if (shouldSkipNode(node)) return "";
     return collectPlainText(node, source);
+}
+
+/** The text the index holds for a markdown body, as `crawl` extracts it. */
+export function markdownToPlainText(body: string): string {
+    return documentToPlainText(body, markdownSourceFromString(body));
 }
 
 function documentToPlainText(body: string, source: MarkdownSource): string {

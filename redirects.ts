@@ -366,6 +366,250 @@ function phpVersionedRedirects(): Redirect[] {
 }
 
 /**
+ * The .NET reference follows the layout of the other SDKs: one page for each
+ * concept at `/reference/dotnet/concepts/<concept>`, with the method pages
+ * folded into the concept they belong to. The pages that held a method on its
+ * own, the `core` folder that became `concepts`, and the data types page go to
+ * their new page in one hop, with the method's anchor where the old page was
+ * one method. The old `/languages/dotnet/...` addresses go there too. These
+ * come before the generic SDK reference moves, which no longer name these
+ * pages.
+ */
+function dotnetReferenceRedirects(): Redirect[] {
+    const concepts = "reference/dotnet/concepts";
+    const moves: [string, string][] = [
+        ["methods", "reference/dotnet"],
+        ["methods/authenticate", `${concepts}/authentication#authenticate`],
+        ["methods/signin", `${concepts}/authentication#signin`],
+        ["methods/signup", `${concepts}/authentication#signup`],
+        ["methods/invalidate", `${concepts}/authentication#invalidate`],
+        ["methods/info", `${concepts}/authentication#info`],
+        ["methods/connect", `${concepts}/connecting-to-surrealdb#connect`],
+        ["methods/use", `${concepts}/connecting-to-surrealdb#use`],
+        ["methods/health", `${concepts}/connecting-to-surrealdb#health`],
+        ["methods/version", `${concepts}/connecting-to-surrealdb#version`],
+        ["methods/query", `${concepts}/executing-queries#query`],
+        ["methods/raw-query", `${concepts}/executing-queries#raw_query`],
+        ["methods/run", `${concepts}/executing-queries#run`],
+        ["methods/set", `${concepts}/executing-queries#set`],
+        ["methods/unset", `${concepts}/executing-queries#unset`],
+        ["methods/create", `${concepts}/data-manipulation#create`],
+        ["methods/delete", `${concepts}/data-manipulation#delete`],
+        ["methods/insert", `${concepts}/data-manipulation#insert`],
+        ["methods/insert-relation", `${concepts}/data-manipulation#insert_relation`],
+        ["methods/merge", `${concepts}/data-manipulation#merge`],
+        ["methods/patch", `${concepts}/data-manipulation#patch`],
+        ["methods/relate", `${concepts}/data-manipulation#relate`],
+        ["methods/select", `${concepts}/data-manipulation#select`],
+        ["methods/update", `${concepts}/data-manipulation#update`],
+        ["methods/upsert", `${concepts}/data-manipulation#upsert`],
+        ["methods/kill", `${concepts}/live-queries#kill`],
+        ["methods/listen_live", `${concepts}/live-queries#listen-live`],
+        ["methods/live-query", `${concepts}/live-queries#live-query`],
+        ["methods/live-raw-query", `${concepts}/live-queries#live-raw-query`],
+        ["methods/live-table", `${concepts}/live-queries#live-table`],
+        ["methods/import", `${concepts}/import-and-export#import`],
+        ["methods/export", `${concepts}/import-and-export#export`],
+        ["core", `${concepts}/connecting-to-surrealdb`],
+        ["core/create-a-new-connection", `${concepts}/connecting-to-surrealdb`],
+        ["core/connection-strings", `${concepts}/connecting-to-surrealdb#connection-strings`],
+        ["core/writing-surrealql", `${concepts}/executing-queries`],
+        ["core/parameters", `${concepts}/executing-queries#set`],
+        ["core/streaming", `${concepts}/live-queries`],
+        ["core/authentication", `${concepts}/authentication`],
+        ["core/data-manipulation", `${concepts}/data-manipulation`],
+        ["core/multiple-sessions", `${concepts}/multiple-sessions`],
+        ["core/transactions", `${concepts}/transactions`],
+        ["core/dependency-injection", `${concepts}/dependency-injection`],
+        ["core/logging", `${concepts}/logging`],
+        ["data-types", `${concepts}/value-types`],
+    ];
+
+    return moves.flatMap(([page, destination]) =>
+        ["reference/dotnet", "languages/dotnet"]
+            .flatMap((base) => [`/docs/${base}/${page}`, `/${base}/${page}`])
+            .map(
+                (source): Redirect => ({
+                    source,
+                    destination: `/docs/${destination}`,
+                    statusCode: 301,
+                }),
+            ),
+    );
+}
+
+/**
+ * The SDK references that follow the shared concept layout: a method that had a
+ * page of its own is now a section of the concept page it belongs to, and a
+ * concept page that was named differently has the slug that the other SDKs
+ * use. Each old address goes to its new page in one hop, with the method's
+ * anchor where the old page was one method, from the current address and from
+ * the `/languages/<sdk>` address that the SDK documentation used before it
+ * moved to the reference. These come before the generic SDK reference moves,
+ * which no longer name these pages.
+ */
+function sdkConceptRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["reference/rust/concepts/authenticating-users", "reference/rust/concepts/authentication"],
+        ["reference/rust/concepts/working-with-types", "reference/rust/concepts/value-types"],
+        ["reference/rust/concepts/multi-tenancy", "reference/rust/concepts/multiple-sessions"],
+        [
+            "reference/mojo/methods/begin-transaction",
+            "reference/mojo/concepts/transactions#begin-transaction",
+        ],
+        [
+            "reference/mojo/methods/transaction-multi",
+            "reference/mojo/concepts/transactions#transaction-multi",
+        ],
+        [
+            "reference/php/v1/methods/insert-relation",
+            "reference/php/v1/concepts/data-manipulation#insertrelation",
+        ],
+        [
+            "reference/mojo/methods/insert-relation",
+            "reference/mojo/concepts/data-manipulation#insert-relation",
+        ],
+        [
+            "reference/php/v1/methods/authenticate",
+            "reference/php/v1/concepts/authentication#authenticate",
+        ],
+        [
+            "reference/php/v1/concepts/connecting",
+            "reference/php/v1/concepts/connecting-to-surrealdb",
+        ],
+        ["reference/php/v1/concepts/data-types", "reference/php/v1/concepts/value-types"],
+        ["reference/php/v2/concepts/data-types", "reference/php/v2/concepts/value-types"],
+        [
+            "reference/swift/methods/authenticate",
+            "reference/swift/concepts/authentication#authenticate",
+        ],
+        [
+            "reference/mojo/methods/authenticate",
+            "reference/mojo/concepts/authentication#authenticate",
+        ],
+        [
+            "reference/php/v1/methods/invalidate",
+            "reference/php/v1/concepts/authentication#invalidate",
+        ],
+        ["reference/rust/concepts/transaction", "reference/rust/concepts/transactions"],
+        ["reference/swift/concepts/connecting", "reference/swift/concepts/connecting-to-surrealdb"],
+        [
+            "reference/php/v1/methods/query-raw",
+            "reference/php/v1/concepts/executing-queries#queryraw",
+        ],
+        ["reference/php/v2/concepts/sessions", "reference/php/v2/concepts/multiple-sessions"],
+        [
+            "reference/swift/methods/invalidate",
+            "reference/swift/concepts/authentication#invalidate",
+        ],
+        ["reference/mojo/methods/invalidate", "reference/mojo/concepts/authentication#invalidate"],
+        [
+            "reference/swift/methods/query-raw",
+            "reference/swift/concepts/executing-queries#query-raw",
+        ],
+        [
+            "reference/php/v1/methods/connect",
+            "reference/php/v1/concepts/connecting-to-surrealdb#connect",
+        ],
+        [
+            "reference/php/v1/methods/version",
+            "reference/php/v1/concepts/connecting-to-surrealdb#version",
+        ],
+        [
+            "reference/php/v1/methods/health",
+            "reference/php/v1/concepts/connecting-to-surrealdb#health",
+        ],
+        [
+            "reference/php/v1/methods/status",
+            "reference/php/v1/concepts/connecting-to-surrealdb#status",
+        ],
+        ["reference/php/v1/methods/signup", "reference/php/v1/concepts/authentication#signup"],
+        ["reference/php/v1/methods/signin", "reference/php/v1/concepts/authentication#signin"],
+        ["reference/php/v1/methods/select", "reference/php/v1/concepts/data-manipulation#select"],
+        ["reference/php/v1/methods/create", "reference/php/v1/concepts/data-manipulation#create"],
+        ["reference/php/v1/methods/insert", "reference/php/v1/concepts/data-manipulation#insert"],
+        ["reference/php/v1/methods/update", "reference/php/v1/concepts/data-manipulation#update"],
+        ["reference/php/v1/methods/upsert", "reference/php/v1/concepts/data-manipulation#upsert"],
+        ["reference/php/v1/methods/delete", "reference/php/v1/concepts/data-manipulation#delete"],
+        ["reference/php/v1/methods/import", "reference/php/v1/concepts/import-and-export#import"],
+        ["reference/php/v1/methods/export", "reference/php/v1/concepts/import-and-export#export"],
+        [
+            "reference/swift/methods/connect",
+            "reference/swift/concepts/connecting-to-surrealdb#connect",
+        ],
+        [
+            "reference/mojo/methods/connect",
+            "reference/mojo/concepts/connecting-to-surrealdb#connect",
+        ],
+        [
+            "reference/mojo/methods/version",
+            "reference/mojo/concepts/connecting-to-surrealdb#version",
+        ],
+        [
+            "reference/php/v1/methods/close",
+            "reference/php/v1/concepts/connecting-to-surrealdb#close",
+        ],
+        ["reference/php/v1/methods/query", "reference/php/v1/concepts/executing-queries#query"],
+        ["reference/php/v1/methods/unset", "reference/php/v1/concepts/executing-queries#unset"],
+        ["reference/php/v1/methods/merge", "reference/php/v1/concepts/data-manipulation#merge"],
+        ["reference/php/v1/methods/patch", "reference/php/v1/concepts/data-manipulation#patch"],
+        ["reference/swift/methods/signin", "reference/swift/concepts/authentication#signin"],
+        ["reference/swift/methods/signup", "reference/swift/concepts/authentication#signup"],
+        ["reference/swift/methods/select", "reference/swift/concepts/data-manipulation#select"],
+        ["reference/swift/methods/create", "reference/swift/concepts/data-manipulation#create"],
+        ["reference/swift/methods/update", "reference/swift/concepts/data-manipulation#update"],
+        ["reference/swift/methods/upsert", "reference/swift/concepts/data-manipulation#upsert"],
+        ["reference/swift/methods/delete", "reference/swift/concepts/data-manipulation#delete"],
+        ["reference/mojo/methods/health", "reference/mojo/concepts/connecting-to-surrealdb#health"],
+        ["reference/mojo/methods/signin", "reference/mojo/concepts/authentication#signin"],
+        ["reference/mojo/methods/signup", "reference/mojo/concepts/authentication#signup"],
+        ["reference/mojo/methods/select", "reference/mojo/concepts/data-manipulation#select"],
+        ["reference/mojo/methods/create", "reference/mojo/concepts/data-manipulation#create"],
+        ["reference/mojo/methods/insert", "reference/mojo/concepts/data-manipulation#insert"],
+        ["reference/mojo/methods/update", "reference/mojo/concepts/data-manipulation#update"],
+        ["reference/mojo/methods/upsert", "reference/mojo/concepts/data-manipulation#upsert"],
+        ["reference/mojo/methods/delete", "reference/mojo/concepts/data-manipulation#delete"],
+        ["reference/php/v1/methods/info", "reference/php/v1/concepts/authentication#info"],
+        ["reference/swift/methods/query", "reference/swift/concepts/executing-queries#query"],
+        ["reference/mojo/methods/close", "reference/mojo/concepts/connecting-to-surrealdb#close"],
+        ["reference/mojo/methods/query", "reference/mojo/concepts/executing-queries#query"],
+        ["reference/mojo/methods/unset", "reference/mojo/concepts/executing-queries#unset"],
+        ["reference/mojo/methods/merge", "reference/mojo/concepts/data-manipulation#merge"],
+        ["reference/mojo/methods/patch", "reference/mojo/concepts/data-manipulation#patch"],
+        ["reference/php/v1/methods/use", "reference/php/v1/concepts/connecting-to-surrealdb#use"],
+        ["reference/php/v1/methods/run", "reference/php/v1/concepts/executing-queries#run"],
+        ["reference/php/v1/methods/let", "reference/php/v1/concepts/executing-queries#let"],
+        ["reference/rust/concepts/live", "reference/rust/concepts/live-queries"],
+        ["reference/swift/methods/live", "reference/swift/concepts/live-queries#live"],
+        ["reference/swift/methods/kill", "reference/swift/concepts/live-queries#kill"],
+        ["reference/mojo/methods/call", "reference/mojo/concepts/executing-queries#call"],
+        ["reference/mojo/methods/live", "reference/mojo/concepts/live-queries#live-query"],
+        ["reference/mojo/methods/kill", "reference/mojo/concepts/live-queries#kill"],
+        ["reference/swift/methods/use", "reference/swift/concepts/connecting-to-surrealdb#use"],
+        ["reference/mojo/methods/use", "reference/mojo/concepts/connecting-to-surrealdb#use"],
+        ["reference/mojo/methods/set", "reference/mojo/concepts/executing-queries#set"],
+        ["reference/mojo/methods/api", "reference/mojo/concepts/executing-queries#api"],
+        ["reference/swift/data-types", "reference/swift/concepts/value-types"],
+        ["reference/php/v1/methods", "reference/php/v1"],
+        ["reference/rust/concepts", "reference/rust/concepts/connecting-to-surrealdb"],
+        ["reference/swift/methods", "reference/swift"],
+        ["reference/mojo/methods", "reference/mojo"],
+    ];
+
+    return moves.flatMap(([page, destination]) =>
+        [page, page.replace(/^reference\//, "languages/")]
+            .flatMap((from) => [`/docs/${from}`, `/${from}`])
+            .map(
+                (source): Redirect => ({
+                    source,
+                    destination: `/docs/${destination}`,
+                    statusCode: 301,
+                }),
+            ),
+    );
+}
+
+/**
  * SDK reference split: the per-language SDK documentation moved out of the
  * `Start > Languages` section (`/languages/<sdk>/*`) into dedicated reference
  * docs (`/reference/<sdk>/*`). The single getting-started page for each SDK
@@ -392,9 +636,6 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/golang/embedding", "reference/golang/embedding", "exact"],
         ["languages/golang/api", "reference/golang/api", "prefix"],
         ["languages/golang/installation", "reference/golang/installation", "exact"],
-        ["languages/dotnet/methods", "reference/dotnet/methods", "prefix"],
-        ["languages/dotnet/core", "reference/dotnet/core", "prefix"],
-        ["languages/dotnet/data-types", "reference/dotnet/data-types", "exact"],
         ["languages/dotnet/embedding", "reference/dotnet/embedding", "exact"],
         ["languages/dotnet/installation", "reference/dotnet/installation", "exact"],
         ["languages/java/concepts", "reference/java/concepts", "prefix"],
@@ -404,7 +645,6 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/kotlin/api", "reference/kotlin/api", "prefix"],
         ["languages/kotlin/installation", "reference/kotlin/installation", "exact"],
         ["languages/php/v1", "reference/php/v1", "exact"],
-        ["languages/php/v1/methods", "reference/php/v1/methods", "prefix"],
         ["languages/php/v1/concepts", "reference/php/v1/concepts", "prefix"],
         ["languages/php/v1/installation", "reference/php/v1/installation", "exact"],
         ["languages/php/v2", "reference/php/v2", "exact"],
@@ -413,14 +653,11 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/php/v2/api", "reference/php/v2/api", "prefix"],
         ["languages/php/v2/installation", "reference/php/v2/installation", "exact"],
         ["languages/php/frameworks", "reference/php/frameworks", "prefix"],
-        ["languages/mojo/methods", "reference/mojo/methods", "prefix"],
         ["languages/mojo/concepts", "reference/mojo/concepts", "prefix"],
         ["languages/mojo/installation", "reference/mojo/installation", "exact"],
         ["languages/python/concepts", "reference/python/concepts", "prefix"],
         ["languages/python/api", "reference/python/api", "prefix"],
         ["languages/python/installation", "reference/python/installation", "exact"],
-        ["languages/swift/methods", "reference/swift/methods", "prefix"],
-        ["languages/swift/data-types", "reference/swift/data-types", "exact"],
         ["languages/swift/concepts", "reference/swift/concepts", "prefix"],
         ["languages/swift/installation", "reference/swift/installation", "exact"],
     ];
@@ -705,7 +942,11 @@ function cloudAndDeploymentRedirects(): Redirect[] {
 
         // manage/cloud split into manage/instances and manage/organisations.
         ["manage/cloud/architecture", "operate/instances/architecture", "exact"],
-        ["manage/cloud/aws-marketplace", "operate/organisations/aws-marketplace", "exact"],
+        [
+            "manage/cloud/aws-marketplace",
+            "operate/organisations/cloud-marketplaces#aws-marketplace",
+            "exact",
+        ],
         ["manage/cloud/backups-and-recovery", "operate/instances/backups", "exact"],
         ["manage/cloud/billing-and-support", "operate/organisations/billing", "exact"],
         ["manage/cloud/high-availability", "operate/instances/high-availability", "exact"],
@@ -893,6 +1134,14 @@ function agentMemoryRedirects(): Redirect[] {
         ).flatMap(([from, to]): [string, string][] =>
             ["/agent-memory", "/spectron"].map((root): [string, string] => [`${root}/${from}`, to]),
         ),
+        // The architecture glossary is part of the glossary in Reference. Listed
+        // before the folder rules below so each older address needs one hop.
+        ...["/agent-memory", "/spectron"].flatMap((root): [string, string][] =>
+            ["architecture", "learn/architecture"].map((folder): [string, string] => [
+                `${root}/${folder}/glossary`,
+                "/docs/agent-memory/reference/glossary",
+            ]),
+        ),
         // Concepts moved into Learn, Enterprise into Deploy, and Memory & knowledge
         // was renamed Learn. Listed before the `/spectron` prefix rules so the
         // old paths need one hop.
@@ -951,6 +1200,42 @@ function overviewConsolidationRedirects(): Redirect[] {
         { source, destination, statusCode: 301 },
         { source: `/docs${source}`, destination, statusCode: 301 },
     ]);
+}
+
+/**
+ * The time series guide that held the concepts, the IoT modelling and the
+ * aggregation pages in one document no longer exists, so its address goes to
+ * the entry page of the section that holds each part.
+ */
+function timeSeriesGuideRedirects(): Redirect[] {
+    const source = "/learn/data-models/time-series/using-as-time-series-database";
+    const destination = "/docs/learn/data-models/time-series/overview";
+
+    return [
+        { source, destination, statusCode: 301 },
+        { source: `/docs${source}`, destination, statusCode: 301 },
+    ];
+}
+
+/**
+ * The AWS and Azure Marketplace guides are sections of one page about cloud
+ * marketplaces, so each old address goes to its section.
+ */
+function cloudMarketplaceRedirects(): Redirect[] {
+    const destination = "/docs/operate/organisations/cloud-marketplaces";
+
+    return ["aws", "azure"].flatMap((provider) => {
+        const source = `/operate/organisations/${provider}-marketplace`;
+
+        return [
+            { source, destination: `${destination}#${provider}-marketplace`, statusCode: 301 },
+            {
+                source: `/docs${source}`,
+                destination: `${destination}#${provider}-marketplace`,
+                statusCode: 301,
+            },
+        ] as Redirect[];
+    });
 }
 
 /**
@@ -1086,12 +1371,12 @@ function legacyIntegrationApiRedirects(): Redirect[] {
     return ["integration", "integrations"].flatMap((prefix) => [
         {
             source: `/${prefix}/apis`,
-            destination: "/docs/reference/rest-api",
+            destination: "/docs/reference/protocols",
             statusCode: 301 as const,
         },
         {
             source: `/${prefix}/apis/:path*`,
-            destination: "/docs/reference/rest-api",
+            destination: "/docs/reference/protocols",
             statusCode: 301 as const,
         },
     ]);
@@ -1117,6 +1402,23 @@ function mobileFrameworkRedirects(): Redirect[] {
             destination: "/docs/reference/javascript/frameworks",
             statusCode: 301,
         });
+}
+
+/**
+ * The Actix, Axum and Rocket guides are one page, with the code for each
+ * framework in tabs. Each old address goes to its framework's heading, which
+ * opens that framework's tab in every tab group on the page. Listed before the
+ * `languages/rust/frameworks` prefix rule, so the oldest addresses also answer
+ * in one hop.
+ */
+function rustWebServerRedirects(): Redirect[] {
+    return ["actix", "axum", "rocket"].flatMap((framework): Redirect[] =>
+        ["/reference/rust/frameworks", "/languages/rust/frameworks"].map((folder) => ({
+            source: `${folder}/${framework}`,
+            destination: `/docs/reference/rust/frameworks/web-servers#${framework}`,
+            statusCode: 301,
+        })),
+    );
 }
 
 /**
@@ -1163,9 +1465,188 @@ function sharedSectionRedirects(): Redirect[] {
     ];
 }
 
+/** The tutorials that have a page at `/learn/tutorials/walkthroughs/<slug>`. */
+const TUTORIAL_PAGES = [
+    "build-a-real-time-presence-app",
+    "build-an-ai-agent",
+    "connect-via-ngrok",
+    "define-a-schema",
+    "gen-ai-chatbot",
+    "github-actions",
+    "how-to-build-a-knowledge-graph-for-ai",
+    "http-via-postman",
+    "identity-provider-integration",
+    "minimal-langchain",
+    "navigate-a-drone-without-gps",
+    "semantic-search-in-rust",
+];
+
+/**
+ * The Auth0 and AWS Cognito guides are sections of one page about identity
+ * providers, so each old slug goes to its section on that page.
+ */
+const IDENTITY_PROVIDER_GUIDES: [string, string][] = [
+    ["auth0-integration", "auth0"],
+    ["aws-cognito-integration", "aws-cognito"],
+];
+
+/**
+ * Every tutorial page lives at `/learn/tutorials/walkthroughs/<slug>`. Older
+ * addresses name it in two shapes: a `tutorials` folder inside the tutorials
+ * section, and the slug directly under `/tutorials`, `/explore/tutorials`,
+ * `/build/tutorials` or `/learn/tutorials`. Each goes to the page in one hop,
+ * so these rules come before the prefix rules that would send them to
+ * `/learn/tutorials/<slug>`, where no page exists. The Auth0 and AWS Cognito
+ * guides are now sections of one page, so their old slugs go to those sections.
+ */
+function tutorialPathRedirects(): Redirect[] {
+    const walkthroughs = "/docs/learn/tutorials/walkthroughs";
+    const parents = ["tutorials", "explore/tutorials", "build/tutorials", "learn/tutorials"];
+    const forms = (path: string) => [`/${path}`, `/docs/${path}`];
+
+    const identityProviders = IDENTITY_PROVIDER_GUIDES.flatMap(([page, section]): Redirect[] =>
+        [
+            ...forms(`learn/tutorials/walkthroughs/${page}`),
+            ...parents.flatMap((parent) => [
+                ...forms(`${parent}/${page}`),
+                ...forms(`${parent}/tutorials/${page}`),
+            ]),
+        ].map((source) => ({
+            source,
+            destination: `${walkthroughs}/identity-provider-integration#${section}`,
+            statusCode: 301,
+        })),
+    );
+
+    return [
+        ...identityProviders,
+        ...parents.flatMap((parent) => tutorialParentRedirects(parent, walkthroughs, forms)),
+    ];
+}
+
+function tutorialParentRedirects(
+    parent: string,
+    walkthroughs: string,
+    forms: (path: string) => string[],
+): Redirect[] {
+    return [
+        ...forms(`${parent}/tutorials`).flatMap((source): Redirect[] => [
+            { source, destination: `${walkthroughs}/overview`, statusCode: 301 },
+            { source: `${source}/:path*`, destination: `${walkthroughs}/:path*`, statusCode: 301 },
+        ]),
+        ...TUTORIAL_PAGES.flatMap((page) =>
+            forms(`${parent}/${page}`).map(
+                (source): Redirect => ({
+                    source,
+                    destination: `${walkthroughs}/${page}`,
+                    statusCode: 301,
+                }),
+            ),
+        ),
+    ];
+}
+
+/**
+ * The migrating section has one overview page, and the two sources that once
+ * had pages of their own are its sections. Their old addresses go to those
+ * sections in one hop, under the current and the former `build` prefix. Only
+ * these exact addresses move: the pages under them keep their paths.
+ */
+function migratingOverviewRedirects(): Redirect[] {
+    const hub = "/docs/integrate/migrating";
+    const moves: [string, string][] = [
+        ["from-other-databases/overview", "from-other-databases"],
+        ["from-other-databases", "from-other-databases"],
+        ["from-files-and-streams", "from-files-and-streams"],
+    ];
+
+    return ["integrate/migrating", "build/migrating"].flatMap((parent) =>
+        moves.flatMap(([page, section]) =>
+            [`/${parent}/${page}`, `/docs/${parent}/${page}`].map(
+                (source): Redirect => ({
+                    source,
+                    destination: `${hub}#${section}`,
+                    statusCode: 301,
+                }),
+            ),
+        ),
+    );
+}
+
+/**
+ * The upgrade guides open on `/operate/upgrading`, which is the page that was
+ * called `overview`. Its former address, and the same address under the old
+ * `build/migrating/from-old-surrealdb-versions` folder, goes there in one hop.
+ * Listed before the folder rule that would send the second one to
+ * `/operate/upgrading/overview`.
+ */
+function upgradingLandingRedirects(): Redirect[] {
+    return ["operate/upgrading", "build/migrating/from-old-surrealdb-versions"].flatMap((parent) =>
+        [`/${parent}/overview`, `/docs/${parent}/overview`].map(
+            (source): Redirect => ({
+                source,
+                destination: "/docs/operate/upgrading",
+                statusCode: 301,
+            }),
+        ),
+    );
+}
+
+/**
+ * The protocol and API reference is at `/reference/protocols`. Its former
+ * `/reference/rest-api` address, and every page under it, goes there in one hop.
+ */
+function protocolsRedirects(): Redirect[] {
+    return ["/reference/rest-api", "/docs/reference/rest-api"].flatMap((source): Redirect[] => [
+        { source, destination: "/docs/reference/protocols", statusCode: 301 },
+        {
+            source: `${source}/:path*`,
+            destination: "/docs/reference/protocols/:path*",
+            statusCode: 301,
+        },
+    ]);
+}
+
+/**
+ * Each language's embedding guide is in its SDK reference. The pages that once
+ * sat under `embedding/by-language` go there in one hop, under the current and
+ * the former `build` prefix, and the folder goes to the embedding overview.
+ */
+function embeddingLanguageRedirects(): Redirect[] {
+    const guides: [string, string][] = [
+        ["dotnet", "/docs/reference/dotnet/embedding"],
+        ["golang", "/docs/reference/golang/embedding"],
+        ["javascript", "/docs/reference/javascript/concepts/embedded-engines"],
+        ["python", "/docs/reference/python/concepts/embedded-databases"],
+        ["rust", "/docs/reference/rust/embedding"],
+    ];
+
+    return ["integrate", "build"].flatMap((section) => {
+        const folder = `${section}/embedding/by-language`;
+        const forms = (path: string) => [`/${path}`, `/docs/${path}`];
+
+        return [
+            ...forms(folder).map(
+                (source): Redirect => ({
+                    source,
+                    destination: "/docs/integrate/embedding",
+                    statusCode: 301,
+                }),
+            ),
+            ...guides.flatMap(([language, destination]) =>
+                forms(`${folder}/${language}`).map(
+                    (source): Redirect => ({ source, destination, statusCode: 301 }),
+                ),
+            ),
+        ];
+    });
+}
+
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
+    ...timeSeriesGuideRedirects(),
+    ...cloudMarketplaceRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
     // consolidated to three pages. The two survivors are named, and the rest go
@@ -1192,9 +1673,14 @@ const baseRedirects: Redirect[] = [
         }),
     ),
     ...mobileFrameworkRedirects(),
+    ...rustWebServerRedirects(),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "integrate/integrations"),
+    ...protocolsRedirects(),
+    ...tutorialPathRedirects(),
+    ...migratingOverviewRedirects(),
+    ...embeddingLanguageRedirects(),
     ...legacyPrefixRedirects("tutorials", "learn/tutorials"),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
@@ -1205,6 +1691,8 @@ const baseRedirects: Redirect[] = [
     ...surrealCliRedirects(),
     ...extensionRedirects(),
     ...phpVersionedRedirects(),
+    ...dotnetReferenceRedirects(),
+    ...sdkConceptRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
     ...aiAgentsRedirects(),
@@ -1320,6 +1808,7 @@ const baseRedirects: Redirect[] = [
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     ...shortPageFoldRedirects(),
+    ...upgradingLandingRedirects(),
     ...sharedSectionRedirects(),
     // Last, so that every rule naming a real former path is tried first. A short
     // URL is a guess at a word, and a guess should only be answered once nothing

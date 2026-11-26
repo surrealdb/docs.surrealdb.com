@@ -1,0 +1,237 @@
+---
+position: 6
+title: Live queries
+description: The Rust SDK for SurrealDB allows changes to tables in real time to be observed
+---
+
+# Live queries
+
+A [`LIVE SELECT`](/docs/reference/query-language/statements/live-select) statement creates a session that keeps track of changes to a table in real time. Inside the Rust SDK, this is accomplished by appending [`.live()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Select.html#method.live) to the end of a [`.select()`](/docs/reference/rust/methods/select) query.
+
+## Getting started
+
+Start a running database using the following command:
+
+```bash
+surreal db start --user root --pass secret 
+```
+
+To follow along interactively, connect [using SurrealDB Studio](/docs/reference/studio) or the following command to open up the CLI:
+
+```bash
+surrealdb % surreal db sql --user root --pass secret --pretty
+```
+
+Then use the `cargo add` command to add three crates: `surrealdb`, `tokio`, and the `futures` crate for the [`StreamExt`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html) trait needed to use the async stream.
+
+The example code below shows a live select that keeps track of changes made to a sample of records from the `account` table. By adding the [`.range()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Select.html#method.range-1) method, it can be restricted to certain record IDs, in this case any record IDs in between the letters a and g.
+
+The stream from the `.live()` method returns a stream of [`Notification`](https://docs.rs/surrealdb/latest/surrealdb/struct.Notification.html)s. These contain an action (an `Action::Create`, `Action::Update`, or `Action::Delete`), and a field called `data` that contains anything that can be deserialised. In this case, the `data` field will deserialise into a struct that we create called `Account`. It also contains a `query_id` field that contains the ID of the live query itself, for record keeping or to cancel using the [`KILL`](/docs/reference/query-language/statements/kill) statement.
+
+From SurrealDB 4.0, also over a remote connection, the stream ends when the live query is killed, instead of returning a notification. If the live query's `WHERE` clause or projection raises an error, the notification has the action `Action::Error` and the error message as its data. A stream of `Value` receives the message as a string, and a stream of a struct such as `Account` receives an error, because the message cannot be deserialised into the struct.
+
+Once the following code is run, the Rust client will continue to listen for changes to the `account` table indefinitely.
+
+```rust
+use futures::StreamExt;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Root;
+use surrealdb::Surreal;
+use surrealdb::types::{RecordId, SurrealValue};
+
+const ACCOUNT: &str = "account";
+
+#[derive(Debug, SurrealValue)]
+struct Account {
+    id: RecordId,
+    balance: f64,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("main").use_db("main").await?;
+    db.query("DEFINE TABLE account").await?;
+
+    let mut sample_accounts = db
+        .select(ACCOUNT)
+        .range("a"..="g")
+        .live()
+        .await?;
+
+    while let Some(result) = sample_accounts.next().await {
+        match result {
+            Ok(notification) => {
+                let action = notification.action;
+                let account: Account = notification.data;
+                let id = notification.query_id;
+                println!("{action:?} from live ID {id}:\n  {account:#?}\n");
+            }
+            Err(error) => eprintln!("{error}"),
+        }
+    }
+
+    Ok(())
+}
+```
+
+We can now move to SurrealDB Studio or the CLI to execute a few queries and see what happens. The following queries create, update, and delete ten `account` records.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+FOR $_ IN 0..10 { CREATE account SET balance = 10.0 };
+UPDATE account SET balance += 1000;
+DELETE account;
+```
+
+The Rust client will keep track of any records with a record ID between a and g, returning an output similar to the following.
+
+```bash
+Create from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "cr4obgozhu4oe2fo3vra",
+        ),
+    },
+    balance: 10.0,
+}
+
+Create from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "do3us1twpyaxm20mp2qt",
+        ),
+    },
+    balance: 10.0,
+}
+
+Update from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "cr4obgozhu4oe2fo3vra",
+        ),
+    },
+    balance: 1010.0,
+}
+
+Update from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "do3us1twpyaxm20mp2qt",
+        ),
+    },
+    balance: 1010.0,
+}
+
+Delete from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "cr4obgozhu4oe2fo3vra",
+        ),
+    },
+    balance: 1010.0,
+}
+
+Delete from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
+  Account {
+    id: RecordId {
+        table: Table(
+            "account",
+        ),
+        key: String(
+            "do3us1twpyaxm20mp2qt",
+        ),
+    },
+    balance: 1010.0,
+}
+```
+
+## Live queries in `tokio::select!`
+
+Reading a live query stream is cancel-safe, so `stream.next()` can be one branch of a `tokio::select!` without losing notifications. The stream holds its notifications in an unbounded channel until they are read. When another branch finishes first, the `next()` future is dropped before it takes a notification, and the notification stays in the channel for the next call.
+
+Three things are not cancel-safe in the same way:
+
+- **Creating the stream.** `.live().await` registers the live query on the server. Create the stream once, before the loop, and not inside a `select!` branch, where a cancelled call can leave a live query running on the server that no stream receives.
+- **Dropping the stream.** A dropped stream kills its live query. Keep the stream in a variable that lives as long as the loop, and poll it with `next()` there.
+- **Other requests.** A query, a write or any other request whose future is dropped is not undone. The server may or may not have run it.
+
+Notifications that are not read stay in the channel, so a loop that stops calling `next()` for a long time holds every notification that arrives meanwhile.
+
+The example below continues the one above. It reads notifications and prints a line every 10 seconds, which needs the `time` feature of `tokio` as well as `macros`.
+
+```rust
+use futures::StreamExt;
+use std::time::Duration;
+
+let mut sample_accounts = db.select(ACCOUNT).range("a"..="g").live().await?;
+let mut ticker = tokio::time::interval(Duration::from_secs(10));
+
+loop {
+    tokio::select! {
+        Some(result) = sample_accounts.next() => {
+            let notification = result?;
+            let account: Account = notification.data;
+            println!("{:?}: {account:?}", notification.action);
+        }
+        _ = ticker.tick() => println!("Still listening"),
+    }
+}
+```
+
+### Requests whose future is dropped
+
+A request reaches the server when its future is first polled, so a future dropped after that point leaves the request run or not run, and the code cannot tell which. Some common cases are:
+
+- **A timeout around a write.** `tokio::time::timeout()` around `db.create("order")` can return after the server has committed the record, so a retry creates a second order. A retried `UPDATE account SET balance -= 10` takes the amount twice.
+- **A write that loses a `select!` race,** for example against a shutdown signal. The write may already have committed.
+- **A web handler whose client disconnects.** Axum drops the handler's future when the connection closes. A handler that sends two queries one after the other can leave the first applied and the second never sent.
+- **Session changes.** A dropped `signin()` or `use_ns()` may or may not have changed the session, so the next query can run as a different user or in a different namespace than the code expects.
+- **File writes.** A dropped `.put()` on a file may or may not have written it.
+
+These make a dropped request safe:
+
+- **Write in a way that can be repeated.** An `UPSERT` on a record ID that the client chooses, such as `UPSERT type::record('order', $order_id) CONTENT $order`, writes the same record again on a retry instead of a second one.
+- **Send related changes as one query** wrapped in `BEGIN` and `COMMIT`, so they apply together or not at all.
+- **Run a write that must finish on its own task** with `tokio::spawn()`. Dropping the outer future then drops only the `JoinHandle`, and the task runs to the end.
+
+An interactive [transaction](/docs/reference/rust/concepts/transactions) is the exception: from version 4.0 of the SDK, a `Transaction` dropped without `commit()` or `cancel()` is rolled back in the background.
+

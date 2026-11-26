@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
-import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import { vercel } from "vite-plugin-vercel/vite";
+import { docsSitemap } from "./plugins/docs-sitemap";
 import { viteDevRedirects } from "./plugins/vite-dev-redirects";
 
 loadEnvFile(".env.shared");
@@ -15,6 +16,25 @@ loadEnvFile(".env.shared");
  * (`bun run build:cloudflare`). See AGENTS.md, "Deployment targets".
  */
 const isCloudflare = process.env.DEPLOY_TARGET === "cloudflare";
+
+let lastModified: Record<string, string> | undefined;
+
+/**
+ * The `<lastmod>` of a sitemap URL: the date its page last changed, from
+ * `generated/last-modified.json`, which `prebuild` writes from the git
+ * history. A page without a known date is listed without one.
+ */
+function sitemapLastmod(url: string): string | undefined {
+    if (!lastModified) {
+        try {
+            lastModified = JSON.parse(readFileSync("generated/last-modified.json", "utf8")).pages;
+        } catch {
+            lastModified = {};
+        }
+    }
+
+    return lastModified?.[url];
+}
 
 export default defineConfig(async ({ mode }) => ({
     base: "/docs",
@@ -36,15 +56,18 @@ export default defineConfig(async ({ mode }) => ({
             : [vercel()]),
         vikeContentCollectionPlugin({
             contentDir: "src/content",
-            lastModified: true,
+            // Dates come from `generated/last-modified.json` instead, which
+            // handles a shallow clone; see scripts/generate-last-modified.mjs.
+            lastModified: false,
             drafts: {
                 field: "draft",
                 includeDrafts: false,
             },
         }),
-        vikeSitemap({
+        docsSitemap({
             baseUrl: "https://surrealdb.com/docs",
             robots: true,
+            lastmod: sitemapLastmod,
             priority: (url, { urls }) => {
                 if (url === "/") return 1.0;
 
