@@ -65,22 +65,22 @@ function deploymentObservabilityToManageRedirects(): Redirect[] {
     return [
         {
             source: "/docs/build/deployment/observability",
-            destination: "/docs/manage/observability",
+            destination: "/docs/operate/observability",
             statusCode: 301,
         },
         {
             source: "/docs/build/deployment/observability/:path*",
-            destination: "/docs/manage/observability/:path*",
+            destination: "/docs/operate/observability/:path*",
             statusCode: 301,
         },
         {
             source: "/build/deployment/observability",
-            destination: "/docs/manage/observability",
+            destination: "/docs/operate/observability",
             statusCode: 301,
         },
         {
             source: "/build/deployment/observability/:path*",
-            destination: "/docs/manage/observability/:path*",
+            destination: "/docs/operate/observability/:path*",
             statusCode: 301,
         },
     ];
@@ -93,7 +93,7 @@ function legacyMigratingRedirects(): Redirect[] {
     for (const d of db) {
         out.push({
             source: `/docs/surrealdb/migrating/${d}`,
-            destination: `/docs/build/migrating/from-other-databases/from-${d}`,
+            destination: `/docs/integrate/migrating/from-other-databases/from-${d}`,
         });
     }
 
@@ -263,7 +263,7 @@ function extensionRedirects(): Redirect[] {
             "learn/extensions/guides/module-architecture",
             "learn/extensions/guides/extension-architecture",
         ],
-        ["explore/cli/modules", "explore/cli/extensions"],
+        ["explore/cli/modules", "reference/cli/guides/extensions"],
     ];
 
     // Source without `/docs` (the www rewrite strips it); destination with `/docs`.
@@ -290,9 +290,9 @@ function extensionRedirects(): Redirect[] {
  */
 function surrealCliRedirects(): Redirect[] {
     const moves: [string, string, "exact" | "prefix"][] = [
-        ["manage/surrealctl/install", "explore/cli/install", "exact"],
-        ["reference/cli/surrealctl/install", "explore/cli/install", "exact"],
-        ["manage/surrealctl", "explore/cli/cloud", "prefix"],
+        ["manage/surrealctl/install", "reference/cli/guides/install", "exact"],
+        ["reference/cli/surrealctl/install", "reference/cli/guides/install", "exact"],
+        ["manage/surrealctl", "reference/cli/guides/cloud", "prefix"],
         ["reference/cli/surrealctl/overview", "reference/cli/cloud", "exact"],
         ["reference/cli/surrealctl/commands/spectron", "reference/cli/cloud/commands", "exact"],
         ["reference/cli/surrealctl", "reference/cli/cloud", "prefix"],
@@ -517,11 +517,11 @@ function sdkGettingStartedRedirects(): Redirect[] {
  */
 function aiAgentsRedirects(): Redirect[] {
     const moves: [string, string][] = [
-        ["build/ai-agents/connect-mcp-to-your-editor", "build/ai-agents/mcp/embedded"],
+        ["build/ai-agents/connect-mcp-to-your-editor", "integrate/ai-agents/mcp/embedded"],
         // Points at the folder index, not at the old stuttering filename that
         // `stutteringPathRedirects` now moves - otherwise this rule redirects
         // to a path that immediately redirects again.
-        ["build/ai-agents/agent-rules", "build/integrations/agent-rules"],
+        ["build/ai-agents/agent-rules", "integrate/integrations/agent-rules"],
     ];
 
     const out: Redirect[] = [];
@@ -596,130 +596,134 @@ function cloudAndDeploymentRedirects(): Redirect[] {
         // Cloud operations → instance operations.
         [
             "build/deployment/surrealdb-cloud/operations/aws-privatelink",
-            "manage/instances/private-connectivity",
+            "operate/instances/private-connectivity",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/data-export-and-backup",
-            "manage/instances/backups",
+            "operate/instances/backups",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/logs",
-            "manage/instances/monitoring",
+            "operate/instances/monitoring",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/metrics",
-            "manage/instances/monitoring",
+            "operate/instances/monitoring",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/monitoring-overview",
-            "manage/instances/monitoring",
+            "operate/instances/monitoring",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/migrating-data",
-            "manage/instances/import-and-export",
+            "operate/instances/import-and-export",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/network-access",
-            "manage/instances/network-access",
+            "operate/instances/network-access",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/operations/scaling",
-            "manage/instances/scaling",
+            "operate/instances/scaling",
             "exact",
         ],
-        ["build/deployment/surrealdb-cloud/operations", "manage/instances", "prefix"],
+        ["build/deployment/surrealdb-cloud/operations", "operate/instances", "prefix"],
 
         // Cloud onboarding → organisation and instance creation.
         [
             "build/deployment/surrealdb-cloud/getting-started/create-an-account",
-            "manage/organisations/sign-in",
+            "operate/organisations/sign-in",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/getting-started/create-an-instance",
-            "manage/instances/create",
+            "operate/instances/create",
             "exact",
         ],
         [
             "build/deployment/surrealdb-cloud/getting-started/create-an-organisation",
-            "manage/organisations",
+            "operate/organisations",
             "exact",
         ],
-        ["build/deployment/surrealdb-cloud/getting-started", "manage/organisations", "prefix"],
+        ["build/deployment/surrealdb-cloud/getting-started", "operate/organisations", "prefix"],
 
         // Billing, support, FAQs, and referrals keep their slugs under organisations.
-        ["build/deployment/surrealdb-cloud/billing-and-support", "manage/organisations", "prefix"],
+        ["build/deployment/surrealdb-cloud/billing-and-support", "operate/organisations", "prefix"],
 
         // Connecting → instances/connect (the Surrealist page was renamed to Studio).
         [
             "build/deployment/surrealdb-cloud/connecting/via-surrealist",
-            "manage/instances/connect/via-studio",
+            "operate/instances/connect/via-studio",
             "exact",
         ],
-        ["build/deployment/surrealdb-cloud/connecting", "manage/instances/connect", "prefix"],
+        ["build/deployment/surrealdb-cloud/connecting", "operate/instances/connect", "prefix"],
 
         // Cloud tooling pages are Studio features, not Cloud features.
-        ["build/deployment/surrealdb-cloud/tooling", "explore/studio", "prefix"],
+        ["build/deployment/surrealdb-cloud/tooling", "reference/studio", "prefix"],
 
         // Remaining Cloud pages fold into the instances section index.
-        ["build/deployment/surrealdb-cloud/what-is-surrealdb-cloud", "manage/instances", "exact"],
-        ["build/deployment/surrealdb-cloud", "manage/instances", "prefix"],
+        ["build/deployment/surrealdb-cloud/what-is-surrealdb-cloud", "operate/instances", "exact"],
+        ["build/deployment/surrealdb-cloud", "operate/instances", "prefix"],
 
         // Self-hosted deployment → the Manage section. The Amazon EKS, Azure AKS,
         // and Google GKE pages merged into a single Managed Kubernetes page.
         [
             "build/deployment/self-hosted/amazon-eks",
-            "manage/self-hosted/managed-kubernetes",
+            "operate/self-hosted/managed-kubernetes",
             "exact",
         ],
         [
             "build/deployment/self-hosted/azure-aks",
-            "manage/self-hosted/managed-kubernetes",
+            "operate/self-hosted/managed-kubernetes",
             "exact",
         ],
         [
             "build/deployment/self-hosted/google-gke",
-            "manage/self-hosted/managed-kubernetes",
+            "operate/self-hosted/managed-kubernetes",
             "exact",
         ],
-        ["build/deployment/self-hosted/overview", "manage/self-hosted", "exact"],
+        ["build/deployment/self-hosted/overview", "operate/self-hosted", "exact"],
         // The self-hosted Docker page was a near copy of the Running one, and was
         // merged into it. Both rules precede the folder rule below.
         ["build/deployment/self-hosted/docker", "running/docker", "exact"],
         ["manage/self-hosted/docker", "running/docker", "exact"],
         // `kubernetes` keeps its slug, so the folder rule covers it.
-        ["build/deployment/self-hosted", "manage/self-hosted", "prefix"],
+        ["build/deployment/self-hosted", "operate/self-hosted", "prefix"],
 
         // The deployment section index became the Deployment models page. There is
         // deliberately no `build/deployment/:path*` rule: the subtrees above cover
         // every page, and `build/deployment/observability` is handled separately by
         // `deploymentObservabilityToManageRedirects`.
-        ["build/deployment", "manage/self-hosted/deployment-models", "exact"],
+        ["build/deployment", "operate/self-hosted/deployment-models", "exact"],
 
         // manage/cloud split into manage/instances and manage/organisations.
-        ["manage/cloud/architecture", "manage/instances/architecture", "exact"],
-        ["manage/cloud/aws-marketplace", "manage/organisations/aws-marketplace", "exact"],
-        ["manage/cloud/backups-and-recovery", "manage/instances/backups", "exact"],
-        ["manage/cloud/billing-and-support", "manage/organisations/billing", "exact"],
-        ["manage/cloud/high-availability", "manage/instances/high-availability", "exact"],
-        ["manage/cloud/instance-management", "manage/instances/create", "exact"],
-        ["manage/cloud/monitoring-and-logs", "manage/instances/monitoring", "exact"],
-        ["manage/cloud/network-access", "manage/instances/network-access", "exact"],
-        ["manage/cloud/organisations-and-users", "manage/organisations/members-and-roles", "exact"],
-        ["manage/cloud/patches-and-upgrades", "manage/instances/versions-and-upgrades", "exact"],
-        ["manage/cloud/scaling", "manage/instances/scaling", "exact"],
-        ["manage/cloud", "manage/instances", "prefix"],
+        ["manage/cloud/architecture", "operate/instances/architecture", "exact"],
+        ["manage/cloud/aws-marketplace", "operate/organisations/aws-marketplace", "exact"],
+        ["manage/cloud/backups-and-recovery", "operate/instances/backups", "exact"],
+        ["manage/cloud/billing-and-support", "operate/organisations/billing", "exact"],
+        ["manage/cloud/high-availability", "operate/instances/high-availability", "exact"],
+        ["manage/cloud/instance-management", "operate/instances/create", "exact"],
+        ["manage/cloud/monitoring-and-logs", "operate/instances/monitoring", "exact"],
+        ["manage/cloud/network-access", "operate/instances/network-access", "exact"],
+        [
+            "manage/cloud/organisations-and-users",
+            "operate/organisations/members-and-roles",
+            "exact",
+        ],
+        ["manage/cloud/patches-and-upgrades", "operate/instances/versions-and-upgrades", "exact"],
+        ["manage/cloud/scaling", "operate/instances/scaling", "exact"],
+        ["manage/cloud", "operate/instances", "prefix"],
 
         // The legacy `/cloud/*` prefix used to point at `manage/cloud`; send it
         // straight to the final destination rather than chaining through it.
-        ["cloud", "manage/instances", "prefix"],
+        ["cloud", "operate/instances", "prefix"],
     ];
 
     const out: Redirect[] = [];
@@ -830,7 +834,7 @@ function agentMemoryRedirects(): Redirect[] {
         "operations",
         "tuning",
     ];
-    const section = "/docs/agent-memory/memory-and-knowledge";
+    const section = "/docs/agent-memory/learn";
     const sectionMoves = memoryAndKnowledge.flatMap((folder): [string, string][] =>
         ["/agent-memory", "/spectron", "/spectron/agent-memory"].flatMap(
             (root): [string, string][] => [
@@ -856,18 +860,57 @@ function agentMemoryRedirects(): Redirect[] {
             "/agent-memory/welcome/what-is-agent-memory",
             "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
         ],
+        // Folded into From context to memory, which covers the same ground
+        [
+            "/agent-memory/welcome/why-agentic-memory",
+            "/docs/agent-memory/welcome/from-context-to-memory",
+        ],
+        [
+            "/spectron/welcome/why-agentic-memory",
+            "/docs/agent-memory/welcome/from-context-to-memory",
+        ],
         // Removed in October 2026: these described the management API and the
         // internal schema, which customers on SurrealDB Cloud do not use. Listed
         // before the `/spectron` prefix rules so the old paths need one hop.
-        [
-            "/agent-memory/reference/management-api",
-            "/docs/agent-memory/quickstarts/surrealdb-cloud",
-        ],
-        ["/spectron/reference/management-api", "/docs/agent-memory/quickstarts/surrealdb-cloud"],
+        ["/agent-memory/reference/management-api", "/docs/agent-memory/operate/cloud"],
+        ["/spectron/reference/management-api", "/docs/agent-memory/operate/cloud"],
         ["/agent-memory/reference/data-model-and-schema", "/docs/agent-memory/reference"],
         ["/spectron/reference/data-model-and-schema", "/docs/agent-memory/reference"],
+        // The Get started page is the one quickstart. The Cloud page explains
+        // how contexts work on Cloud, so it moved to Operate, and the two pages
+        // that described a library Agent Memory does not offer were removed.
+        ...(
+            [
+                ["quickstarts/surrealdb-cloud", "/docs/agent-memory/operate/cloud"],
+                ["quickstarts/hosted", "/docs/agent-memory#quickstart"],
+                ["quickstarts/embedded", "/docs/agent-memory#quickstart"],
+                ["quickstarts", "/docs/agent-memory#quickstart"],
+                [
+                    "integrations/surfaces/embedded-library",
+                    "/docs/agent-memory/integrations/surfaces/rest",
+                ],
+            ] as [string, string][]
+        ).flatMap(([from, to]): [string, string][] =>
+            ["/agent-memory", "/spectron"].map((root): [string, string] => [`${root}/${from}`, to]),
+        ),
+        // Concepts moved into Learn, Enterprise into Deploy, and Memory & knowledge
+        // was renamed Learn. Listed before the `/spectron` prefix rules so the
+        // old paths need one hop.
+        ...(
+            [
+                ["memory-and-knowledge", "learn"],
+                ["mental-model", "learn/mental-model"],
+                ["architecture", "learn/architecture"],
+                ["enterprise", "operate/enterprise"],
+            ] as [string, string][]
+        ).flatMap(([from, to]): [string, string][] =>
+            ["/agent-memory", "/spectron"].flatMap((root): [string, string][] => [
+                [`${root}/${from}`, `/docs/agent-memory/${to}`],
+                [`${root}/${from}/:path*`, `/docs/agent-memory/${to}/:path*`],
+            ]),
+        ),
         // Flattened section - the hub page's content lives at a new slug.
-        ["/spectron/agent-memory", "/docs/agent-memory/memory-and-knowledge"],
+        ["/spectron/agent-memory", "/docs/agent-memory/learn"],
         ["/spectron/agent-memory/:path*", "/docs/agent-memory/:path*"],
         // Everything else keeps its path below the new prefix.
         ["/spectron", "/docs/agent-memory"],
@@ -940,7 +983,7 @@ function enterpriseConsolidationRedirects(): Redirect[] {
 
     const out: Redirect[] = removed.map((slug) => ({
         source: `/manage/enterprise/${slug}`,
-        destination: "/docs/manage/enterprise",
+        destination: "/docs/operate/enterprise",
         statusCode: 301 as const,
     }));
 
@@ -948,7 +991,7 @@ function enterpriseConsolidationRedirects(): Redirect[] {
     // observability section, so send it there rather than to the index.
     out.push({
         source: "/manage/enterprise/security/audit-logging",
-        destination: "/docs/manage/observability/audit-logging",
+        destination: "/docs/operate/observability/audit-logging",
         statusCode: 301,
     });
 
@@ -956,12 +999,12 @@ function enterpriseConsolidationRedirects(): Redirect[] {
     out.push(
         {
             source: "/manage/organisations/enterprise",
-            destination: "/docs/manage/enterprise",
+            destination: "/docs/operate/enterprise",
             statusCode: 301,
         },
         {
             source: "/manage/organisations/enterprise/:path*",
-            destination: "/docs/manage/enterprise/:path*",
+            destination: "/docs/operate/enterprise/:path*",
             statusCode: 301,
         },
     );
@@ -985,7 +1028,7 @@ function stutteringPathRedirects(): Redirect[] {
             "learn/schema-management/schema-design/schema-design",
             "learn/schema-management/schema-design",
         ],
-        ["build/integrations/agent-rules/agent-rules", "build/integrations/agent-rules"],
+        ["build/integrations/agent-rules/agent-rules", "integrate/integrations/agent-rules"],
     ];
 
     return moves.map(([from, to]) => ({
@@ -1005,12 +1048,12 @@ function shortPageFoldRedirects(): Redirect[] {
     return [
         {
             source: "/explore/tutorials/demos/blink",
-            destination: "/explore/tutorials/demos/overview#blink-note-taking-app",
+            destination: "/learn/tutorials/demos/overview#blink-note-taking-app",
             statusCode: 301,
         },
         {
             source: "/build/ai-agents/ai-frameworks",
-            destination: "/build/integrations/ai-frameworks/overview",
+            destination: "/integrate/integrations/ai-frameworks/overview",
             statusCode: 301,
         },
     ];
@@ -1076,6 +1119,50 @@ function mobileFrameworkRedirects(): Redirect[] {
         });
 }
 
+/**
+ * The top bars of the database docs and Agent Memory share five sections: Get
+ * started, Learn, Build, Deploy and Reference.
+ *
+ * - Explore was folded into the others: Studio and the CLI guides joined
+ *   Reference, and tutorials joined Build. The `/explore` hub goes to Build.
+ * - Manage is named Deploy, in its URLs as well as its label.
+ * - Agent Memory's concept pages moved into its Learn section, and its
+ *   deployment pages into its Deploy section.
+ *
+ * Listed after every rule naming an older path, so those still answer in one hop.
+ */
+function sharedSectionRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["explore/studio", "reference/studio"],
+        ["explore/cli", "reference/cli/guides"],
+        ["explore/tutorials", "learn/tutorials"],
+        ["manage", "operate"],
+        // Build became Integrate. Its tutorials joined Learn and its version
+        // upgrade guides joined Operate, so those come before the folder rules.
+        ["build/migrating/from-old-surrealdb-versions", "operate/upgrading"],
+        ["build/tutorials", "learn/tutorials"],
+        ["build/ai-agents", "integrate/ai-agents"],
+        ["build/embedding", "integrate/embedding"],
+        ["build/integrations", "integrate/integrations"],
+        ["build/migrating", "integrate/migrating"],
+        ["build", "integrate"],
+    ];
+    const exact: [string, string][] = [["explore", "learn"]];
+    return [
+        ...moves.flatMap(([from, to]): Redirect[] => [
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}/:path*`, destination: `/docs/${to}/:path*`, statusCode: 301 },
+        ]),
+        ...exact.map(
+            ([from, to]): Redirect => ({
+                source: `/${from}`,
+                destination: `/docs/${to}`,
+                statusCode: 301,
+            }),
+        ),
+    ];
+}
+
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
@@ -1085,31 +1172,30 @@ const baseRedirects: Redirect[] = [
     // to the section, same as the `explore/surrealist` rules further down.
     {
         source: "/surrealist/advanced-topics/search-and-shortcuts",
-        destination: "/explore/studio/search-and-shortcuts",
+        destination: "/reference/studio/search-and-shortcuts",
         statusCode: 301,
     },
     {
         source: "/surrealist/advanced-topics/surrealql-editors",
-        destination: "/explore/studio/surrealql-editors",
+        destination: "/reference/studio/surrealql-editors",
         statusCode: 301,
     },
-    { source: "/surrealist", destination: "/explore/studio", statusCode: 301 },
-    { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
+    { source: "/surrealist", destination: "/reference/studio", statusCode: 301 },
+    { source: "/surrealist/:path*", destination: "/reference/studio", statusCode: 301 },
     // SurrealDB 4.0 removed SurrealML, so its pages and the older `/surrealml`
     // URLs go to the upgrade guide's section on what the removal takes away.
     ...["/surrealml", "/surrealml/:path*", "/explore/ml-models", "/explore/ml-models/:path*"].map(
         (source): Redirect => ({
             source,
-            destination:
-                "/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#surrealml-is-removed",
+            destination: "/docs/operate/upgrading/3x-to-4x#surrealml-is-removed",
             statusCode: 301,
         }),
     ),
     ...mobileFrameworkRedirects(),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
-    ...legacyPrefixRedirects("integrations", "build/integrations"),
-    ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
+    ...legacyPrefixRedirects("integrations", "integrate/integrations"),
+    ...legacyPrefixRedirects("tutorials", "learn/tutorials"),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
     ...legacySurrealdbTreeRedirects(),
@@ -1165,7 +1251,7 @@ const baseRedirects: Redirect[] = [
     // Surrealist → SurrealDB Studio path rename
     {
         source: "/docs/explore/surrealist",
-        destination: "/docs/explore/studio",
+        destination: "/docs/reference/studio",
         statusCode: 301,
     },
     // The Surrealist tree was consolidated into a three-page Studio section, so
@@ -1174,12 +1260,12 @@ const baseRedirects: Redirect[] = [
     // otherwise swallow them.
     {
         source: "/docs/explore/surrealist/advanced-topics/search-and-shortcuts",
-        destination: "/docs/explore/studio/search-and-shortcuts",
+        destination: "/docs/reference/studio/search-and-shortcuts",
         statusCode: 301,
     },
     {
         source: "/docs/explore/surrealist/advanced-topics/surrealql-editors",
-        destination: "/docs/explore/studio/surrealql-editors",
+        destination: "/docs/reference/studio/surrealql-editors",
         statusCode: 301,
     },
     // Everything else under `surrealist/` was removed rather than moved, so it
@@ -1188,27 +1274,27 @@ const baseRedirects: Redirect[] = [
     // quiet walk back up the tree.
     {
         source: "/docs/explore/surrealist/:path*",
-        destination: "/docs/explore/studio",
+        destination: "/docs/reference/studio",
         statusCode: 301,
     },
     {
         source: "/explore/surrealist",
-        destination: "/explore/studio",
+        destination: "/reference/studio",
         statusCode: 301,
     },
     {
         source: "/explore/surrealist/advanced-topics/search-and-shortcuts",
-        destination: "/explore/studio/search-and-shortcuts",
+        destination: "/reference/studio/search-and-shortcuts",
         statusCode: 301,
     },
     {
         source: "/explore/surrealist/advanced-topics/surrealql-editors",
-        destination: "/explore/studio/surrealql-editors",
+        destination: "/reference/studio/surrealql-editors",
         statusCode: 301,
     },
     {
         source: "/explore/surrealist/:path*",
-        destination: "/explore/studio",
+        destination: "/reference/studio",
         statusCode: 301,
     },
     {
@@ -1234,6 +1320,7 @@ const baseRedirects: Redirect[] = [
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     ...shortPageFoldRedirects(),
+    ...sharedSectionRedirects(),
     // Last, so that every rule naming a real former path is tried first. A short
     // URL is a guess at a word, and a guess should only be answered once nothing
     // better matches.

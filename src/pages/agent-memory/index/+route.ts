@@ -4,7 +4,8 @@ import type { PageContext } from "vike/types";
 const AGENT_MEMORY_SIBLING_SECTIONS = new Set([
     "cookbooks",
     "integrations",
-    "memory-and-knowledge",
+    "learn",
+    "operate",
     "reference",
 ]);
 
