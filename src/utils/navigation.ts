@@ -9,6 +9,10 @@ import type { PageSchema } from "./schema";
 export interface NavSection {
     title: string;
     icon?: SectionIconName;
+    /** From the folder's `__category.json`: what the section covers, for a card. */
+    description?: string;
+    picto?: string;
+    pictoDark?: string;
     /**
      * The page the heading links to. Set when the section's first page repeats
      * the heading, so the heading is that page and `links` leaves it out.
@@ -20,6 +24,8 @@ export interface NavSection {
 export interface NavLink {
     title: string;
     path: string;
+    /** What the page covers, set only on a section hub's own data, for its cards. */
+    description?: string;
     children?: NavLink[];
 }
 
@@ -32,6 +38,12 @@ export interface NavGroup {
     title: string;
     /** The page the heading links to: the collection's landing page. */
     path: string;
+    /** One sentence on what the group covers, from its `__category.json`. */
+    description?: string;
+    /** The picto a card for the group shows, from its `__category.json`. */
+    picto?: string;
+    /** The dark-mode counterpart of `picto`. */
+    pictoDark?: string;
     /** Set when the landing page is the heading, so `links` leaves it out. */
     landing?: NavLink;
     links: NavLink[];
@@ -153,6 +165,9 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
         value: withLanding({
             title: category?.metadata.title ?? folder.name,
             icon: category?.metadata.icon,
+            description: category?.metadata.description,
+            picto: category?.metadata.picto,
+            pictoDark: category?.metadata.pictoDark,
             links: sortByPosition(items),
         }),
         position: category?.metadata.position ?? 0,
@@ -225,6 +240,9 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     const rootSection = withLanding({
         title: rootCategory?.metadata.title ?? "Overview",
         icon: rootCategory?.metadata.icon,
+        description: rootCategory?.metadata.description,
+        picto: rootCategory?.metadata.picto,
+        pictoDark: rootCategory?.metadata.pictoDark,
         links: sortByPosition(rootLinks),
     });
 
@@ -366,6 +384,9 @@ export function buildSectionNavigation(
             value: {
                 title: category?.metadata.title ?? rootSection.title,
                 path: first.path,
+                description: category?.metadata.description,
+                picto: category?.metadata.picto,
+                pictoDark: category?.metadata.pictoDark,
                 landing,
                 links,
                 sections,
@@ -402,7 +423,18 @@ export function groupsFromSections(sections: NavSection[]): NavGroup[] {
 
         if (!target) return [];
 
-        return [{ title: section.title, path: target.path, landing, links, sections: [] }];
+        return [
+            {
+                title: section.title,
+                path: target.path,
+                description: section.description,
+                picto: section.picto,
+                pictoDark: section.pictoDark,
+                landing,
+                links,
+                sections: [],
+            },
+        ];
     };
 
     const [first, second, ...rest] = sections;
@@ -412,7 +444,16 @@ export function groupsFromSections(sections: NavSection[]): NavGroup[] {
         const rows = [...(second.landing ? [second.landing] : []), ...second.links];
 
         return [
-            { title: first.title, path: only.path, landing: only, links: rows, sections: [] },
+            {
+                title: first.title,
+                path: only.path,
+                description: first.description,
+                picto: first.picto,
+                pictoDark: first.pictoDark,
+                landing: only,
+                links: rows,
+                sections: [],
+            },
             ...rest.flatMap((section) => toGroup(section, false)),
         ];
     }
@@ -422,6 +463,75 @@ export function groupsFromSections(sections: NavSection[]): NavGroup[] {
         ...(second ? toGroup(second, false) : []),
         ...rest.flatMap((section) => toGroup(section, false)),
     ];
+}
+
+/** A card on a section hub page. */
+export interface HubCard {
+    title: string;
+    /** The page the card links to, as the sidebar writes paths, without the `/docs` base. */
+    path: string;
+    description?: string;
+    picto?: string;
+    pictoDark?: string;
+}
+
+const normalized = (path: string) => path.replace(/\/$/, "") || "/";
+
+/**
+ * The cards a hub page shows for its groups, one for each group of the
+ * sidebar. A group whose landing page is the hub itself, such as Learn inside
+ * the Learn hub of Agent Memory, is the hub's own collection, so its parts
+ * give the cards instead.
+ */
+export function hubCards(groups: NavGroup[], hubPath: string): HubCard[] {
+    const own = normalized(hubPath);
+
+    return groups.flatMap((group) => {
+        const isHub = [group.path, group.landing?.path].some(
+            (path) => path && normalized(path) === own,
+        );
+
+        if (isHub && group.sections.length > 0) {
+            return group.sections.flatMap((section) => {
+                const target = section.landing ?? section.links[0];
+
+                return target
+                    ? [
+                          {
+                              title: section.title,
+                              path: target.path,
+                              description: section.description,
+                              picto: section.picto,
+                              pictoDark: section.pictoDark,
+                          },
+                      ]
+                    : [];
+            });
+        }
+
+        return [
+            {
+                title: group.title,
+                path: group.path,
+                description: group.description,
+                picto: group.picto,
+                pictoDark: group.pictoDark,
+            },
+        ];
+    });
+}
+
+/**
+ * The cards a hub page shows for the pages of a section that is one flat list:
+ * the rows of its groups, other than the hub itself.
+ */
+export function hubPages(groups: NavGroup[], hubPath: string): HubCard[] {
+    const own = normalized(hubPath);
+
+    return groups
+        .flatMap((group) => [...(group.landing ? [group.landing] : []), ...group.links])
+        .filter((link) => normalized(link.path) !== own)
+        .map((link) => ({ title: link.title, path: link.path, description: link.description }));
 }
 
 /**

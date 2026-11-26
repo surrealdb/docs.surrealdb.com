@@ -7,8 +7,22 @@ import { LLMS_TXT_URL } from "./agent-markdown";
 import { labStages } from "./labs";
 import { bundleFor, LLMS_BUNDLES, type LlmsBundle } from "./llms-bundles";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
-import { flattenMdxComponents } from "./mdx-to-markdown";
+import { type FolderCardsMap, flattenMdxComponents, type SectionHub } from "./mdx-to-markdown";
+import {
+    buildNavigation,
+    buildSectionNavigation,
+    groupsFromSections,
+    type HubCard,
+    hubCards,
+    hubPages,
+    type NavGroup,
+    type NavLink,
+    SECTION_HUBS,
+    SOLO_SECTIONS,
+    sectionOfHub,
+} from "./navigation";
 import type { LabSchema } from "./schema";
+import { sectionMenuPaths } from "./section-hubs";
 
 /**
  * Maps a URL prefix to the content collection that serves it.
@@ -63,6 +77,141 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "agent-memory", id: "agent-memory/index" },
     { prefix: "", id: "index" },
 ];
+
+/**
+ * Adds each page's description to the rows of a hub's groups, so that a card
+ * for a page can say what the page covers. Only a hub's own data carries them:
+ * on every page they would grow the sidebar of the whole collection.
+ */
+function withPageDescriptions(groups: NavGroup[], collectionId: string): NavGroup[] {
+    const route = COLLECTION_ROUTES.find((candidate) => candidate.id === collectionId);
+
+    if (!route) return groups;
+
+    const descriptions = new Map<string, string>();
+
+    for (const entry of getCollection(collectionId as keyof CollectionMap)) {
+        const { description } = entry.metadata as { description?: string };
+
+        if (description && !entry.slug.endsWith("__category")) {
+            descriptions.set(
+                `/${[route.prefix, entry.slug].filter(Boolean).join("/")}`,
+                description,
+            );
+        }
+    }
+
+    const describe = (link: NavLink): NavLink => ({
+        ...link,
+        description: descriptions.get(link.path),
+        children: link.children?.map(describe),
+    });
+
+    return groups.map((group) => ({
+        ...group,
+        landing: group.landing && describe(group.landing),
+        links: group.links.map(describe),
+    }));
+}
+
+/**
+ * The groups of the sidebar that a section hub page shows, which its
+ * `<SectionCards>` draws as cards. A section of several collections has one
+ * group for each collection; a section that is a single collection has one for
+ * each of its folders, and its pages carry their descriptions. Undefined for
+ * any page that is not a section hub.
+ *
+ * @param pathname - The page's path without the `/docs` base, such as `/learn`.
+ */
+export function sectionGroupsOfHub(pathname: string): NavGroup[] | undefined {
+    const section = sectionOfHub(pathname);
+
+    if (section) {
+        return buildSectionNavigation(
+            section,
+            COLLECTION_ROUTES.map((route) => route.id),
+            sectionMenuPaths(SECTION_HUBS[section]),
+        );
+    }
+
+    const solo = SOLO_SECTIONS[pathname.replace(/\/$/, "")];
+
+    return solo ? withPageDescriptions(groupsFromSections(buildNavigation(solo)), solo) : undefined;
+}
+
+/**
+ * The pages directly inside a folder, as cards for `<FolderCards>`: each page's
+ * title, and the `picto` and `pictoDark` of its frontmatter. Sorted by
+ * `position`, as the sidebar lists them.
+ *
+ * @param path - The folder as the sidebar writes paths, such as `/agent-memory/integrations/frameworks`.
+ */
+export function folderCards(path: string): HubCard[] {
+    const folder = path.replace(/^\/|\/$/g, "");
+    const route = COLLECTION_ROUTES.filter(
+        (candidate) => folder === candidate.prefix || folder.startsWith(`${candidate.prefix}/`),
+    ).sort((a, b) => b.prefix.length - a.prefix.length)[0];
+
+    if (!route) return [];
+
+    const within = folder.slice(route.prefix.length).replace(/^\//, "");
+
+    return [...getCollection(route.id as keyof CollectionMap)]
+        .filter((entry) => {
+            const rest = within ? entry.slug.slice(within.length + 1) : entry.slug;
+
+            return (
+                (!within || entry.slug.startsWith(`${within}/`)) &&
+                rest !== "" &&
+                !rest.includes("/") &&
+                rest !== "index" &&
+                !entry.slug.endsWith("__category")
+            );
+        })
+        .map((entry) => {
+            const meta = entry.metadata as {
+                title?: string;
+                position?: number;
+                picto?: string;
+                pictoDark?: string;
+            };
+
+            return {
+                position: meta.position ?? 0,
+                card: {
+                    title: meta.title ?? entry.slug,
+                    path: `/${[route.prefix, entry.slug].filter(Boolean).join("/")}`,
+                    picto: meta.picto,
+                    pictoDark: meta.pictoDark,
+                } satisfies HubCard,
+            };
+        })
+        .sort((a, b) => a.position - b.position || a.card.title.localeCompare(b.card.title))
+        .map(({ card }) => card);
+}
+
+/**
+ * The cards of every `<FolderCards path="...">` in a page, keyed by folder, or
+ * undefined when the page has none.
+ */
+export function folderCardsIn(content: string): Record<string, HubCard[]> | undefined {
+    const paths = [...content.matchAll(/<FolderCards\b[^>]*?\bpath="([^"]+)"/g)].map(
+        (match) => match[1] as string,
+    );
+
+    return paths.length > 0
+        ? Object.fromEntries(paths.map((path) => [path, folderCards(path)]))
+        : undefined;
+}
+
+/** A section hub page's cards, as the `.md` rendering of `<SectionCards>` needs them. */
+export function sectionHubOf(pathname: string): SectionHub | undefined {
+    const groups = sectionGroupsOfHub(pathname);
+
+    return groups
+        ? { cards: hubCards(groups, pathname), pages: hubPages(groups, pathname) }
+        : undefined;
+}
 
 type CollectionEntry = NonNullable<ReturnType<typeof getCollectionEntry>>;
 
@@ -155,12 +304,19 @@ export function suffixDocsLinks(markdown: string): string {
  * `sdkVersions` resolves `<Version>` markers to the version numbers the
  * rendered page shows; without it they fall back to "latest".
  */
-export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVersionMap): string {
+export function composeRawMarkdown(
+    entry: CollectionEntry,
+    sdkVersions?: SdkVersionMap,
+    sectionHub?: SectionHub,
+    folders?: FolderCardsMap,
+): string {
     const metadata = entry.metadata as { title?: string; description?: string };
     const heading = metadata.title ? `# ${metadata.title}` : undefined;
     const body = flattenMdxComponents(
         stripLanguageTestComments(stripLeadingH1(entry.content)),
         sdkVersions,
+        sectionHub,
+        folders,
     );
 
     const document = [heading, metadata.description, body].filter(Boolean).join("\n\n");
@@ -314,7 +470,12 @@ export function composeCorpusPages(sdkVersions?: SdkVersionMap): CorpusPage[] {
         for (const entry of entries) {
             const path = [prefix, entry.slug].filter(Boolean).join("/");
             const url = path ? `${DOCS_ORIGIN}/docs/${path}` : `${DOCS_ORIGIN}/docs`;
-            const page = composeRawMarkdown(entry, sdkVersions).trimEnd();
+            const page = composeRawMarkdown(
+                entry,
+                sdkVersions,
+                sectionHubOf(`/${path}`),
+                folderCardsIn(entry.content),
+            ).trimEnd();
 
             pages.push({ path: `/${path}`, markdown: `Source: ${url}\n\n${page}` });
         }

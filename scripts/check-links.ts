@@ -34,7 +34,8 @@
  *
  * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`. And
  * it checks that every page the product switch links in
- * `src/utils/product-counterparts.ts` exists; see `checkCounterpartPages`.
+ * `src/utils/product-counterparts.ts` exists; see `checkCounterpartPages`. And
+ * it checks that each section hub's cards cover its section; see `checkSectionCards`.
  *
  * Usage: bun scripts/check-links.ts
  */
@@ -406,6 +407,188 @@ function checkCounterpartPages(): string[] {
 
 const counterpartProblems = checkCounterpartPages();
 
+/**
+ * The section hub pages, whose `<SectionCards>` draw a card for each group of
+ * the section's sidebar. `dirs` are the folders whose subfolders are the
+ * groups, `collections` are whole collections that are a group each, and
+ * `roots` are collections whose own category is a group.
+ */
+const HUBS: {
+    file: string;
+    dirs: string[];
+    collections?: string[];
+    roots?: string[];
+    /** Groups that have no card of their own: the sidebar shows them as the heading of the first group. */
+    merged?: string[];
+}[] = [
+    { file: "index/learn.mdx", dirs: ["learn"] },
+    { file: "index/integrate.mdx", dirs: ["integrate"] },
+    { file: "index/operate.mdx", dirs: ["operate"] },
+    { file: "index/reference.mdx", dirs: ["reference"] },
+    {
+        file: "agent-memory/learn/index.mdx",
+        dirs: ["agent-memory/learn"],
+        collections: ["agent-memory/cookbooks"],
+    },
+    {
+        file: "agent-memory/index/integrate.mdx",
+        dirs: ["agent-memory/integrations"],
+        roots: ["agent-memory/integrations"],
+        merged: ["agent-memory/integrations/sdks"],
+    },
+    { file: "agent-memory/operate/index.mdx", dirs: [] },
+    { file: "agent-memory/reference/index.mdx", dirs: [] },
+];
+
+interface Category {
+    hidden?: boolean;
+    description?: string;
+    picto?: string;
+}
+
+function categoryOf(dir: string): Category | undefined {
+    const file = join(CONTENT_DIR, dir, "__category.json");
+
+    return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Category) : undefined;
+}
+
+/** The visible subfolders of a folder that have a category: the groups of a sidebar. */
+function groupFolders(dir: string): string[] {
+    return readdirSync(join(CONTENT_DIR, dir), { withFileTypes: true })
+        .filter(
+            (entry) => entry.isDirectory() && categoryOf(join(dir, entry.name))?.hidden !== true,
+        )
+        .filter((entry) => categoryOf(join(dir, entry.name)) !== undefined)
+        .map((entry) => join(dir, entry.name));
+}
+
+/** Every page under a folder, as files. */
+function pageFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+            ? pageFiles(join(dir, entry.name))
+            : /\.mdx?$/.test(entry.name)
+              ? [join(dir, entry.name)]
+              : [],
+    );
+}
+
+/**
+ * Checks that a hub's cards cover what its section's sidebar lists, and that
+ * each card has the text it shows. The sidebar is built from the folders of a
+ * section, so a hub that shows every group cannot drift from it, but a hub that
+ * splits its groups under headings with `paths` names them by hand: a folder
+ * that no list names has no card, and a path that names no folder is a dead
+ * card. A card says nothing without a `description`, except where its hub
+ * gives `paths`, as the SDK logos do, and needs a `picto` to show an icon.
+ */
+function checkSectionCards(): string[] {
+    const found: string[] = [];
+
+    for (const hub of HUBS) {
+        const file = join(CONTENT_DIR, hub.file);
+        const text = readFileSync(file, "utf8");
+        const uses = [...text.matchAll(/<SectionCards\b((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/g)].map(
+            (match) => match[1] ?? "",
+        );
+
+        if (uses.length === 0) {
+            found.push(`${hub.file}  has no <SectionCards>`);
+            continue;
+        }
+
+        const named = uses.flatMap((attrs) => {
+            const list = /\bpaths=\{(\[[^\]]*\])\}/.exec(attrs)?.[1];
+
+            return list ? (JSON.parse(list) as string[]) : [];
+        });
+        const splitsGroups = named.length > 0;
+        const folders = hub.dirs
+            .flatMap(groupFolders)
+            .filter((folder) => !hub.merged?.includes(folder));
+
+        if (splitsGroups) {
+            for (const path of named) {
+                const folder = path.replace(/^\//, "");
+
+                if (!categoryOf(folder) || categoryOf(folder)?.hidden) {
+                    found.push(
+                        `${hub.file}  paths names ${path}, which is no group of the section`,
+                    );
+                }
+            }
+
+            for (const folder of folders) {
+                if (!named.includes(`/${folder}`)) {
+                    found.push(`${hub.file}  /${folder} is a group of the sidebar with no card`);
+                }
+            }
+        }
+
+        const withText = [
+            ...(splitsGroups ? [] : folders),
+            ...(hub.collections ?? []),
+            ...(hub.roots ?? []),
+        ];
+
+        for (const folder of [...folders, ...(hub.collections ?? []), ...(hub.roots ?? [])]) {
+            const category = categoryOf(folder);
+
+            if (!category?.picto)
+                found.push(`${folder}/__category.json  has no picto for its card`);
+            if (withText.includes(folder) && !category?.description) {
+                found.push(`${folder}/__category.json  has no description for its card`);
+            }
+        }
+
+        if (uses.some((attrs) => /\bpages=\{true\}/.test(attrs))) {
+            const dir = join(CONTENT_DIR, hub.file.split("/").slice(0, -1).join("/"));
+
+            for (const page of pageFiles(dir)) {
+                const description = (/^description:\s*(.+)$/m.exec(readFileSync(page, "utf8")) ??
+                    [])[1];
+
+                if (page !== file && !description) {
+                    found.push(`${relative(CONTENT_DIR, page)}  has no description for its card`);
+                }
+            }
+        }
+    }
+
+    return found;
+}
+
+/**
+ * Checks that each `<FolderCards path="...">` names a folder of pages, since a
+ * path that names none draws no cards and says so nowhere.
+ */
+function checkFolderCards(): string[] {
+    const found: string[] = [];
+
+    for (const file of walk(CONTENT_DIR)) {
+        if (!/\.mdx?$/.test(file)) continue;
+
+        for (const match of readFileSync(file, "utf8").matchAll(
+            /<FolderCards\b[^>]*?\bpath="([^"]+)"/g,
+        )) {
+            const dir = join(CONTENT_DIR, match[1] ?? "");
+            const hasPages =
+                existsSync(dir) &&
+                readdirSync(dir).some((name) => /\.mdx?$/.test(name) && !/^index\./.test(name));
+
+            if (!hasPages) {
+                found.push(
+                    `${relative(CONTENT_DIR, file)}  <FolderCards path="${match[1]}"> names a folder with no pages`,
+                );
+            }
+        }
+    }
+
+    return found;
+}
+
+const sectionCardProblems = [...checkSectionCards(), ...checkFolderCards()];
+
 for (const problem of problems) {
     console.error(`${problem.file}:${problem.line}  ${problem.link}\n    ${problem.reason}`);
 }
@@ -418,6 +601,10 @@ for (const problem of counterpartProblems) {
     console.error(`src/utils/product-counterparts.ts  ${problem}`);
 }
 
+for (const problem of sectionCardProblems) {
+    console.error(`src/content/${problem}`);
+}
+
 console.log(
     `[links] ${checked} internal links checked across ${pages.size} pages, ${problems.length} broken`,
 );
@@ -425,7 +612,15 @@ console.log(`[links] ${shortUrls.length} short URLs checked, ${shortUrlProblems.
 console.log(
     `[links] ${COUNTERPART_PAGES.length} product switch pairs checked, ${counterpartProblems.length} problems`,
 );
+console.log(
+    `[links] ${HUBS.length} section hubs checked, ${sectionCardProblems.length} card problems`,
+);
 
-if (problems.length > 0 || shortUrlProblems.length > 0 || counterpartProblems.length > 0) {
+if (
+    problems.length > 0 ||
+    shortUrlProblems.length > 0 ||
+    counterpartProblems.length > 0 ||
+    sectionCardProblems.length > 0
+) {
     process.exit(1);
 }

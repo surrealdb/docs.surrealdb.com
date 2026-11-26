@@ -15,8 +15,10 @@ import { CodeWithOutput } from "~/components/CodeWithOutput";
 import { DemoEmbed } from "~/components/DemoEmbed";
 import { Details } from "~/components/Details";
 import { Edition } from "~/components/Edition";
+import { FolderCards } from "~/components/FolderCards";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
+import { SectionCards } from "~/components/SectionCards";
 import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
 import { SurrealistMini } from "~/components/SurrealistMini";
@@ -342,6 +344,8 @@ export function registerMarkdownComponents(): MarkdownComponents {
         AgentPrompt: { component: AgentPrompt, block: true },
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
+        SectionCards: { component: SectionCards, block: true, preserveNewlines: false },
+        FolderCards: { component: FolderCards, block: true },
         CodeSetup: { component: CodeSetup, block: true, preserveNewlines: false },
         CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
         // A showcase demo: its own finished page, framed on the card surface
