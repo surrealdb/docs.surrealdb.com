@@ -35,3 +35,14 @@ export function linkUrl(href: string): string {
     const url = new URL(href, window.location.origin);
     return url.origin + url.pathname;
 }
+
+/**
+ * A search term as analytics reports it. Readers paste error messages and
+ * connection strings into search, so any word holding an `@` (an email
+ * address, or the credentials in `user:pass@host`) becomes `[email]`. Google
+ * Analytics keeps only the first 100 characters of a value, so the term is cut
+ * there too.
+ */
+export function searchTerm(term: string): string {
+    return term.replace(/\S+@\S+/g, "[email]").slice(0, 100);
+}
