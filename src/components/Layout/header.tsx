@@ -115,6 +115,14 @@ function signInUrl(cta: string) {
     return `https://studio.surrealdb.com/?signin=true&cta=${cta}`;
 }
 
+/**
+ * The sign-in buttons' `cta` ids, each written once so the link's `cta`
+ * parameter and the button's `data-cta` always match. They follow the
+ * website's `nav_signin` and `nav_drawer_signin`.
+ */
+const HEADER_SIGNIN_CTA = "docs_nav_signin";
+const DRAWER_SIGNIN_CTA = "docs_nav_drawer_signin";
+
 function normalizeHref(href: string) {
     return href.replace(/^\/docs/, "").replace(/\/$/, "") || "/";
 }
@@ -681,17 +689,17 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     </ClientOnly>
                     <Button
                         component="a"
-                        href={signInUrl("docs_header_signin")}
+                        href={signInUrl(HEADER_SIGNIN_CTA)}
                         target="_blank"
                         rel="noopener noreferrer"
                         size="sm"
                         variant="gradient"
                         visibleFrom="sm"
-                        data-cta="docs_header_signin"
+                        data-cta={HEADER_SIGNIN_CTA}
                         data-cta-destination="studio"
                         data-cta-placement="nav"
                     >
-                        Sign In
+                        Sign in
                     </Button>
 
                     <Burger
@@ -745,20 +753,20 @@ export function MobileNav({ navLinks, pageNavigation }: MobileNavProps) {
                 phones reach it from here instead. */}
             <Button
                 component="a"
-                href={signInUrl("docs_mobile_menu_signin")}
+                href={signInUrl(DRAWER_SIGNIN_CTA)}
                 target="_blank"
                 rel="noopener noreferrer"
                 variant="gradient"
                 hiddenFrom="sm"
                 fullWidth
-                data-cta="docs_mobile_menu_signin"
+                data-cta={DRAWER_SIGNIN_CTA}
                 data-cta-destination="studio"
-                data-cta-placement="nav"
+                data-cta-placement="nav_drawer"
             >
-                Sign In
+                Sign in
             </Button>
-            {/* The header search only has room from `sm` up, so phones reach
-                it from here instead. */}
+            {/* The header version menu only has room from `sm` up, so phones
+                reach it from here instead. */}
             {product.id === "surrealdb" && (
                 <Box hiddenFrom="sm">
                     <VersionMenu />
