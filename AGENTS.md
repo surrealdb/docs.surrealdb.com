@@ -1633,7 +1633,7 @@ A card shows an author photo from `src/assets/img/labs-authors/<avatar>.jpg` (or
 
 ### Blog posts in Labs
 
-The Labs listing also shows the blog's `tutorials` and `engineering` posts. They come from `src/data/labs-blog.json`, which `bun run generate:labs-blog` writes from the public website API and which is committed, so the docs never call the API at runtime. Run it after posts are published. The list endpoint gives authors only as `people:` record IDs, which `src/data/labs-blog-authors.json` maps to the `name`, `role` and `avatar` a card shows. A post is credited to the first of its authors found there, and to SurrealDB when none is. A new author's posts credit SurrealDB until their ID is added, so check the regenerated diff for new IDs.
+The Labs listing also shows the blog's `tutorials` and `engineering` posts. They come from `src/data/labs-blog.json`, which `bun run generate:labs-blog` writes from the public website API and which is committed, so the docs never call the API at runtime. Run it after posts are published. The list endpoint gives authors only as `people:` record IDs, which `src/data/labs-blog-authors.json` maps to the `name`, `role` and `avatar` a card shows. A post is credited to the first of its authors found there, and to SurrealDB when none is. A new author's posts credit SurrealDB until their ID is added, so check the regenerated diff for new IDs. A post that teaches a feature SurrealDB has removed goes in `EXCLUDED_POSTS` in `scripts/generate-labs-blog.mjs`, so that regenerating the file does not bring it back.
 
 ## Link graph
 
