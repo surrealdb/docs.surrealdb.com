@@ -14,7 +14,7 @@ import { useDebouncedValue, useHotkeys, useInputState, useOs } from "@mantine/ho
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import { linkUrl, searchTerm, trackEvent } from "~/utils/analytics";
 import { getProductFromPath, PRODUCT_META } from "~/utils/product";
@@ -22,7 +22,24 @@ import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/ut
 import { SearchResultCard } from "./SearchResult";
 import classes from "./style.module.scss";
 
-function mapResultsToActions(results: SearchResult[], query: string): SpotlightActionData[] {
+/**
+ * How long the query has to stay unchanged before it counts as a search. The
+ * results update on a shorter debounce while the reader types, and reporting
+ * each of those would count every prefix of a term as a search of its own.
+ */
+const SEARCH_SETTLE_DELAY = 1000;
+
+/** Opens the search panel and reports it, for every control that opens it. */
+export function openDocsSearch() {
+    spotlight.open();
+    trackEvent("search_opened");
+}
+
+function mapResultsToActions(
+    results: SearchResult[],
+    query: string,
+    onSelect: (result: SearchResult) => void,
+): SpotlightActionData[] {
     return results.map((result, index) => ({
         id: `result-${index}`,
         label: String(result.title ?? ""),
@@ -31,12 +48,7 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
         // browser owns the navigation. The click handler only reports.
         component: "a",
         href: String(result.url ?? "/"),
-        onClick: () => {
-            trackEvent("search_result_click", {
-                search_term: searchTerm(query),
-                link_url: linkUrl(String(result.url ?? "/")),
-            });
-        },
+        onClick: () => onSelect(result),
         children: (
             <SearchResultCard
                 result={result}
@@ -49,6 +61,14 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
 export function SearchDocs(props: UnstyledButtonProps) {
     const [search, setSearch] = useInputState("");
     const [debouncedSearch] = useDebouncedValue(search.trim(), 250);
+    const [settledSearch] = useDebouncedValue(search.trim(), SEARCH_SETTLE_DELAY);
+    const lastReportedSearch = useRef("");
+    // The input as it stood when a result was chosen. The panel closes but keeps
+    // the text, so a term typed just before the click would still settle and be
+    // reported as a search of its own; it is not reported until the input changes.
+    const chosenSearch = useRef("");
+    const currentSearch = useRef("");
+    currentSearch.current = search.trim();
     const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
     const os = useOs();
     const { urlPathname } = usePageContext();
@@ -58,36 +78,70 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const searchQuery = useQuery({
         queryKey: ["docs-search", debouncedSearch, product] as const,
-        queryFn: async ({ signal }) => {
-            const results = await searchDocs(debouncedSearch, signal, product);
-
-            trackEvent("search", {
-                search_term: searchTerm(debouncedSearch),
-                search_product: product,
-            });
-
-            // Surface queries that find nothing so content gaps are
-            // measurable rather than inferred from missing clicks.
-            if (results.length === 0) {
-                trackEvent("search_no_results", {
-                    search_term: searchTerm(debouncedSearch),
-                    search_product: product,
-                });
-            }
-
-            return results;
-        },
+        // The term travels with its results, so while the next term loads, the
+        // list on screen and what a click reports both still name the term the
+        // results came from.
+        queryFn: async ({ signal }) => ({
+            term: debouncedSearch,
+            results: await searchDocs(debouncedSearch, signal, product),
+        }),
         enabled: debouncedSearch.length > 0,
         placeholderData: keepPreviousData,
         retry: false,
     });
 
-    const openSearch = useCallback(() => {
-        spotlight.open();
-        trackEvent("search_opened");
-    }, []);
+    // Each settled term is reported once, with its number of results, so a
+    // search that finds nothing counts once each time it happens. The search
+    // API also records the query of a search that finds nothing in the
+    // `search_miss` table, but only when the edge cache misses, so that table
+    // lists gaps without counting them.
+    const reportSearch = useCallback(
+        (term: string, resultCount: number) => {
+            if (term === lastReportedSearch.current) return;
+            lastReportedSearch.current = term;
 
-    useHotkeys([["mod+K", openSearch]]);
+            trackEvent("search", {
+                search_term: searchTerm(term),
+                search_product: product,
+                result_count: resultCount,
+            });
+        },
+        [product],
+    );
+
+    // The results of the settled term, once they have arrived. Until then the
+    // list can still hold an earlier term's results.
+    const settledResults =
+        searchQuery.isSuccess && settledSearch.length > 0 && searchQuery.data.term === settledSearch
+            ? searchQuery.data.results
+            : undefined;
+
+    useEffect(() => {
+        if (!settledSearch) {
+            lastReportedSearch.current = "";
+            chosenSearch.current = "";
+            return;
+        }
+        if (settledSearch === chosenSearch.current) return;
+        if (settledResults) reportSearch(settledSearch, settledResults.length);
+    }, [settledSearch, settledResults, reportSearch]);
+
+    // A click can come before the term has settled, so it reports the search
+    // first. Both events name the term the clicked result came from, with that
+    // term's count, which can trail what is in the input.
+    const handleSelect = useCallback(
+        (result: SearchResult, term: string, resultCount: number) => {
+            chosenSearch.current = currentSearch.current;
+            reportSearch(term, resultCount);
+            trackEvent("search_result_click", {
+                search_term: searchTerm(term),
+                link_url: linkUrl(String(result.url ?? "/")),
+            });
+        },
+        [reportSearch],
+    );
+
+    useHotkeys([["mod+K", openDocsSearch]]);
 
     useEffect(() => {
         if (rateLimitRemaining <= 0) return;
@@ -116,8 +170,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const actions = useMemo(() => {
         if (!hasTypedQuery || debouncedSearch.length === 0) return [];
-        return mapResultsToActions(searchQuery.data ?? [], debouncedSearch);
-    }, [debouncedSearch, hasTypedQuery, searchQuery.data]);
+        const data = searchQuery.data;
+        if (!data) return [];
+        return mapResultsToActions(data.results, data.term, (result) =>
+            handleSelect(result, data.term, data.results.length),
+        );
+    }, [debouncedSearch, hasTypedQuery, searchQuery.data, handleSelect]);
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
     const hasQuery = hasTypedQuery;
@@ -143,7 +201,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 px="md"
                 mb="md"
                 w="100%"
-                onClick={openSearch}
+                onClick={openDocsSearch}
                 {...props}
             >
                 <Group gap="sm">
@@ -185,7 +243,10 @@ export function SearchDocs(props: UnstyledButtonProps) {
             {/* Composed rather than the `<Spotlight>` shorthand, which renders
                 the search, the list and the empty state and nothing else -
                 the scope line needs a footer beneath them. */}
+            {/* `shortcut={null}` leaves `useHotkeys` above as the one handler of
+                mod+K, so the shortcut always goes through `openDocsSearch`. */}
             <Spotlight.Root
+                shortcut={null}
                 scrollable
                 maxHeight={500}
                 transitionProps={{ transition: "fade-down" }}
