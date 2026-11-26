@@ -1,0 +1,540 @@
+---
+position: 10
+title: Integrate an identity provider with SurrealDB
+description: "Use Auth0, AWS Cognito or Authorizer as the authentication provider for a client-side application backed only by SurrealDB, with one record access method that verifies the provider's tokens."
+---
+
+# Integrate an identity provider with SurrealDB
+
+A client-side application can sign users in with an identity provider and send the token it receives straight to SurrealDB, which verifies the token and applies table permissions as that user. No backend sits between the application and the database. This guide builds that setup once, then gives the settings for [Auth0](/docs/learn/tutorials/walkthroughs/identity-provider-integration#auth0), [AWS Cognito](/docs/learn/tutorials/walkthroughs/identity-provider-integration#aws-cognito) and [Authorizer](/docs/learn/tutorials/walkthroughs/identity-provider-integration#authorizer). It uses [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access), the method for every current version of SurrealDB.
+
+In this guide you will learn how to:
+
+- Check what an identity provider must put in its tokens for SurrealDB to accept them.
+- Define a record access method that verifies those tokens and creates a [record user](/docs/learn/security/authentication/users#record-users) at first sign-in.
+- Restrict each user to their own record.
+- Configure Auth0, AWS Cognito or Authorizer to issue the tokens.
+- Authenticate from a client-side application.
+
+SurrealDB is the only backend in this setup. If your application has other backends, they can validate the provider's tokens as well.
+
+The figure below shows the flow that this guide builds. The access method is called `idp` for every provider.
+
+<img src="~/assets/img/diagrams/light/conn-jwt-idp-light.webp" darkSrc="~/assets/img/diagrams/conn-jwt-idp.webp" alt="A user signs in with an identity provider, which returns a signed JWT that carries ns, db and ac claims, added by a hook of the provider such as an Auth0 action, a Cognito pre-token lambda or an Authorizer script. The app sends the token to SurrealDB with authenticate() or a Bearer header. SurrealDB finds the access method that ns, db and ac name, verifies the signature with the method's key or with the keys published at its JWT URL, and checks exp and nbf. It then runs AUTHENTICATE, which checks claims such as the audience and returns the user record, and starts a session with $token set to the claims, $access to the access method and $auth to the user record. Table PERMISSIONS then apply to every query, so SELECT * FROM user returns only that user's record. If any check fails, the token is refused with 401." />
+
+## What SurrealDB needs from a provider
+
+SurrealDB accepts the tokens of any provider whose tokens meet these conditions:
+
+- The token is signed with an asymmetric algorithm such as `RS256` or `ES256`, the provider publishes its public keys as a JSON Web Key Set (JWKS), and each token carries a `kid` header so that SurrealDB can pick the key.
+- The token carries the claims `ns`, `db` and `ac`, which name the namespace, the database and the access method it is meant for. Providers add them through a hook that runs when a token is issued.
+- The token carries an issuer (`iss`) and an audience (`aud`) that `AUTHENTICATE` can check, and a subject (`sub`) that is the same at every sign-in.
+- SurrealDB can reach the provider over the network to download the keys.
+
+The table shows how the three providers in this guide meet them. Each provider's section gives the address of its JWKS.
+
+| | Auth0 | AWS Cognito | Authorizer |
+| --- | --- | --- | --- |
+| Adds the claims with | A post-login action | A pre-token generation lambda | A custom access token script |
+| Names of the `ns`, `db` and `ac` claims | The names, with the prefix `https://surrealdb.com/` | The names alone | The names alone |
+| Token to send | The access token | The identity token | The access token |
+| The `aud` claim holds | An array with the API audience and the `userinfo` URL | The client ID | The client ID |
+| Hosting | Managed service | Managed service | Self-hosted, version 2.4.8 or later |
+
+## Prerequisites
+
+This guide assumes the following:
+
+- You have a [fresh instance of SurrealDB running](/docs/running/overview).
+
+- You can [use a local Docker container](/docs/running/docker) without volumes for the purposes of this guide. SurrealDB downloads the provider's public keys, so it must be allowed to reach the provider's host with the network [capability](/docs/learn/security/authorization/capabilities):
+
+```bash
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest \
+  start --user root --pass secret --allow-net <PROVIDER_HOST>
+```
+
+To run the SurrealQL statements in this guide, use [Studio](/docs/reference/studio), the [`surreal sql`](/docs/reference/cli/db/commands/sql) shell, or any other way of sending queries to SurrealDB. To start the shell:
+
+```bash
+surreal db sql -u root -p secret --pretty
+```
+
+You will also need an account with the provider that you choose, or a running Authorizer instance. Each provider's section lists what it needs.
+
+## Configuring SurrealDB
+
+This part is the same for every provider.
+
+### Defining the user table
+
+Each user that signs in is a record in a `user` table. The record ID is the provider's user ID (the `sub` claim), which never changes, unlike an email address. Users can read and change only their own record, and only when they signed in through the access method defined in the next step.
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE user SCHEMAFULL
+    -- Authorised users can select, update, delete and create user records.
+    -- Records that do not match the permissions are neither modified nor returned.
+    PERMISSIONS FOR select, update, delete, create
+    WHERE
+        -- The access method must match the method that is defined below.
+        $access = "idp"
+        -- The record ID must match that of the authenticated user.
+        AND id = $auth
+;
+
+DEFINE FIELD email
+    ON user TYPE string ASSERT string::is_email($value);
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+-- Some other information that the user can edit.
+DEFINE FIELD nickname ON user TYPE option<string>;
+```
+
+### Defining the access method
+
+The access method tells SurrealDB how to verify a token and which record the token belongs to. It uses [JWKS support](/docs/reference/query-language/statements/define/access/jwt#json-web-key-set-jwks) to download the provider's public keys from a URL, so a new signing key needs no change in SurrealDB. The [`AUTHENTICATE`](/docs/reference/query-language/statements/define/access/record#with-authenticate-clause) clause checks that the token was issued by your provider for your application, then returns the record user. Because the record ID comes from the token, the record is created the first time a user authenticates, and the application needs no separate step to create it.
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+-- Specify the namespace and database that will be used.
+-- These values should match the ns and db claims that the provider adds.
+USE NS main DB main;
+
+-- The name of the access method should match the ac claim that the provider adds.
+DEFINE ACCESS idp ON DATABASE TYPE RECORD
+    -- Verify the token with the public keys that the provider publishes.
+    WITH JWT URL "https://<PROVIDER_HOST>/.well-known/jwks.json"
+    AUTHENTICATE {
+        IF (
+            -- The issuer claim must match your provider.
+            $token.iss = "https://<PROVIDER_HOST>"
+            -- The audience claim must match your application.
+            AND $token.aud = "<CLIENT_ID>"
+            -- The email address in the token must be verified as belonging to the user.
+            AND $token.email_verified = true
+        ) {
+            -- The record user is identified by the provider's user ID.
+            LET $user = type::record("user", $token.sub);
+            -- Create the record the first time this user authenticates.
+            IF !record::exists($user) {
+                CREATE $user SET email = $token.email;
+            };
+            RETURN $user;
+        }
+    }
+;
+```
+
+The placeholders take the values of your provider, which each provider's section lists. If any check fails, the statement returns nothing and SurrealDB refuses the token with a 401 error.
+
+The unique index on `email` also means that a person who signs in through two providers with the same address is refused at the second sign-in, because a second record with that address cannot be created. Remove the index if both sign-ins should work.
+
+### Allowing SurrealDB to reach the provider
+
+The `--allow-net` flag takes the provider's host. For the strongest security, list only that host, for example `--allow-net auth.example.com`.
+
+> [!IMPORTANT]
+> SurrealDB also checks the IP address that the host resolves to. If the provider runs on a private network, for example as another container next to SurrealDB, that address must be allowed too: `--allow-net auth.internal,10.0.0.12`. If SurrealDB cannot download the keys, every token is refused with 401, and the SurrealDB log gives the reason, for example `Access to network target '10.0.0.12/32' is not allowed`.
+
+### Rotating the signing key
+
+By default, SurrealDB keeps each JWKS it downloads in a cache for 12 hours. When a token names a key identifier (`kid`) that is not in the cache, SurrealDB downloads the keys again, but not if its cached copy is less than 5 minutes old. With these defaults, rotating the provider's signing key has two consequences:
+
+- After the provider starts signing with the new key, SurrealDB can refuse tokens signed with it for up to 5 minutes.
+- After the provider removes the old key, SurrealDB keeps accepting tokens signed with it until its cache is replaced, which can take up to 12 hours. Those tokens still expire as usual, so this matters mainly when the old key has been compromised.
+
+To stop trusting a compromised key straight away, restart SurrealDB, which empties the cache. Both periods are settings that the [`SURREAL_JWKS_CACHE_EXPIRATION_SECONDS` and `SURREAL_JWKS_CACHE_COOLDOWN_SECONDS`](/docs/reference/cli/db/environment-variables#security-config) environment variables change. A shorter expiration makes SurrealDB download the keys more often, and a longer one makes it trust a removed key for longer.
+
+> [!NOTE]
+> SurrealDB verifies a token on its own and does not ask the provider whether a session is still active. Signing out at the provider stops new tokens from being issued but does not invalidate a token that was already sent to SurrealDB, which stays valid until it expires. The token lifetime is set at the provider.
+
+## Connecting from the application
+
+Once the provider returns a token, pass it to SurrealDB. The token carries `ns`, `db` and `ac`, so no further selection is needed.
+
+<Tabs syncKey="language">
+<TabItem label="JavaScript">
+```ts
+import { Surreal } from "surrealdb";
+
+const db = new Surreal();
+await db.connect("ws://localhost:8000");
+await db.authenticate(token);
+
+// Only the signed-in user's own record is returned.
+console.log(await db.query("SELECT * FROM user"));
+
+// A user can update their own record.
+await db.query("UPDATE $auth SET nickname = $nickname", { nickname: "ada" });
+```
+</TabItem>
+<TabItem label="Rust">
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::types::Value;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // The token that the provider returned, as a String.
+    let token = std::env::var("TOKEN").unwrap();
+
+    let db = Surreal::new::<Ws>("localhost:8000").await?;
+    db.authenticate(token).await?;
+
+    // Only the signed-in user's own record is returned.
+    let mut response = db.query("SELECT * FROM user").await?;
+    let users: Vec<Value> = response.take(0)?;
+    println!("{users:?}");
+
+    // A user can update their own record.
+    db.query("UPDATE $auth SET nickname = $nickname")
+        .bind(("nickname", "ada"))
+        .await?;
+
+    Ok(())
+}
+```
+</TabItem>
+<TabItem label="Python">
+```python
+from surrealdb import Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.authenticate(token)
+
+    # Only the signed-in user's own record is returned.
+    print(db.query("SELECT * FROM user"))
+
+    # A user can update their own record.
+    db.query("UPDATE $auth SET nickname = $nickname", {"nickname": "ada"})
+```
+</TabItem>
+</Tabs>
+
+The same token can be sent to the HTTP REST API as a bearer token:
+
+```bash
+curl -X POST http://localhost:8000/sql \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  --data-binary 'SELECT * FROM user;'
+```
+
+## Setting up your provider
+
+The steps so far are the same for every provider. What differs is on the provider's side, and each of the three sections below covers the same things, in this order:
+
+1. Setting up the application in the provider.
+2. Adding the `ns`, `db` and `ac` claims to the provider's tokens.
+3. The values to use in the access method above.
+4. Getting the token that the application passes to SurrealDB.
+
+Read only the section for your provider, then return to [Connecting from the application](/docs/learn/tutorials/walkthroughs/identity-provider-integration#connecting-from-the-application) with the token it gives you. The sections differ in how much there is to set up:
+
+- **Auth0** is a managed service. You create an application and an API, and an action adds the claims.
+- **AWS Cognito** is a managed service. You create a user pool and a client, and a lambda adds the claims.
+- **Authorizer** is self-hosted. You start it with an asymmetric signing key, and a script adds the claims.
+
+## Auth0
+
+[Auth0](https://auth0.com/) is a managed service, and its free plan is enough for this guide. You need an Auth0 account, an application and an API.
+
+### Creating the application and the API
+
+Complete the regular setup for a single-page application and an API resource in Auth0 by following the Auth0 [quickstart](https://auth0.com/docs/quickstart/spa) for your application. If you use plain JavaScript, follow [the vanilla guide](https://auth0.com/docs/quickstart/spa/vanillajs/01-login) to create the application and [the API guide](https://auth0.com/docs/quickstart/spa/vanillajs/02-calling-an-api) to create the API.
+
+> [!NOTE]
+> The guides ask for a backend API written in a language such as Node.js or Go. SurrealDB replaces it, so a static file server is enough. The API resource in Auth0 is still required, because it generates the audience that Auth0 needs before it adds claims to access tokens.
+
+Keep these values:
+
+- The client ID and the domain, generated when you create the application.
+- The audience, generated when you create the API.
+
+### Adding the claims
+
+Auth0 adds custom claims through actions. Because Auth0 [requires claims for an API audience to be namespaced](https://auth0.com/docs/troubleshoot/product-lifecycle/past-migrations/custom-claims-migration#restricted-token-audience), every claim carries the `https://surrealdb.com/` prefix. [Create an action](https://auth0.com/docs/customize/actions/write-your-first-action#create-an-action) with the "Login / Post Login" trigger and the following code:
+
+```js
+exports.onExecutePostLogin = async (event, api) => {
+    if (event.authorization) {
+        // The claims that SurrealDB requires. The values must match your SurrealDB setup.
+        api.accessToken.setCustomClaim("https://surrealdb.com/ns", "main");
+        api.accessToken.setCustomClaim("https://surrealdb.com/db", "main");
+        api.accessToken.setCustomClaim("https://surrealdb.com/ac", "idp");
+
+        // The claims that AUTHENTICATE reads.
+        api.accessToken.setCustomClaim("https://surrealdb.com/email", event.user.email);
+        api.accessToken.setCustomClaim(
+            "https://surrealdb.com/email_verified",
+            event.user.email_verified,
+        );
+    }
+};
+```
+
+Save the action and add it to the "Login" flow under "Actions > Flows".
+
+### Defining the access method for Auth0
+
+Define the user table as shown above, then define the access method with the claim names and the audience that Auth0 uses. Auth0 gives the audience as an array that holds both the API audience and its `userinfo` URL.
+
+```surql
+/**[test]
+
+[env]
+clean = true
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+USE NS main DB main;
+
+DEFINE ACCESS idp ON DATABASE TYPE RECORD
+    -- Verify the token with the public keys that Auth0 publishes.
+    WITH JWT URL "https://<YOUR_AUTH0_DOMAIN>/.well-known/jwks.json"
+    AUTHENTICATE {
+        IF (
+            -- The audience claim is an array in Auth0 access tokens.
+            $token.aud.is_array()
+            -- It must contain the audience that you defined when creating the API.
+            AND $token.aud CONTAINS "<YOUR_AUTH0_AUDIENCE_VALUE>"
+            -- It must contain the user information endpoint of your Auth0 domain.
+            AND $token.aud CONTAINS "https://<YOUR_AUTH0_DOMAIN>/userinfo"
+            -- The email address in the token must be verified as belonging to the user.
+            AND $token['https://surrealdb.com/email_verified'] = true
+        ) {
+            LET $user = type::record("user", $token.sub);
+            IF !record::exists($user) {
+                CREATE $user SET email = $token['https://surrealdb.com/email'];
+            };
+            RETURN $user;
+        }
+    }
+;
+```
+
+Replace the placeholders with the domain of your Auth0 application and the audience of your API. Start SurrealDB with `--allow-net` and your Auth0 domain, for example `--allow-net example.eu.auth0.com`.
+
+> [!NOTE]
+> Auth0 user IDs contain a `|`, as in `google-oauth2|123`, so a record ID displays with backticks: ``user:`google-oauth2|123` ``.
+
+Validating the audience is [a requirement of Auth0](https://auth0.com/docs/secure/tokens/access-tokens/validate-access-tokens).
+
+### Getting the token from Auth0
+
+With [Auth0 SPA JS](https://github.com/auth0/auth0-spa-js), the access token for your API comes from `getTokenSilently()`. Pass it to SurrealDB as shown above.
+
+```js
+const token = await auth0Client.getTokenSilently();
+```
+
+### Alternative: using HMAC
+
+Public key cryptography means that SurrealDB stores no secret at all. Some administrators prefer an HMAC algorithm, where one secret both signs and verifies the token. SurrealDB then stores the secret in the access method, and anyone who can read it can issue tokens that SurrealDB trusts, so restrict access to it. This method is not recommended over public key cryptography.
+
+Auth0 does not allow HMAC algorithms for single-page applications while OIDC-conformant authentication is on, because such an application would have to keep the secret in the client. The secret stays in SurrealDB here, so you can [disable OIDC-conformant authentication](https://auth0.com/docs/authenticate/login/oidc-conformant-authentication) to select an HMAC algorithm. Other options change as well, so review them afterwards.
+
+To use HMAC, replace the `WITH JWT URL` line of the access method with `WITH JWT ALGORITHM HS256 KEY "<YOUR_AUTH0_CLIENT_SECRET_VALUE>"`, where the key is the [Auth0 client secret](https://auth0.com/docs/secure/application-credentials#client-secret-authentication). The rest of this guide is unchanged.
+
+## AWS Cognito
+
+[AWS Cognito](https://aws.amazon.com/cognito/) is a managed service. You need an [Amazon Web Services account](https://aws.amazon.com/resources/create-account/), and this guide is subject to at least the [Cognito](https://aws.amazon.com/cognito/pricing/) and [Lambda](https://aws.amazon.com/lambda/pricing/) pricing. The resources used here should stay within the free tier of both, but that depends on your situation.
+
+### Creating a user pool and a client
+
+A Cognito [user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-identity-pools.html) is a user directory for web and mobile applications. A client within the pool is the way an application, here a client-side web application, authenticates with it. [Create a user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-as-user-directory.html) with the following options so that this guide works as written:
+
+- In "Configure sign-in experience", select at least "Email" in "Cognito user pool sign-in options".
+- In "Configure sign-up experience", select at least "email" in "Required attributes", and select "Allow Cognito to automatically send messages to verify and confirm".
+- In "Configure message delivery", select "Send email with Cognito" in "Email".
+- In "Integrate your app":
+  - Select "Use the Cognito Hosted UI" in "Hosted authentication pages".
+  - Select "Use a Cognito domain" in "Domain" and set a name for it.
+  - In "Initial app client", select "Public client" and "Don't generate a client secret".
+  - Under "Allowed callback URLs", set the URL of your web application.
+  - Under "Advanced app client settings", make sure "Authorization code grant" is selected.
+  - Under "Attribute read and write permissions", make sure "email" and "email_verified" are selected for "Read".
+
+> [!IMPORTANT]
+> These options are the simplest setup for following this guide, and may not match your security requirements. Changing them can require changes to the other steps.
+
+When the pool exists, open it in the AWS console and keep these values:
+
+- The "User pool ID" in the "User pool overview" section.
+- The "Cognito domain" in the "Configuration for all app clients" section of the "App integration" tab.
+- The "Client ID" of the only client in the "App client list" of the "App integration" tab.
+- The AWS region of the pool.
+
+### Creating a pre-token generation lambda
+
+Cognito adds claims to tokens through a [pre-token generation lambda](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html#cognito-user-pools-lambda-trigger-syntax-pre-token-generation) trigger. [Create an AWS Lambda function](https://docs.aws.amazon.com/lambda/latest/dg/getting-started.html#getting-started-create-function) with the "Node.js 20.x" runtime or equivalent and this code:
+
+```js
+const handler = async (event) => {
+    event.response = {
+        claimsOverrideDetails: {
+            claimsToAddOrOverride: {
+                ac: "idp", // The access method that is defined with DEFINE ACCESS.
+                ns: "main", // The namespace selected when calling DEFINE ACCESS.
+                db: "main", // The database selected when calling DEFINE ACCESS.
+            },
+        },
+    };
+
+    return event;
+};
+
+export { handler };
+```
+
+Then [associate the function with your user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-identity-pools-working-with-aws-lambda-triggers.html). In the "User pool properties" tab, open "Lambda triggers" and choose "Add Lambda trigger". Select the trigger type "Authentication", then "Pre token generation trigger", and select your function.
+
+### Creating a test user
+
+Open the pool, choose "Create user" in the "Users" section, and enter an email address. Select "Mark email address as verified", which saves the verification step, and set a password that meets the requirements of the pool.
+
+### Defining the access method for Cognito
+
+Define the user table and the access method as shown above, with these values:
+
+- The JWKS URL is `https://cognito-idp.<YOUR_AWS_REGION>.amazonaws.com/<YOUR_COGNITO_USER_POOL_ID>/.well-known/jwks.json`.
+- `$token.iss` is `https://cognito-idp.<YOUR_AWS_REGION>.amazonaws.com/<YOUR_COGNITO_USER_POOL_ID>`.
+- `$token.aud` is your Cognito client ID.
+
+[Validating the issuer and audience is a requirement of Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html). Start SurrealDB with `--allow-net` and the Cognito host of your region, for example `--allow-net cognito-idp.eu-west-1.amazonaws.com`.
+
+### Getting the token from Cognito
+
+The Cognito Hosted UI sends the user back to your application with an authorization code in a query parameter. Exchange the code at the Cognito [token endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/token-endpoint.html) for the user's tokens, then pass the identity token (`id_token`) to SurrealDB. The user signs in through the [login endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/login-endpoint.html) of the Hosted UI, or you can use the [Amplify SDK](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-integrate-apps.html#cognito-integrate-apps-amplify).
+
+> [!NOTE]
+> Like most OpenID Connect providers, Cognito issues an identity token and an access token. This guide uses the identity token because it carries the custom claims by default, and this guide trusts it only to state who the user is. A token that carries authorisation claims such as OAuth scopes should be the access token instead. Customising access tokens in Cognito requires its [advanced security features](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-advanced-security.html#cognito-user-pool-settings-advanced-security.title).
+
+## Authorizer
+
+[Authorizer](https://authorizer.dev) is an open-source (Apache 2.0), self-hosted authentication and authorisation server, so both your users' identities and your application data can stay on infrastructure that you control. You need a running Authorizer instance of version 2.4.8 or later, reachable at a URL such as `https://auth.example.com`. Earlier versions do not put a `kid` header on their tokens, which SurrealDB needs to select the signing key from the JWKS. The [Authorizer documentation](https://docs.authorizer.dev) lists deployment options.
+
+### Configuring Authorizer
+
+Authorizer takes its configuration as command-line flags. Start it with an asymmetric signing key: `--jwt-type=RS256` (or `ES256`) together with `--jwt-private-key` and `--jwt-public-key`. Authorizer then publishes the public key at `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json`. Keys for HMAC algorithms such as `HS256` are never published, so SurrealDB cannot verify tokens signed with them.
+
+Authorizer adds claims to every access token with a [custom access token script](https://docs.authorizer.dev/core/server-config): a JavaScript function that receives the user and the default token payload and returns the claims to add. Start Authorizer with this flag in addition to your usual configuration:
+
+```bash
+--custom-access-token-script='function(user, tokenPayload) {
+  return {
+    ns: "main",              // The namespace selected when calling DEFINE ACCESS.
+    db: "main",              // The database selected when calling DEFINE ACCESS.
+    ac: "idp",               // The access method that is defined with DEFINE ACCESS.
+    email: user.email,
+    email_verified: user.email_verified
+  };
+}'
+```
+
+Every Authorizer access token already includes `iss` (your Authorizer URL), `aud` and `client_id` (your client ID), `sub` (the user ID), `exp` and `roles`, so no further claims are needed.
+
+Add the origin that serves your application to `--allowed-origins`, for example `--allowed-origins=http://localhost:5173`. With the default value `*`, Authorizer accepts sign-in requests only from its own origin, so a sign-in from your application is refused.
+
+Keep these values:
+
+- Your Authorizer URL, for example `https://auth.example.com`. This is the `--url` flag and the `iss` claim of every token.
+- Your client ID. This is the `--client-id` flag and the `aud` claim of every access token.
+
+To create a test user, sign up on the Authorizer login page at `https://<YOUR_AUTHORIZER_URL>/app`. If you enabled email verification with `--enable-email-verification`, verify the address first. If Authorizer offers to set up multi-factor authentication, skip it for the test user so that the application can sign in with only an email and a password.
+
+### Defining the access method for Authorizer
+
+Define the user table and the access method as shown above, with these values:
+
+- `<PROVIDER_HOST>` is your Authorizer host, so the JWKS URL is `https://<YOUR_AUTHORIZER_URL>/.well-known/jwks.json` and `$token.iss` is `https://<YOUR_AUTHORIZER_URL>`.
+- `$token.aud` is your Authorizer client ID.
+
+Start SurrealDB with `--allow-net` and your Authorizer host, for example `--allow-net auth.example.com`.
+
+### Using Authorizer roles in permissions
+
+Every Authorizer access token carries a `roles` claim with the roles granted to the user, and the table permissions can read it. The following table lets every authenticated user read posts, but only users with the `admin` role write them:
+
+```surql
+/**[test]
+
+[[test.results]]
+error = false
+
+[[test.results]]
+error = false
+
+*/
+DEFINE TABLE post SCHEMAFULL
+    PERMISSIONS
+        FOR select WHERE $access = "idp"
+        FOR create, update, delete WHERE $access = "idp" AND $token.roles CONTAINS "admin"
+;
+DEFINE FIELD title ON post TYPE string;
+```
+
+Roles are managed in Authorizer, with `--roles`, `--default-roles` and the dashboard, so a user's permissions in SurrealDB change as soon as the user receives a new token. Auth0 and Cognito can carry roles in a claim of their own, which you add in the same hook that adds `ns`, `db` and `ac`.
+
+### Getting the token from Authorizer
+
+The [Authorizer JavaScript SDK](https://github.com/authorizerdev/authorizer-js) signs the user in and returns the access token:
+
+```ts
+import { Authorizer } from "@authorizerdev/authorizer-js";
+
+const authorizer = new Authorizer({
+    authorizerURL: "https://<YOUR_AUTHORIZER_URL>",
+    redirectURL: window.location.origin,
+    clientID: "<YOUR_AUTHORIZER_CLIENT_ID>",
+});
+
+const { data, errors } = await authorizer.login({
+    email: "user@example.com",
+    password: "<PASSWORD>",
+});
+if (errors.length) throw errors[0];
+
+const token = data.access_token;
+```
+
+Authorizer access tokens expire after 30 minutes. Refresh them with the Authorizer SDK.
+
+### Rotating the Authorizer signing key
+
+To rotate the key, start Authorizer with its secondary key flags (`--jwt-secondary-type`, `--jwt-secondary-public-key` and `--jwt-secondary-private-key`), then remove the old key. The timing in [Rotating the signing key](/docs/learn/tutorials/walkthroughs/identity-provider-integration#rotating-the-signing-key) applies.
+
+## Using another provider
+
+Any provider whose tokens meet the conditions at the top of this guide works the same way: add the three claims in the provider's hook, point `WITH JWT URL` at its JWKS, and check its issuer and audience in `AUTHENTICATE`. [Tokens and JWTs](/docs/learn/security/authorization/tokens-and-jwts) covers the token side in more detail.

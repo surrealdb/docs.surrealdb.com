@@ -88,9 +88,9 @@ const KEEP_IZE =
 
 /**
  * Technical terms spelled with a z in SurrealQL, SQL or a tool's own name: the
- * `TOKENIZERS` clause, serializable isolation, Surqlize and Wizer.
+ * `TOKENIZERS` clause, serializable isolation, Surqlize, Wizer and Authorizer.
  */
-const TECHNICAL_Z = /^(?:tokeni[sz]\w*|(?:de)?serializ\w*|surqlize\w*|wizer)$/i;
+const TECHNICAL_Z = /^(?:tokeni[sz]\w*|(?:de)?serializ\w*|surqlize\w*|wizer|authorizer)$/i;
 
 const SPELLINGS: [RegExp, string][] = [
     [/\bcolor(?:s|ed|ing|ful)?\b/gi, "colour"],
@@ -130,6 +130,7 @@ const NAMES = new Set([
     "Scale",
     "Free",
     "Labs",
+    "Marketplace",
     "Skills",
     "Surrealist",
     // Part of the names "VS Code" and "Claude Code".

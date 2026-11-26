@@ -942,7 +942,11 @@ function cloudAndDeploymentRedirects(): Redirect[] {
 
         // manage/cloud split into manage/instances and manage/organisations.
         ["manage/cloud/architecture", "operate/instances/architecture", "exact"],
-        ["manage/cloud/aws-marketplace", "operate/organisations/aws-marketplace", "exact"],
+        [
+            "manage/cloud/aws-marketplace",
+            "operate/organisations/cloud-marketplaces#aws-marketplace",
+            "exact",
+        ],
         ["manage/cloud/backups-and-recovery", "operate/instances/backups", "exact"],
         ["manage/cloud/billing-and-support", "operate/organisations/billing", "exact"],
         ["manage/cloud/high-availability", "operate/instances/high-availability", "exact"],
@@ -1199,6 +1203,42 @@ function overviewConsolidationRedirects(): Redirect[] {
 }
 
 /**
+ * The time series guide that held the concepts, the IoT modelling and the
+ * aggregation pages in one document no longer exists, so its address goes to
+ * the entry page of the section that holds each part.
+ */
+function timeSeriesGuideRedirects(): Redirect[] {
+    const source = "/learn/data-models/time-series/using-as-time-series-database";
+    const destination = "/docs/learn/data-models/time-series/overview";
+
+    return [
+        { source, destination, statusCode: 301 },
+        { source: `/docs${source}`, destination, statusCode: 301 },
+    ];
+}
+
+/**
+ * The AWS and Azure Marketplace guides are sections of one page about cloud
+ * marketplaces, so each old address goes to its section.
+ */
+function cloudMarketplaceRedirects(): Redirect[] {
+    const destination = "/docs/operate/organisations/cloud-marketplaces";
+
+    return ["aws", "azure"].flatMap((provider) => {
+        const source = `/operate/organisations/${provider}-marketplace`;
+
+        return [
+            { source, destination: `${destination}#${provider}-marketplace`, statusCode: 301 },
+            {
+                source: `/docs${source}`,
+                destination: `${destination}#${provider}-marketplace`,
+                statusCode: 301,
+            },
+        ] as Redirect[];
+    });
+}
+
+/**
  * The Enterprise subtree, collapsed onto one page.
  *
  * Twelve of its thirteen pages were a title, a description and an H1 with no
@@ -1427,8 +1467,6 @@ function sharedSectionRedirects(): Redirect[] {
 
 /** The tutorials that have a page at `/learn/tutorials/walkthroughs/<slug>`. */
 const TUTORIAL_PAGES = [
-    "auth0-integration",
-    "aws-cognito-integration",
     "build-a-real-time-presence-app",
     "build-an-ai-agent",
     "connect-via-ngrok",
@@ -1437,9 +1475,19 @@ const TUTORIAL_PAGES = [
     "github-actions",
     "how-to-build-a-knowledge-graph-for-ai",
     "http-via-postman",
+    "identity-provider-integration",
     "minimal-langchain",
     "navigate-a-drone-without-gps",
     "semantic-search-in-rust",
+];
+
+/**
+ * The Auth0 and AWS Cognito guides are sections of one page about identity
+ * providers, so each old slug goes to its section on that page.
+ */
+const IDENTITY_PROVIDER_GUIDES: [string, string][] = [
+    ["auth0-integration", "auth0"],
+    ["aws-cognito-integration", "aws-cognito"],
 ];
 
 /**
@@ -1448,14 +1496,40 @@ const TUTORIAL_PAGES = [
  * section, and the slug directly under `/tutorials`, `/explore/tutorials`,
  * `/build/tutorials` or `/learn/tutorials`. Each goes to the page in one hop,
  * so these rules come before the prefix rules that would send them to
- * `/learn/tutorials/<slug>`, where no page exists.
+ * `/learn/tutorials/<slug>`, where no page exists. The Auth0 and AWS Cognito
+ * guides are now sections of one page, so their old slugs go to those sections.
  */
 function tutorialPathRedirects(): Redirect[] {
     const walkthroughs = "/docs/learn/tutorials/walkthroughs";
     const parents = ["tutorials", "explore/tutorials", "build/tutorials", "learn/tutorials"];
     const forms = (path: string) => [`/${path}`, `/docs/${path}`];
 
-    return parents.flatMap((parent) => [
+    const identityProviders = IDENTITY_PROVIDER_GUIDES.flatMap(([page, section]): Redirect[] =>
+        [
+            ...forms(`learn/tutorials/walkthroughs/${page}`),
+            ...parents.flatMap((parent) => [
+                ...forms(`${parent}/${page}`),
+                ...forms(`${parent}/tutorials/${page}`),
+            ]),
+        ].map((source) => ({
+            source,
+            destination: `${walkthroughs}/identity-provider-integration#${section}`,
+            statusCode: 301,
+        })),
+    );
+
+    return [
+        ...identityProviders,
+        ...parents.flatMap((parent) => tutorialParentRedirects(parent, walkthroughs, forms)),
+    ];
+}
+
+function tutorialParentRedirects(
+    parent: string,
+    walkthroughs: string,
+    forms: (path: string) => string[],
+): Redirect[] {
+    return [
         ...forms(`${parent}/tutorials`).flatMap((source): Redirect[] => [
             { source, destination: `${walkthroughs}/overview`, statusCode: 301 },
             { source: `${source}/:path*`, destination: `${walkthroughs}/:path*`, statusCode: 301 },
@@ -1469,7 +1543,7 @@ function tutorialPathRedirects(): Redirect[] {
                 }),
             ),
         ),
-    ]);
+    ];
 }
 
 /**
@@ -1571,6 +1645,8 @@ function embeddingLanguageRedirects(): Redirect[] {
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     ...overviewConsolidationRedirects(),
+    ...timeSeriesGuideRedirects(),
+    ...cloudMarketplaceRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
     // consolidated to three pages. The two survivors are named, and the rest go
