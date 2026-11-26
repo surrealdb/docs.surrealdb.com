@@ -16,7 +16,7 @@ import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { linkUrl, trackEvent } from "~/utils/analytics";
+import { linkUrl, searchTerm, trackEvent } from "~/utils/analytics";
 import { getProductFromPath, PRODUCT_META } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
@@ -33,7 +33,7 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
         href: String(result.url ?? "/"),
         onClick: () => {
             trackEvent("search_result_click", {
-                search_term: query,
+                search_term: searchTerm(query),
                 link_url: linkUrl(String(result.url ?? "/")),
             });
         },
@@ -62,7 +62,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             const results = await searchDocs(debouncedSearch, signal, product);
 
             trackEvent("search", {
-                search_term: debouncedSearch,
+                search_term: searchTerm(debouncedSearch),
                 search_product: product,
             });
 
@@ -70,7 +70,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             // measurable rather than inferred from missing clicks.
             if (results.length === 0) {
                 trackEvent("search_no_results", {
-                    search_term: debouncedSearch,
+                    search_term: searchTerm(debouncedSearch),
                     search_product: product,
                 });
             }
