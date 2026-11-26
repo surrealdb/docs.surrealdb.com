@@ -1,0 +1,74 @@
+---
+position: 4
+title: MongoDB driver transactions
+description: Use sessions and transactions with @surrealdb/mql, including withTransaction retries, transactions across databases, and how a SurrealDB transaction differs from a MongoDB one.
+---
+
+# MongoDB driver transactions
+
+A session carries a SurrealDB transaction. Operations that receive the session run inside the transaction, can read its uncommitted writes, and are committed or rolled back together. Sessions need the WebSocket transport, so `startSession()` throws over `http://` and `https://`.
+
+## withTransaction
+
+`withTransaction` runs a callback in a transaction and commits when it returns. It runs the callback again when the error says a retry can succeed, which is what a write conflict says, so it is the form to use.
+
+```ts
+const session = client.startSession();
+
+await session.withTransaction(async (s) => {
+	await accounts.updateOne({ _id: "a" }, { $inc: { balance: -100 } }, { session: s });
+	await accounts.updateOne({ _id: "b" }, { $inc: { balance: 100 } }, { session: s });
+});
+
+await session.endSession();
+```
+
+The callback can run more than once, so it must await everything it starts. An error it catches and ignores is an error `withTransaction` cannot see. An error that leaves the callback aborts the transaction.
+
+`client.withSession()` and `await using session = client.startSession()` end the session for you and abort a transaction that is still open.
+
+## Commit and abort yourself
+
+```ts
+const session = client.startSession();
+
+try {
+	session.startTransaction();
+	await accounts.updateOne({ _id: "a" }, { $inc: { balance: -100 } }, { session });
+	await accounts.updateOne({ _id: "b" }, { $inc: { balance: 100 } }, { session });
+	await session.commitTransaction();
+} catch (error) {
+	await session.abortTransaction();
+	throw error;
+} finally {
+	await session.endSession();
+}
+```
+
+Every method that sends a statement takes `session`, including the `Db` methods and the index methods. SurrealDB's schema statements are transactional, so a `createIndex` or `createCollection` inside a transaction is rolled back with it.
+
+## Transactions across databases
+
+A client addresses every database in its namespace, and one session can span several of them. A commit applies to all, and an abort rolls back all.
+
+```ts
+const session = client.startSession();
+
+await session.withTransaction(async () => {
+	await client.db("ledger").collection("entries").insertOne({ n: 1 }, { session });
+	await client.db("audit").collection("log").insertOne({ n: 1 }, { session });
+});
+
+await session.endSession();
+```
+
+`client.db(name)` is cheap and sends nothing, so you can call it inline. Addressing a database creates it, even for a read, which differs from MongoDB, where only a write creates one.
+
+## Differences from MongoDB
+
+- **A failed operation does not abort the transaction.** MongoDB aborts the transaction and reports error `251` for everything after it. SurrealDB keeps the transaction open, so code that catches the error can carry on and commit the rest. An error that leaves a `withTransaction` callback aborts either way.
+- **A failed commit is not tried again.** The transaction is used up by the attempt, so a second `commitTransaction()` reports the original failure.
+- **Nothing is retried inside a transaction.** Outside one, the driver sends a write again after a conflict. Inside one, only running the whole transaction again can clear the conflict, which `withTransaction` does.
+- **Operations on one session run one after another.** MongoDB forbids overlapping operations, and the driver queues them in call order.
+- **Snapshot sessions are not available.** `startSession({ snapshot: true })` throws with code `123`. `readConcern: "snapshot"` on an operation or a client is accepted, because a SurrealDB transaction reads from one point in time.
+- **A text index needs its analyzer before the transaction.** `createIndex({ field: "text" }, { session })` creates the shared analyzer on the connection and keeps the index in the transaction. A `$text` search in that transaction cannot use the new index until the commit.

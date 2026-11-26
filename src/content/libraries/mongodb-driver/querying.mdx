@@ -1,0 +1,173 @@
+---
+position: 3
+title: MongoDB driver querying
+description: Insert, find, update, delete and bulk write documents with @surrealdb/mql, use MongoDB query filters, update operators, indexes and aggregation pipelines, and see how each is translated to SurrealQL.
+---
+
+# MongoDB driver querying
+
+Collections have the methods of the MongoDB Node.js driver. Each call is translated to SurrealQL when it runs, and the examples on this page use the `users` collection from the [first query](/docs/libraries/mongodb-driver#a-first-query).
+
+## Insert and find
+
+`insertOne` returns the new `_id`, and `insertMany` returns a count and the ids by position. A collection is created by the first write.
+
+```ts
+const { insertedId } = await users.insertOne({ name: "Alice", age: 30, tags: ["admin"] });
+const { insertedCount } = await users.insertMany([
+	{ name: "Bob", age: 25 },
+	{ name: "Charlie", age: 35 },
+]);
+```
+
+`findOne` returns one document or `null`. `find` returns a cursor, and no query runs until you read from it with `toArray()`, `next()` or `for await`.
+
+```ts
+const alice = await users.findOne({ name: "Alice" });
+
+const names = await users
+	.find({ age: { $gte: 30 } })
+	.sort({ age: -1 })
+	.project({ name: 1, age: 1, _id: 0 })
+	.toArray();
+
+const total = await users.countDocuments({ age: { $gte: 18 } });
+const unique = await users.distinct("name");
+```
+
+An inclusion projection must name every field that the sort uses. A `sort` on a field the projection leaves out throws a `MongoCompatibilityError`, because SurrealQL needs each `ORDER BY` field in the field list. Add the field to the projection, use an exclusion projection, or sort the results in your code.
+
+When `insertMany` has a document that is refused, such as a duplicate `_id`, it throws a `MongoBulkWriteError` even though earlier documents were written. With the default `ordered: true` it stops at the failure and keeps what came before. With `ordered: false` it tries every document and keeps every success. `err.insertedCount` and `err.writeErrors` say what happened. Inside a transaction the whole batch is all or nothing.
+
+## Update, replace and delete
+
+```ts
+await users.updateOne({ name: "Alice" }, { $set: { age: 31 }, $inc: { logins: 1 } });
+await users.updateMany({ age: { $lt: 18 } }, { $set: { status: "minor" } });
+await users.replaceOne({ name: "Alice" }, { name: "Alice", age: 31, role: "admin" });
+
+// Insert the document when nothing matches
+await users.updateOne({ name: "Dave" }, { $set: { age: 28 } }, { upsert: true });
+
+const { deletedCount } = await users.deleteOne({ name: "Bob" });
+await users.deleteMany({ age: { $lt: 18 } });
+```
+
+The `findOneAndUpdate`, `findOneAndReplace` and `findOneAndDelete` methods return a document. Pass `returnDocument: "after"` to get the document as it is after the update.
+
+```ts
+const updated = await users.findOneAndUpdate(
+	{ name: "Alice" },
+	{ $inc: { age: 1 } },
+	{ returnDocument: "after" },
+);
+```
+
+Each method that changes one document does so in a single SurrealQL statement that also chooses the document. When two clients race to change the same document, one of them wins and the other gets `matchedCount: 0`, as in MongoDB.
+
+> [!NOTE]
+> On SurrealDB 3.0 to 3.2 with the in-memory storage engine, two such writes could both commit and one of them be lost. SurrealDB 3.3.0 fixes this. On those versions, use a persistent storage engine for concurrent writes to one document.
+
+`bulkWrite()` takes MongoDB's write models and returns MongoDB's `BulkWriteResult`. It runs one statement for each model in order, so it does not save network round trips, and it is not atomic unless you pass a session.
+
+```ts
+const result = await users.bulkWrite([
+	{ insertOne: { document: { name: "Dana", age: 41 } } },
+	{ updateOne: { filter: { name: "Alice" }, update: { $addToSet: { tags: "owner" } } } },
+	{ deleteMany: { filter: { age: { $lt: 18 } } } },
+]);
+```
+
+## Query filters
+
+Filters use the MongoDB query language. Comparison operators compare within one type, as in MongoDB, so `{ age: { $lt: 30 } }` matches numbers below 30 and nothing else. A field that holds an array matches when any element matches.
+
+| Group | Operators |
+| --- | --- |
+| Comparison | `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte` |
+| Membership | `$in`, `$nin` |
+| Logical | `$and`, `$or`, `$nor`, `$not` |
+| Element | `$exists`, `$type` |
+| Evaluation | `$regex`, `$mod`, `$text` |
+| Array | `$all`, `$size`, `$elemMatch` |
+| Geospatial | `$geoWithin`, `$geoIntersects`, `$near`, `$nearSphere` |
+
+```ts
+await users.find({ $or: [{ name: /^Al/i }, { tags: { $all: ["admin", "owner"] } }] }).toArray();
+await users.find({ results: { $elemMatch: { score: { $gt: 80 }, grade: "A" } } }).toArray();
+```
+
+Comparing with an array or an embedded document, such as `{ tags: { $gt: ["a", "b"] } }`, throws a `MongoCompatibilityError`, because SurrealDB orders those values differently from MongoDB. Compare the elements with `$elemMatch`, or the fields by their dotted paths.
+
+A GeoJSON object with exactly a `type` and `coordinates` is stored as a SurrealDB geometry and returned as GeoJSON. Geospatial queries run without an index, so on a large collection they scan every document.
+
+## Update operators
+
+| Group | Operators |
+| --- | --- |
+| Field | `$set`, `$setOnInsert`, `$unset`, `$inc`, `$mul`, `$min`, `$max`, `$rename`, `$currentDate` |
+| Array | `$push` with `$each`, `$sort` and `$slice`, `$addToSet`, `$pull`, `$pullAll`, `$pop` |
+
+The positional operators `$[]` and `$[identifier]` update array elements, and `arrayFilters` selects them.
+
+```ts
+await users.updateOne(
+	{ _id: "g" },
+	{ $set: { "scores.$[high].top": true } },
+	{ arrayFilters: [{ "high.n": { $gte: 90 } }] },
+);
+```
+
+## Indexes
+
+`createIndex` is a `DEFINE INDEX` statement. Creating the same index again succeeds, and reusing a name for a different key throws an error with code `86`.
+
+```ts
+await users.createIndex({ email: 1 }, { unique: true });
+await users.createIndex({ lastName: 1, age: -1 });
+await users.createIndex({ title: "text", body: "text" });
+
+const indexes = await users.listIndexes().toArray();
+await users.dropIndex("email_1");
+```
+
+A write that breaks a unique index fails with code `11000`, and `err.keyValue` names the value. Four differences from MongoDB matter in practice:
+
+- **Unique indexes skip missing fields.** Two documents that both lack the indexed field are accepted, where MongoDB rejects the second.
+- **A text index has one full-text index for each field.** `$text` searches all of them, and ranking is fixed to BM25.
+- **Sort direction is recorded but not used.** SurrealDB indexes serve both directions.
+- **Some options throw.** `expireAfterSeconds`, `partialFilterExpression`, `collation`, `weights`, `hidden` and the `2d`, `2dsphere` and `hashed` key types are refused.
+
+## Aggregation
+
+`collection.aggregate(pipeline)` returns a cursor and sends nothing until you read from it. The pipeline is translated into as few `SELECT` statements as its stages allow.
+
+```ts
+const byCategory = await orders
+	.aggregate([
+		{ $match: { status: "shipped" } },
+		{ $group: { _id: "$category", revenue: { $sum: { $multiply: ["$price", "$qty"] } }, n: { $sum: 1 } } },
+		{ $sort: { revenue: -1 } },
+		{ $limit: 10 },
+	])
+	.toArray();
+```
+
+These stages are available:
+
+| Kind | Stages |
+| --- | --- |
+| Filter and order | `$match`, `$sort`, `$skip`, `$limit`, `$sample` |
+| Group and count | `$group`, `$count`, `$sortByCount`, `$bucket`, `$facet` |
+| Reshape | `$project`, `$unset`, `$addFields`, `$set`, `$replaceRoot`, `$replaceWith`, `$unwind` |
+| Join and traverse | `$lookup`, `$graphLookup` |
+| Write | `$out`, `$merge`, which must be the last stage |
+
+Inside `$project` and the accumulators, the expression operators cover arithmetic, strings, comparison, conditions, arrays, sets, objects, type conversion and dates. A stage or operator outside the supported list, such as `$bucketAuto`, `$unionWith` or `$setWindowFields`, throws a `MongoCompatibilityError` that names it, so a pipeline never returns a partial answer.
+
+A few stages differ from MongoDB:
+
+- **`$lookup`** supports the `localField` and `foreignField` form, not the `pipeline` form. It holds the matching foreign documents in memory for the length of the statement, so a very large foreign collection is the case to watch.
+- **`$graphLookup`** stops at a depth of 64, and a `maxDepth` of 64 or more is refused.
+- **`$bucket`** requires a `default`.
+- **`$divide` by zero** returns `null` where MongoDB fails the pipeline. Guard the divisor with `$cond` when a zero is possible.

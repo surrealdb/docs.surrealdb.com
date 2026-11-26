@@ -97,7 +97,7 @@ export const LLMS_BUNDLES: LlmsBundle[] = [
     {
         slug: "libraries",
         title: "Libraries",
-        description: "SQL drivers and the Surqlize query builders.",
+        description: "The SQL drivers, the MongoDB driver and the Surqlize query builders.",
         prefixes: ["/libraries"],
     },
     {
