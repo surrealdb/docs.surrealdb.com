@@ -33,7 +33,10 @@ export interface CopyPanelTab {
 
 export interface CopyPanelProps {
     tabs: CopyPanelTab[];
-    /** Called after the copy button puts a tab's text on the clipboard. */
+    /**
+     * Called when the copy button is pressed. The clipboard write is not
+     * awaited, so this runs even if the browser refuses it.
+     */
     onCopy?: (tab: CopyPanelTab) => void;
 }
 

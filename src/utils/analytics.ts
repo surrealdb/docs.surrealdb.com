@@ -27,6 +27,15 @@ export function trackEvent(name: string, params: AnalyticsParams = {}): void {
 }
 
 /**
+ * Reports a copy of the setup prompt, from whichever place it was copied: the
+ * page menu, the home page panel, or an `<AgentPrompt />` without its own text.
+ * Each place also sends `cta_click` with an ID of its own.
+ */
+export function trackSetupPromptCopy(): void {
+    trackEvent("copy_setup_prompt", { page_path: window.location.pathname });
+}
+
+/**
  * A link's address as analytics reports it: the origin and the path, without
  * the query string or the fragment. A relative `href` resolves against the
  * current page.

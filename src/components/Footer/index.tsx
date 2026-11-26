@@ -125,6 +125,7 @@ export function Footer() {
             component="footer"
             role="contentinfo"
             className={classes.root}
+            data-cta-section="footer"
         >
             <Box className={classes.inner}>
                 {/* Identity block. Holds its own column on wide viewports and
