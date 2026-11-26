@@ -25,21 +25,28 @@
 </p>
 
 <p align="center">
-    <a href="https://surrealdb.com/blog"><img height="25" src="src/assets/img/logo/dark/blog.svg" alt="Blog"></a>
+    <a href="https://surrealdb.com/blog"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/blog-dark.svg"><img height="24" src=".github/readme/blog-light.svg" alt="Blog"></picture></a>
     &nbsp;
-    <a href="https://github.com/surrealdb/surrealdb"><img height="25" src="src/assets/img/logo/dark/github.svg" alt="Github	"></a>
     &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="src/assets/img/logo/dark/linkedin.svg" alt="LinkedIn"></a>
+    <a href="https://github.com/surrealdb/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/github-dark.svg"><img height="24" src=".github/readme/github-light.svg" alt="GitHub"></picture></a>
     &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="src/assets/img/logo/dark/twitter.svg" alt="Twitter"></a>
     &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="src/assets/img/logo/dark/youtube.svg" alt="Youtube"></a>
+    <a href="https://www.linkedin.com/company/surrealdb/"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/linkedin-dark.svg"><img height="24" src=".github/readme/linkedin-light.svg" alt="LinkedIn"></picture></a>
     &nbsp;
-    <a href="https://dev.to/surrealdb"><img height="25" src="src/assets/img/logo/dark/dev.svg" alt="Dev"></a>
     &nbsp;
-    <a href="https://surrealdb.com/discord"><img height="25" src="src/assets/img/logo/dark/discrod.svg" alt="Discord"></a>
+    <a href="https://twitter.com/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/x-dark.svg"><img height="24" src=".github/readme/x-light.svg" alt="X"></picture></a>
     &nbsp;
-    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="src/assets/img/logo/dark/stack-overflow.svg" alt="StackOverflow"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/youtube-dark.svg"><img height="24" src=".github/readme/youtube-light.svg" alt="YouTube"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://dev.to/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/dev-dark.svg"><img height="24" src=".github/readme/dev-light.svg" alt="DEV"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://surrealdb.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/discord-dark.svg"><img height="24" src=".github/readme/discord-light.svg" alt="Discord"></picture></a>
+    &nbsp;
+    &nbsp;
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/stack-overflow-dark.svg"><img height="24" src=".github/readme/stack-overflow-light.svg" alt="Stack Overflow"></picture></a>
 </p>
 
 <br>
