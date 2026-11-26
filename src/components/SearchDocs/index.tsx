@@ -16,7 +16,7 @@ import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { linkUrl, trackEvent } from "~/utils/analytics";
+import { linkUrl, searchTerm, trackEvent } from "~/utils/analytics";
 import { getProductFromPath, PRODUCT_META } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
@@ -89,7 +89,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             lastReportedSearch.current = term;
 
             trackEvent("search", {
-                search_term: term,
+                search_term: searchTerm(term),
                 search_product: product,
                 result_count: resultCount,
             });
@@ -121,7 +121,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
         (result: SearchResult) => {
             reportSearch(debouncedSearch, searchQuery.data?.length ?? 0);
             trackEvent("search_result_click", {
-                search_term: debouncedSearch,
+                search_term: searchTerm(debouncedSearch),
                 link_url: linkUrl(String(result.url ?? "/")),
             });
         },

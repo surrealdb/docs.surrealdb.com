@@ -52,7 +52,7 @@ export function FeedbackModal({ sentiment, opened, onClose, path }: FeedbackModa
         try {
             await submitFeedback({ path, sentiment, reasons, comment });
             setState("sent");
-            trackEvent("feedback_submitted", { sentiment, page: path });
+            trackEvent("feedback_submitted", { sentiment, page_path: path });
         } catch {
             // The reader's text stays in the form, so they can retry
             // or copy it out rather than losing it.

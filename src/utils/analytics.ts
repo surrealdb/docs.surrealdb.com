@@ -27,6 +27,15 @@ export function trackEvent(name: string, params: AnalyticsParams = {}): void {
 }
 
 /**
+ * Reports a copy of the setup prompt, from whichever place it was copied: the
+ * page menu, the home page panel, or an `<AgentPrompt />` without its own text.
+ * Each place also sends `cta_click` with an ID of its own.
+ */
+export function trackSetupPromptCopy(): void {
+    trackEvent("copy_setup_prompt", { page_path: window.location.pathname });
+}
+
+/**
  * A link's address as analytics reports it: the origin and the path, without
  * the query string or the fragment. A relative `href` resolves against the
  * current page.
@@ -34,4 +43,15 @@ export function trackEvent(name: string, params: AnalyticsParams = {}): void {
 export function linkUrl(href: string): string {
     const url = new URL(href, window.location.origin);
     return url.origin + url.pathname;
+}
+
+/**
+ * A search term as analytics reports it. Readers paste error messages and
+ * connection strings into search, so any word holding an `@` (an email
+ * address, or the credentials in `user:pass@host`) becomes `[email]`. Google
+ * Analytics keeps only the first 100 characters of a value, so the term is cut
+ * there too.
+ */
+export function searchTerm(term: string): string {
+    return term.replace(/\S+@\S+/g, "[email]").slice(0, 100);
 }
