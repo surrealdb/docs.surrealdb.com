@@ -19,6 +19,13 @@ export const pageSchema = strictObject({
     title: string().optional(),
     description: string().optional(),
     /**
+     * The picto a section's card shows on its hub page, such as `@ui/pictoBook`.
+     * Set it in a folder's `__category.json`; a group with none shows no icon.
+     */
+    picto: string().optional(),
+    /** The dark-mode counterpart of `picto`, for a logo that has one. */
+    pictoDark: string().optional(),
+    /**
      * Sort order among siblings. A whole number: to fit a page between two
      * others, move the later siblings up by one rather than using a fraction.
      */

@@ -8,6 +8,9 @@ import classes from "./style.module.scss";
 export const GITHUB_BASE = "https://github.com/surrealdb/docs.surrealdb.com/edit/main/src/content/";
 export const GITHUB_ISSUES = "https://github.com/surrealdb/docs.surrealdb.com/issues/new";
 
+/** The first entry of the list: the top of the page, above its first heading. */
+const OVERVIEW_LABEL = "Overview";
+
 /** How long the list takes to open and close, in milliseconds. */
 const COLLAPSE_MS = 200;
 
@@ -55,7 +58,7 @@ function useActiveHeading(shown: { heading: DocHeading; el: HTMLElement | null }
                 if (el && el.getBoundingClientRect().top <= 120) current = index;
             });
 
-            setActiveIndex(current ?? 0);
+            setActiveIndex(current);
         }
 
         window.addEventListener("scroll", onScroll, true);
@@ -119,6 +122,21 @@ export function PageAside({ headings }: PageAsideProps) {
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
+                <Box
+                    component="li"
+                    className={classes.tocItem}
+                    data-active={activeIndex === null || undefined}
+                >
+                    <Anchor
+                        href="#top"
+                        className={classes.tocLink}
+                        underline="never"
+                        data-active={activeIndex === null || undefined}
+                        style={{ paddingLeft: "20px" }}
+                    >
+                        {OVERVIEW_LABEL}
+                    </Anchor>
+                </Box>
                 {shown.map(({ heading }, index) => (
                     <Box
                         component="li"
@@ -202,6 +220,27 @@ export function PageAsideCollapse({ headings }: PageAsideProps) {
                     id="mobile-toc-list"
                     className={classes.mobileList}
                 >
+                    <Box
+                        component="li"
+                        className={classes.tocItem}
+                    >
+                        <Anchor
+                            href="#top"
+                            className={classes.tocLink}
+                            underline="never"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                close();
+                                setTimeout(() => {
+                                    document.getElementById("top")?.scrollIntoView();
+                                    history.replaceState(null, "", "#top");
+                                }, COLLAPSE_MS + 50);
+                            }}
+                            style={{ paddingLeft: "20px" }}
+                        >
+                            {OVERVIEW_LABEL}
+                        </Anchor>
+                    </Box>
                     {shown.map(({ heading }, index) => (
                         <Box
                             component="li"

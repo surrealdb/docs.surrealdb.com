@@ -2,7 +2,7 @@ import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
-import { COLLECTION_ROUTES } from "./collections";
+import { COLLECTION_ROUTES, folderCardsIn, sectionHubOf } from "./collections";
 import { lastModifiedFor } from "./last-modified";
 import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, metaDescription } from "./meta";
@@ -10,6 +10,7 @@ import {
     buildNavigation,
     buildSectionNavigation,
     groupsFromSections,
+    type HubCard,
     type NavGroup,
     type NavSection,
     resolveFolderLanding,
@@ -31,6 +32,10 @@ export interface PageData {
      * of its collections. Absent where a collection is a section of its own.
      */
     sectionNavigation?: NavGroup[];
+    /** The cards of a section hub page, which `<SectionCards>` draws. Absent on any other page. */
+    hub?: { cards: HubCard[]; pages: HubCard[] };
+    /** The pages of each folder that a `<FolderCards>` on the page lists, keyed by the folder. */
+    folders?: Record<string, HubCard[]>;
     contentPath: string;
     breadcrumbs: string[];
     /** Ancestor trail for BreadcrumbList JSON-LD: Docs, categories, then the page. */
@@ -172,6 +177,8 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         headings,
         navigation,
         sectionNavigation,
+        hub: sectionHubOf(context.urlPathname),
+        folders: folderCardsIn(entry.content),
         contentPath,
         breadcrumbs,
         breadcrumbItems,
