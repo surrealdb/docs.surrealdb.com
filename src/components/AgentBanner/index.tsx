@@ -3,7 +3,7 @@ import { Icon, iconArrowRight } from "@surrealdb/ui";
 import { AgentBrand } from "~/components/AgentBrand";
 import { CopyPanel, type CopyPanelTab } from "~/components/CopyPanel";
 import { AGENTS, SETUP_PROMPT } from "~/utils/agents";
-import { trackEvent } from "~/utils/analytics";
+import { trackEvent, trackSetupPromptCopy } from "~/utils/analytics";
 import classes from "./style.module.scss";
 
 interface MoreLinkProps {
@@ -33,11 +33,15 @@ function MoreLink({ href, label }: MoreLinkProps) {
 }
 
 /**
- * Reports a copy of the Agent Skills install commands or of an agent's MCP
- * configuration. The prompt tab is reported by its `data-cta` alone.
+ * Reports a copy from the panel: the setup prompt as `copy_setup_prompt`, and
+ * the Agent Skills install commands or an agent's MCP configuration as
+ * `install_copy`.
  */
-function reportInstallCopy(tab: CopyPanelTab) {
-    if (tab.value === "prompt") return;
+function reportCopy(tab: CopyPanelTab) {
+    if (tab.value === "prompt") {
+        trackSetupPromptCopy();
+        return;
+    }
 
     trackEvent("install_copy", {
         method: tab.value === "skills" ? "agent_skills" : `mcp_config_${tab.value}`,
@@ -113,7 +117,7 @@ export function AgentBanner() {
     return (
         <CopyPanel
             tabs={tabs}
-            onCopy={reportInstallCopy}
+            onCopy={reportCopy}
         />
     );
 }
