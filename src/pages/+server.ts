@@ -23,7 +23,9 @@ import {
     composeFullCorpusMarkdown,
     composeLabsMarkdown,
     composeRawMarkdown,
+    folderCardsIn,
     resolveCollectionMatch,
+    sectionHubOf,
     suffixDocsLinks,
     withFrontmatter,
     withIndexPointer,
@@ -236,7 +238,17 @@ async function composePageMarkdown(match: CollectionMatch): Promise<string> {
     const sdkVersion = sdk
         ? releasedVersion(sdk, sdkVersions[SDK_VERSION_KEYS[id] ?? ""])
         : undefined;
-    const page = withIndexPointer(withRelated(composeRawMarkdown(entry, sdkVersions), docsPath));
+    const page = withIndexPointer(
+        withRelated(
+            composeRawMarkdown(
+                entry,
+                sdkVersions,
+                sectionHubOf(path),
+                folderCardsIn(entry.content),
+            ),
+            docsPath,
+        ),
+    );
 
     return withFrontmatter(
         {
