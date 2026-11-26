@@ -63,6 +63,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const [debouncedSearch] = useDebouncedValue(search.trim(), 250);
     const [settledSearch] = useDebouncedValue(search.trim(), SEARCH_SETTLE_DELAY);
     const lastReportedSearch = useRef("");
+    // The input as it stood when a result was chosen. The panel closes but keeps
+    // the text, so a term typed just before the click would still settle and be
+    // reported as a search of its own; it is not reported until the input changes.
+    const chosenSearch = useRef("");
+    const currentSearch = useRef("");
+    currentSearch.current = search.trim();
     const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
     const os = useOs();
     const { urlPathname } = usePageContext();
@@ -72,7 +78,13 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const searchQuery = useQuery({
         queryKey: ["docs-search", debouncedSearch, product] as const,
-        queryFn: ({ signal }) => searchDocs(debouncedSearch, signal, product),
+        // The term travels with its results, so while the next term loads, the
+        // list on screen and what a click reports both still name the term the
+        // results came from.
+        queryFn: async ({ signal }) => ({
+            term: debouncedSearch,
+            results: await searchDocs(debouncedSearch, signal, product),
+        }),
         enabled: debouncedSearch.length > 0,
         placeholderData: keepPreviousData,
         retry: false,
@@ -100,32 +112,33 @@ export function SearchDocs(props: UnstyledButtonProps) {
     // The results of the settled term, once they have arrived. Until then the
     // list can still hold an earlier term's results.
     const settledResults =
-        searchQuery.isSuccess &&
-        !searchQuery.isPlaceholderData &&
-        settledSearch.length > 0 &&
-        settledSearch === debouncedSearch
-            ? searchQuery.data
+        searchQuery.isSuccess && settledSearch.length > 0 && searchQuery.data.term === settledSearch
+            ? searchQuery.data.results
             : undefined;
 
     useEffect(() => {
         if (!settledSearch) {
             lastReportedSearch.current = "";
+            chosenSearch.current = "";
             return;
         }
+        if (settledSearch === chosenSearch.current) return;
         if (settledResults) reportSearch(settledSearch, settledResults.length);
     }, [settledSearch, settledResults, reportSearch]);
 
-    // A click can come before the term has settled, so it reports the
-    // search first.
+    // A click can come before the term has settled, so it reports the search
+    // first. Both events name the term the clicked result came from, with that
+    // term's count, which can trail what is in the input.
     const handleSelect = useCallback(
-        (result: SearchResult) => {
-            reportSearch(debouncedSearch, searchQuery.data?.length ?? 0);
+        (result: SearchResult, term: string, resultCount: number) => {
+            chosenSearch.current = currentSearch.current;
+            reportSearch(term, resultCount);
             trackEvent("search_result_click", {
-                search_term: searchTerm(debouncedSearch),
+                search_term: searchTerm(term),
                 link_url: linkUrl(String(result.url ?? "/")),
             });
         },
-        [debouncedSearch, reportSearch, searchQuery.data],
+        [reportSearch],
     );
 
     useHotkeys([["mod+K", openDocsSearch]]);
@@ -157,7 +170,11 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const actions = useMemo(() => {
         if (!hasTypedQuery || debouncedSearch.length === 0) return [];
-        return mapResultsToActions(searchQuery.data ?? [], debouncedSearch, handleSelect);
+        const data = searchQuery.data;
+        if (!data) return [];
+        return mapResultsToActions(data.results, data.term, (result) =>
+            handleSelect(result, data.term, data.results.length),
+        );
     }, [debouncedSearch, hasTypedQuery, searchQuery.data, handleSelect]);
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
@@ -226,7 +243,10 @@ export function SearchDocs(props: UnstyledButtonProps) {
             {/* Composed rather than the `<Spotlight>` shorthand, which renders
                 the search, the list and the empty state and nothing else -
                 the scope line needs a footer beneath them. */}
+            {/* `shortcut={null}` leaves `useHotkeys` above as the one handler of
+                mod+K, so the shortcut always goes through `openDocsSearch`. */}
             <Spotlight.Root
+                shortcut={null}
                 scrollable
                 maxHeight={500}
                 transitionProps={{ transition: "fade-down" }}
