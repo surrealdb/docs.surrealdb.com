@@ -18,6 +18,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FEATURES, type Feature, OUT_OF_SCOPE } from "./features";
+import { HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
 
 const ROOT = join(import.meta.dir, "..");
 const CONTENT = join(ROOT, "src/content");
@@ -69,7 +70,7 @@ const mentioningCommand = (command: string) =>
 
 /** What a page says when a thing has gone. */
 const GONE =
-    /removed|no longer|3\.x (?:only|and earlier)|before (?:SurrealDB )?4\.0|up to (?:SurrealDB )?3\./i;
+    /removed|no longer|has no `?\w+`? command|3\.x (?:only|and earlier)|before (?:SurrealDB )?4\.0|up to (?:SurrealDB )?3\./i;
 
 interface Part {
     surface: string;
@@ -98,6 +99,9 @@ function allParts(feature: Feature): Part[] {
         const { first, last } = span(cliTags, item);
 
         if (major(last) < 3) continue;
+
+        // A variable for engine development or a flag that `--help` hides is not for users.
+        if (item.key in INTERNAL || item.key in HIDDEN_FLAGS) continue;
 
         const isSetting = item.kind === "env" || item.kind === "config";
 

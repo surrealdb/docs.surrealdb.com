@@ -231,7 +231,7 @@ export const OUT_OF_SCOPE: (Omit<Feature, "name" | "terms"> & { why: string })[]
     {
         why: "SurrealML was removed in 4.0 and is not tracked",
         cli: /^surreal ml\b/,
-        settings: /(^|_)ML(_|$)/,
+        settings: /(^|_)ML(_|$)|^SURREAL_(NAME|VERSION)$/,
         routes: /^\S+ \/ml\//,
         functions: /^ml::/,
     },
