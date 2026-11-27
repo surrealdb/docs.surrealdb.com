@@ -110,7 +110,7 @@ These write files that are committed, so run them and commit the result with the
 | `bun run generate:labs` | After an entry is merged in awesome-surreal, to list it in Labs. Writes `src/data/labs.json`. |
 | `bun run generate:labs-blog` | After blog posts are published, to list them in Labs. Writes `src/data/labs-blog.json`. |
 | `bun run generate:cli-history` | After a SurrealDB release is tagged, to update the environment variable and flag history chart. |
-| `bun run generate:function-history` | After a SurrealDB release is tagged, to update `src/data/function-history.json`, the built-in functions of each release since 3.0. |
+| `bun run generate:function-history` | After a SurrealDB release is tagged, to update `src/data/function-history.json`, the built-in functions of each release since 3.0. To cross-check it with what a binary reports, run `bun scripts/function-history/runtime.ts <surreal binary>`, which stores the result in `src/data/function-runtime.json`, and `bun scripts/function-history/probe.ts <surreal binary>` to call every name and store the ones the engine cannot run in `src/data/function-probe.json`. |
 
 ### Diagrams and screenshots
 
