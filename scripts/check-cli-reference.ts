@@ -34,36 +34,11 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DISTRIBUTED_STORAGE_FLAGS, HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
 
 const ROOT = join(import.meta.dir, "..");
 const ENV_PAGE = "src/content/reference/cli/db/environment-variables.mdx";
 const COMMANDS = "src/content/reference/cli/db/commands";
-
-/** Variables the release reads that are not settings for a user, with the reason. */
-const INTERNAL: Record<string, string> = {
-    SURREAL_BUILD_ID: "read at compile time, when the engine is built",
-    SURREAL_BUILD_VERSION: "read at compile time by the build script",
-    SURREAL_COMPILE_CACHE_STATS: "a measurement switch for engine development",
-    SURREAL_HOLD_CREATES: "a benchmark switch for engine development",
-    SURREAL_INVOKED_AS: "set by the Surreal CLI itself when it runs the database",
-    SURREAL_MORSEL_LOOPBACK_PLACES: "a conformance setting for testing the host-place contract",
-    SURREAL_MORSEL_NEEDS_VIEW: "a test setting that runs the parallel merge on every backend",
-    SURREAL_MORSEL_STEAL_ALWAYS: "a test setting that forces the most work stealing a run can see",
-    SURREAL_ONLINE_VERSION_CHECK: "accepted so old invocations parse; it has no effect",
-    SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL: "read only by debug builds, for integration tests",
-    SURREAL_TELEMETRY_RPC_LIVE_ID: "accepted but no longer applied; the server logs a warning",
-    SURREAL_TRACE_COMPILES: "a tracing switch for engine development",
-    SURREAL_VM_LEAF: "a debugging report for engine development",
-};
-
-/** Flags the release hides from `--help`, with the reason. */
-const HIDDEN_FLAGS: Record<string, string> = {
-    "surreal start --key": "hidden; not currently in use",
-    "surreal start --no-banner": "hidden; the database prints no banner",
-    "surreal start --planner-strategy": "hidden; retired, and refused with an error",
-    "surreal sql --planner-strategy": "hidden; retired, and refused with an error",
-    "surreal mcp --planner-strategy": "hidden; retired, and refused with an error",
-};
 
 /**
  * A command whose page sends the reader to another command's page for a shared
@@ -267,11 +242,140 @@ for (const flag of flags) {
             : [pageText(command), pageText(SHARES_FLAGS_WITH[command] ?? "")].join("\n");
     const documented = new RegExp(`${long}(?![\\w-])`).test(text);
 
-    if (flag.key in HIDDEN_FLAGS) continue;
+    if (flag.key in HIDDEN_FLAGS || DISTRIBUTED_STORAGE_FLAGS.includes(flag.key)) continue;
     if (!documented) {
         problems.push(
             `${flag.key} is in ${release} but its page does not mention it; document it, or list it in HIDDEN_FLAGS with the reason`,
         );
+    }
+}
+
+// The option tables of the command pages
+//
+// Each `<OptionsTable>` row for a flag or argument is checked against the
+// release: the flag has to exist, its environment variable has to be the one the
+// release reads, and a default that the release states has to be the one the row
+// gives. A row for a flag that the release no longer has has to say which
+// versions it applies to.
+
+interface OptionRow {
+    name: string;
+    env?: string;
+    default?: string | number | boolean;
+    description?: string;
+}
+
+let optionRows = 0;
+const COMMAND_OF_PAGE = Object.fromEntries(
+    Object.entries(PAGE_FOR).map(([command, page]) => [page, command]),
+);
+/** The pages that describe a command that is gone, or that hold no options of their own. */
+const SKIPPED_PAGES = new Set(["ml", "help", "index"]);
+const VERSIONED =
+    /<Since|\bv\d+\.\d+|\b\d+\.x\b|(?<![\d.])\d+\.\d+\.\d+(?![\d.])|\b(from|before|until|in|up to)( SurrealDB)? \d+\.\d+/i;
+
+/** The JSON array after each `options={` of an `<OptionsTable>`, found by matching brackets outside strings. */
+function* optionArrays(text: string): Generator<string> {
+    for (const start of text.matchAll(/<OptionsTable[^>]*?options=\{/g)) {
+        const from = (start.index ?? 0) + start[0].length;
+        let depth = 0;
+        let inString = false;
+
+        for (let at = from; at < text.length; at++) {
+            const char = text[at];
+
+            if (inString) {
+                if (char === "\\") at++;
+                else if (char === '"') inString = false;
+            } else if (char === '"') inString = true;
+            else if (char === "[") depth++;
+            else if (char === "]" && --depth === 0) {
+                yield text.slice(from, at + 1);
+                break;
+            }
+        }
+    }
+}
+
+const plainDefault = (value: string | number | boolean) =>
+    String(value).replace(/[`'"]/g, "").trim().toLowerCase();
+
+for (const file of pages) {
+    const name = file.replace(/\.mdx$/, "");
+
+    if (SKIPPED_PAGES.has(name)) continue;
+
+    const command = COMMAND_OF_PAGE[name] ?? `surreal ${name}`;
+    const text = readFileSync(join(ROOT, COMMANDS, file), "utf8");
+
+    for (const source of optionArrays(text)) {
+        let options: OptionRow[];
+
+        try {
+            options = JSON.parse(source);
+        } catch (error) {
+            problems.push(
+                `${file}: an <OptionsTable> holds options that are not valid JSON (${String(error)})`,
+            );
+            continue;
+        }
+
+        for (const row of options) {
+            optionRows++;
+            // One row can stand for a pair, such as `--allow-scripting, --deny-scripting`.
+            const names = row.name.split(/,\s*/);
+            const envs = row.env?.split(/,\s*/) ?? [];
+
+            names.forEach((rowName, index) => {
+                const argument = /^[[<]/.test(rowName);
+                const base = rowName.replace(/[[\]<>.]/g, "").toLowerCase();
+                // A flag that every command takes is listed under `surreal`, and an argument that repeats ends in `...`.
+                const keys = argument
+                    ? [`${command} <${base}>`, `${command} <${base}...>`]
+                    : [`${command} ${rowName}`, `surreal ${rowName}`];
+                const key = keys[0] as string;
+                const matches = data.items.filter((item) => keys.includes(item.key));
+                const item = matches.find(inRelease) ?? matches[0];
+
+                if (!item) {
+                    problems.push(
+                        `${file}: the row ${rowName} names ${key}, which no release has had`,
+                    );
+                    return;
+                }
+
+                if (!inRelease(item)) {
+                    if (!VERSIONED.test(`${row.description ?? ""}${row.name}`)) {
+                        problems.push(
+                            `${file}: ${key} is not in ${release}, and its row does not say which versions it applies to`,
+                        );
+                    }
+                    return;
+                }
+
+                const env = envs.length === names.length ? envs[index] : undefined;
+
+                if (env && item.env && env !== item.env) {
+                    problems.push(`${file}: ${key} reads ${item.env}, but its row says ${env}`);
+                }
+
+                const expected = sourceDefault([item]);
+
+                if (row.default !== undefined && expected !== undefined) {
+                    const given = String(row.default);
+                    const same =
+                        asNumber(given) !== undefined && asNumber(expected) !== undefined
+                            ? asNumber(given) === asNumber(expected)
+                            : plainDefault(given) === plainDefault(expected);
+
+                    if (!same) {
+                        problems.push(
+                            `${file}: ${key} has the default ${given}, but ${release} has ${expected}`,
+                        );
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -288,7 +392,7 @@ if (waiting.length > 0) {
     );
 }
 console.log(
-    `[cli] ${release}: ${current.length} variables and ${flags.length} flags checked, ${problems.length} problems`,
+    `[cli] ${release}: ${current.length} variables, ${flags.length} flags and ${optionRows} option table rows checked, ${problems.length} problems`,
 );
 
 if (problems.length > 0) process.exit(1);
