@@ -98,7 +98,7 @@ const pageText = pages(FUNCTIONS)
     .join("\n");
 const mentioned = (name: string) =>
     name.includes("::")
-        ? new RegExp(`(?<![\\w:])${name.replace(/::/g, "::")}(?![\\w:])`, "i").test(pageText)
+        ? new RegExp(`(?<![\\w:])${name}(?![\\w:])`, "i").test(pageText)
         : pages(FUNCTIONS).some((file) => file.endsWith(`/${name}.mdx`));
 
 const live = (item: Item) => item.ranges.at(-1)?.[1] === newest;

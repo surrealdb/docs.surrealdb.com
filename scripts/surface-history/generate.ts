@@ -130,7 +130,7 @@ function rpcMethods(tag: string): Set<string> {
     const block = text.slice(start, text.indexOf("_ => Self::Unknown", start));
     const found = new Set<string>();
 
-    for (const arm of block.matchAll(/((?:"[a-z_]+"\s*\|?\s*)+)=>\s*Self::\w+/g)) {
+    for (const arm of block.matchAll(/("[a-z_]+"(?:\s*\|\s*"[a-z_]+")*)\s*=>\s*Self::\w+/g)) {
         for (const name of (arm[1] as string).matchAll(/"([a-z_]+)"/g))
             found.add(name[1] as string);
     }
