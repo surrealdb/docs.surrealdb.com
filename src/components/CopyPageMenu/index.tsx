@@ -14,6 +14,7 @@ import {
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
 import { SETUP_PROMPT } from "~/utils/agents";
+import { trackEvent, trackSetupPromptCopy } from "~/utils/analytics";
 import classes from "./style.module.scss";
 
 const LLM_PREFIXES = {
@@ -40,8 +41,7 @@ export function CopyPageMenu() {
             const body = await response.text();
 
             copy(body);
-            window.dataLayer?.push({
-                event: "copy_page_markdown",
+            trackEvent("copy_page_markdown", {
                 page_path: window.location.pathname,
             });
         } catch (error) {
@@ -53,10 +53,7 @@ export function CopyPageMenu() {
 
     const handleCopySetupPrompt = useStable(() => {
         copy(SETUP_PROMPT);
-        window.dataLayer?.push({
-            event: "copy_setup_prompt",
-            page_path: window.location.pathname,
-        });
+        trackSetupPromptCopy();
     });
 
     const handleViewMarkdown = useStable(() => {
@@ -195,6 +192,7 @@ export function CopyPageMenu() {
                         </ThemeIcon>
                     }
                     onClick={handleCopySetupPrompt}
+                    data-cta="docs_page_menu_setup_prompt"
                 >
                     <Stack gap={0}>
                         <Text
@@ -229,6 +227,8 @@ export function CopyPageMenu() {
                         />
                     }
                     onClick={() => handleOpenLLM("chatGpt")}
+                    data-cta="docs_page_menu_open_chatgpt"
+                    data-cta-destination="external"
                 >
                     <Stack gap={0}>
                         <Text
@@ -263,6 +263,8 @@ export function CopyPageMenu() {
                         />
                     }
                     onClick={() => handleOpenLLM("claude")}
+                    data-cta="docs_page_menu_open_claude"
+                    data-cta-destination="external"
                 >
                     <Stack gap={0}>
                         <Text

@@ -3,6 +3,7 @@ import { Icon, iconArrowRight } from "@surrealdb/ui";
 import { AgentBrand } from "~/components/AgentBrand";
 import { CopyPanel, type CopyPanelTab } from "~/components/CopyPanel";
 import { AGENTS, SETUP_PROMPT } from "~/utils/agents";
+import { trackEvent, trackSetupPromptCopy } from "~/utils/analytics";
 import classes from "./style.module.scss";
 
 interface MoreLinkProps {
@@ -32,6 +33,23 @@ function MoreLink({ href, label }: MoreLinkProps) {
 }
 
 /**
+ * Reports a copy from the panel: the setup prompt as `copy_setup_prompt`, and
+ * the Agent Skills install commands or an agent's MCP configuration as
+ * `install_copy`.
+ */
+function reportCopy(tab: CopyPanelTab) {
+    if (tab.value === "prompt") {
+        trackSetupPromptCopy();
+        return;
+    }
+
+    trackEvent("install_copy", {
+        method: tab.value === "skills" ? "agent_skills" : `mcp_config_${tab.value}`,
+        page: window.location.pathname,
+    });
+}
+
+/**
  * The agent setup panel at the top of the documentation home page.
  *
  * It sits above the section cards because it is the shortest route into
@@ -48,6 +66,7 @@ export function AgentBanner() {
             text: SETUP_PROMPT,
             prose: true,
             copyLabel: "Copy prompt",
+            cta: "docs_home_agent_prompt_copy",
             caption:
                 "Your agent installs SurrealDB's Agent Skills and connects to the SurrealDB MCP server, ready to write SurrealQL against a real database.",
             footer: (
@@ -72,6 +91,7 @@ export function AgentBanner() {
                 "codex plugin marketplace add surrealdb/agent-skills",
             ].join("\n"),
             caption: "Install SurrealDB's Agent Skills with the skills CLI, or as a plugin.",
+            cta: "docs_home_agent_skills_copy",
         },
         ...AGENTS.map((agent) => ({
             value: agent.id,
@@ -84,6 +104,7 @@ export function AgentBanner() {
             ariaLabel: agent.name,
             text: agent.setup.code,
             caption: agent.setup.where,
+            cta: "docs_home_agent_config_copy",
             footer: (
                 <MoreLink
                     href={`/docs/agents/${agent.id}`}
@@ -93,5 +114,10 @@ export function AgentBanner() {
         })),
     ];
 
-    return <CopyPanel tabs={tabs} />;
+    return (
+        <CopyPanel
+            tabs={tabs}
+            onCopy={reportCopy}
+        />
+    );
 }
