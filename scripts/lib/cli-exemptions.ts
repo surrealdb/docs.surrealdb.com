@@ -29,3 +29,16 @@ export const HIDDEN_FLAGS: Record<string, string> = {
     "surreal mcp --planner-strategy": "hidden; retired, and refused with an error",
     "surreal mcp --strict": "hidden from `--help`",
 };
+
+/**
+ * Flags of distributed storage, which is outside the single-node scope of the
+ * command pages. The environment variables page holds the matching settings.
+ */
+export const DISTRIBUTED_STORAGE_FLAGS = [
+    "surreal start --kvs-ca",
+    "surreal start --kvs-crt",
+    "surreal start --kvs-key",
+    "surreal start --tikv-gc-interval",
+    "surreal start --tikv-gc-lifetime",
+    "surreal start --tikv-lock-cleanup-interval",
+];

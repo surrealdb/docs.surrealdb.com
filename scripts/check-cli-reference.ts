@@ -34,7 +34,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
+import { DISTRIBUTED_STORAGE_FLAGS, HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
 
 const ROOT = join(import.meta.dir, "..");
 const ENV_PAGE = "src/content/reference/cli/db/environment-variables.mdx";
@@ -242,11 +242,140 @@ for (const flag of flags) {
             : [pageText(command), pageText(SHARES_FLAGS_WITH[command] ?? "")].join("\n");
     const documented = new RegExp(`${long}(?![\\w-])`).test(text);
 
-    if (flag.key in HIDDEN_FLAGS) continue;
+    if (flag.key in HIDDEN_FLAGS || DISTRIBUTED_STORAGE_FLAGS.includes(flag.key)) continue;
     if (!documented) {
         problems.push(
             `${flag.key} is in ${release} but its page does not mention it; document it, or list it in HIDDEN_FLAGS with the reason`,
         );
+    }
+}
+
+// The option tables of the command pages
+//
+// Each `<OptionsTable>` row for a flag or argument is checked against the
+// release: the flag has to exist, its environment variable has to be the one the
+// release reads, and a default that the release states has to be the one the row
+// gives. A row for a flag that the release no longer has has to say which
+// versions it applies to.
+
+interface OptionRow {
+    name: string;
+    env?: string;
+    default?: string | number | boolean;
+    description?: string;
+}
+
+let optionRows = 0;
+const COMMAND_OF_PAGE = Object.fromEntries(
+    Object.entries(PAGE_FOR).map(([command, page]) => [page, command]),
+);
+/** The pages that describe a command that is gone, or that hold no options of their own. */
+const SKIPPED_PAGES = new Set(["ml", "help", "index"]);
+const VERSIONED =
+    /<Since|\bv\d+\.\d+|\b\d+\.x\b|(?<![\d.])\d+\.\d+\.\d+(?![\d.])|\b(from|before|until|in|up to)( SurrealDB)? \d+\.\d+/i;
+
+/** The JSON array after each `options={` of an `<OptionsTable>`, found by matching brackets outside strings. */
+function* optionArrays(text: string): Generator<string> {
+    for (const start of text.matchAll(/<OptionsTable[^>]*?options=\{/g)) {
+        const from = (start.index ?? 0) + start[0].length;
+        let depth = 0;
+        let inString = false;
+
+        for (let at = from; at < text.length; at++) {
+            const char = text[at];
+
+            if (inString) {
+                if (char === "\\") at++;
+                else if (char === '"') inString = false;
+            } else if (char === '"') inString = true;
+            else if (char === "[") depth++;
+            else if (char === "]" && --depth === 0) {
+                yield text.slice(from, at + 1);
+                break;
+            }
+        }
+    }
+}
+
+const plainDefault = (value: string | number | boolean) =>
+    String(value).replace(/[`'"]/g, "").trim().toLowerCase();
+
+for (const file of pages) {
+    const name = file.replace(/\.mdx$/, "");
+
+    if (SKIPPED_PAGES.has(name)) continue;
+
+    const command = COMMAND_OF_PAGE[name] ?? `surreal ${name}`;
+    const text = readFileSync(join(ROOT, COMMANDS, file), "utf8");
+
+    for (const source of optionArrays(text)) {
+        let options: OptionRow[];
+
+        try {
+            options = JSON.parse(source);
+        } catch (error) {
+            problems.push(
+                `${file}: an <OptionsTable> holds options that are not valid JSON (${String(error)})`,
+            );
+            continue;
+        }
+
+        for (const row of options) {
+            optionRows++;
+            // One row can stand for a pair, such as `--allow-scripting, --deny-scripting`.
+            const names = row.name.split(/,\s*/);
+            const envs = row.env?.split(/,\s*/) ?? [];
+
+            names.forEach((rowName, index) => {
+                const argument = /^[[<]/.test(rowName);
+                const base = rowName.replace(/[[\]<>.]/g, "").toLowerCase();
+                // A flag that every command takes is listed under `surreal`, and an argument that repeats ends in `...`.
+                const keys = argument
+                    ? [`${command} <${base}>`, `${command} <${base}...>`]
+                    : [`${command} ${rowName}`, `surreal ${rowName}`];
+                const key = keys[0] as string;
+                const matches = data.items.filter((item) => keys.includes(item.key));
+                const item = matches.find(inRelease) ?? matches[0];
+
+                if (!item) {
+                    problems.push(
+                        `${file}: the row ${rowName} names ${key}, which no release has had`,
+                    );
+                    return;
+                }
+
+                if (!inRelease(item)) {
+                    if (!VERSIONED.test(`${row.description ?? ""}${row.name}`)) {
+                        problems.push(
+                            `${file}: ${key} is not in ${release}, and its row does not say which versions it applies to`,
+                        );
+                    }
+                    return;
+                }
+
+                const env = envs.length === names.length ? envs[index] : undefined;
+
+                if (env && item.env && env !== item.env) {
+                    problems.push(`${file}: ${key} reads ${item.env}, but its row says ${env}`);
+                }
+
+                const expected = sourceDefault([item]);
+
+                if (row.default !== undefined && expected !== undefined) {
+                    const given = String(row.default);
+                    const same =
+                        asNumber(given) !== undefined && asNumber(expected) !== undefined
+                            ? asNumber(given) === asNumber(expected)
+                            : plainDefault(given) === plainDefault(expected);
+
+                    if (!same) {
+                        problems.push(
+                            `${file}: ${key} has the default ${given}, but ${release} has ${expected}`,
+                        );
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -263,7 +392,7 @@ if (waiting.length > 0) {
     );
 }
 console.log(
-    `[cli] ${release}: ${current.length} variables and ${flags.length} flags checked, ${problems.length} problems`,
+    `[cli] ${release}: ${current.length} variables, ${flags.length} flags and ${optionRows} option table rows checked, ${problems.length} problems`,
 );
 
 if (problems.length > 0) process.exit(1);

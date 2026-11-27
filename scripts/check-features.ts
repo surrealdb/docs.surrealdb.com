@@ -18,7 +18,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FEATURES, type Feature, OUT_OF_SCOPE } from "./features";
-import { HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
+import { DISTRIBUTED_STORAGE_FLAGS, HIDDEN_FLAGS, INTERNAL } from "./lib/cli-exemptions";
 
 const ROOT = join(import.meta.dir, "..");
 const CONTENT = join(ROOT, "src/content");
@@ -101,7 +101,12 @@ function allParts(feature: Feature): Part[] {
         if (major(last) < 3) continue;
 
         // A variable for engine development or a flag that `--help` hides is not for users.
-        if (item.key in INTERNAL || item.key in HIDDEN_FLAGS) continue;
+        if (
+            item.key in INTERNAL ||
+            item.key in HIDDEN_FLAGS ||
+            DISTRIBUTED_STORAGE_FLAGS.includes(item.key)
+        )
+            continue;
 
         const isSetting = item.kind === "env" || item.kind === "config";
 
