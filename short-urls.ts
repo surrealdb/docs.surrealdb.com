@@ -243,6 +243,7 @@ const functionFamilies = [
     "parse",
     "rand",
     "record",
+    "schema",
     "search",
     "sequence",
     "session",
@@ -282,7 +283,7 @@ const dataTypes = [
 
 /** Taken by a word above, so the family keeps only its qualified form. */
 const TAKEN_CLAUSES = new Set(["explain", "start"]);
-const TAKEN_FUNCTIONS = new Set(["api", "http", "bytes", "sleep", "search", "not"]);
+const TAKEN_FUNCTIONS = new Set(["api", "http", "bytes", "sleep", "search", "not", "schema"]);
 const BARE_COMMANDS = new Set(["start", "sql", "import", "export", "validate", "isready"]);
 
 const reference: ShortUrl[] = [

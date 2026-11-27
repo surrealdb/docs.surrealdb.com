@@ -233,7 +233,7 @@ const universe = parts({
     functions: /./,
 });
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** One feature for each command, and one for each function namespace, so that none can be left out. */
 function automatic(): Feature[] {
@@ -266,7 +266,7 @@ function automatic(): Feature[] {
                 cli:
                     command === "surreal"
                         ? /^surreal (--|-\w)/
-                        : new RegExp(`^${escape(command)}( |$)`),
+                        : new RegExp(`^${escapeRegExp(command)}( |$)`),
             }),
         ),
         ...[...namespaces].map(
@@ -311,7 +311,7 @@ if (args.includes("--unassigned")) {
     console.log(
         `${everyFeature.length} features, ${universe.length} parts since 3.0, ${outOfScope.size} out of scope, ${unassigned.length} claimed by none`,
     );
-    console.log("\nfeature".padEnd(40) + "parts  undocumented  ended  unmarked-pages");
+    console.log(`\n${"feature".padEnd(39)} parts  undocumented  ended  unmarked-pages`);
 
     for (const feature of everyFeature) {
         const all = parts(feature);
@@ -346,12 +346,12 @@ if (args.includes("--unassigned")) {
         console.log(`\n== ${feature.name} ==`);
 
         for (const surface of surfaces) {
-            const of = all.filter((part) => part.surface === surface);
-            const undocumented = of.filter((part) => !part.documented);
-            const lasts = [...new Set(of.map((part) => part.last))];
+            const members = all.filter((part) => part.surface === surface);
+            const undocumented = members.filter((part) => !part.documented);
+            const lasts = [...new Set(members.map((part) => part.last))];
 
             console.log(
-                `  ${surface.padEnd(10)} ${String(of.length).padStart(3)} parts, ${of.length - undocumented.length} documented, last in ${lasts.join(" / ")}`,
+                `  ${surface.padEnd(10)} ${String(members.length).padStart(3)} parts, ${members.length - undocumented.length} documented, last in ${lasts.join(" / ")}`,
             );
 
             for (const part of undocumented) {

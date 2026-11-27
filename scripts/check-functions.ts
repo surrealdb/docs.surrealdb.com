@@ -22,7 +22,7 @@
  * Usage: bun scripts/check-functions.ts
  */
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const FUNCTIONS = join(ROOT, "src/content/reference/query-language/functions");
@@ -63,6 +63,7 @@ const documented = new Map<string, Documented>();
 for (const file of pages(FUNCTIONS)) {
     const text = readFileSync(file, "utf8");
     const lines = text.split("\n");
+    const namespace = basename(file, ".mdx");
 
     // A page that is new as a whole carries one badge under its frontmatter or its title.
     const body = text
@@ -72,7 +73,9 @@ for (const file of pages(FUNCTIONS)) {
     const pageSince = /^<Since\s+v="([^"]+)"/.exec(body)?.[1];
 
     lines.forEach((line, index) => {
-        const match = HEADING.exec(line);
+        // A method heading such as ``## `.chain()` `` on the `value` page documents `value::chain`.
+        const method = /^#{2,6}\s+`\.(\w+)\(/.exec(line);
+        const match = HEADING.exec(line) ?? (method ? [line, `${namespace}::${method[1]}`] : null);
 
         if (!match) return;
 
