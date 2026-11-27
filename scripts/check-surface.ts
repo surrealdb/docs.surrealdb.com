@@ -56,6 +56,8 @@ interface Heading {
     key: string;
     since?: string;
     line: number;
+    /** The text of the section, up to the next heading of the same level. */
+    body: string;
 }
 
 /** The headings of a page that match a pattern, with the `<Since>` badge under each. */
@@ -76,11 +78,14 @@ function headings(file: string, pattern: RegExp, key: (m: RegExpExecArray) => st
 
         const next = lines.slice(index + 1, index + 4).find((candidate) => candidate.trim() !== "");
 
+        const end = lines.findIndex((candidate, at) => at > index && /^##\s/.test(candidate));
+
         return [
             {
                 key: key(match),
                 since: /<Since\s+v="([^"]+)"/.exec(next ?? "")?.[1],
                 line: index + 1,
+                body: lines.slice(index + 1, end === -1 ? undefined : end).join("\n"),
             },
         ].map((heading) => ({ ...heading, since: heading.since ?? pageSince }));
     });
@@ -103,8 +108,14 @@ const mentions = (needle: string) =>
         .map(({ file }) => file.slice(CONTENT.length + 1));
 
 /** Whether a badge names the release a thing first shipped in, or its minor release. */
-function sinceMatches(since: string | undefined, added: string | undefined): boolean {
-    return !added || since === added || since === added.replace(/\.\d+$/, ".0");
+function sinceMatches(since: string | undefined, added: string | undefined, body = ""): boolean {
+    // A sentence that names the release, such as "available in SurrealDB 3.2.6", dates a thing as well as a badge.
+    return (
+        !added ||
+        since === added ||
+        since === added.replace(/\.\d+$/, ".0") ||
+        body.includes(added.replace(/^v/, ""))
+    );
 }
 
 // ---- RPC methods
@@ -144,7 +155,7 @@ section(
         const added = (item.ranges[0]?.[0] ?? 0) > 0 ? firstTag(item) : undefined;
         const heading = rpcDocumented.get(item.name);
 
-        return heading && !sinceMatches(heading.since, added)
+        return heading && !sinceMatches(heading.since, added, heading.body)
             ? [`${item.name}: first in ${added}, page says ${heading.since ?? "nothing"}`]
             : [];
     }),
@@ -153,8 +164,9 @@ section(
 // ---- HTTP routes
 const routeHeadings = headings(
     HTTP_PAGE,
-    /^##\s+`(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\/[^`]*)`/,
-    (m) => `${m[1]} ${shape(m[2] as string)}`,
+    /^##\s+(?:`(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\/[^`]*)`|.*`(\/[^`]*)`)/,
+    // A heading with a path and no method, such as "Buckets at `/bucket/:bucket`", covers every method of its routes.
+    (m) => (m[1] ? `${m[1]} ${shape(m[2] as string)}` : `ANY ${shape(m[3] as string)}`),
 );
 const routeDocumented = new Map(routeHeadings.map((heading) => [heading.key, heading]));
 
@@ -166,13 +178,39 @@ function pairs(name: string): string[] {
 }
 
 const routeKnown = new Set(routeHistory.items.flatMap((item) => pairs(item.name)));
+/** A path with its wildcard named like a parameter, so `/api/:p/*` and `/api/:ns/:db/:endpoint` compare equal. */
+const loose = (path: string) => path.replace(/\*/g, ":p");
+
+/**
+ * Routes that no heading of the HTTP page covers, each with where they are
+ * covered or why they need no page.
+ */
+const ELSEWHERE: Record<string, string> = {
+    "ANY /surrealdb.protocol.rpc.v1.SurrealDBService/*":
+        "the gRPC transport section of the RPC protocol page",
+    "GET /sync": "a placeholder handler that answers with a fixed string",
+    "POST /sync": "a placeholder handler that answers with a fixed string",
+};
+
 const documentedPair = (pair: string) => {
     const [method, ...rest] = pair.split(" ");
     const path = rest.join(" ");
 
+    if (pair in ELSEWHERE) return true;
+
+    const covers = (key: string) => {
+        const [keyMethod, ...keyRest] = key.split(" ");
+        const keyPath = loose(keyRest.join(" "));
+
+        // A section of a path covers that path and the paths below it.
+        const pathCovered = keyPath === loose(path) || loose(path).startsWith(`${keyPath}/`);
+
+        return pathCovered && (keyMethod === "ANY" || keyMethod === method);
+    };
+
     return method === "ANY"
-        ? [...routeDocumented.keys()].some((key) => key.endsWith(` ${path}`))
-        : routeDocumented.has(pair);
+        ? [...routeDocumented.keys()].some((key) => key.endsWith(` ${path}`) || covers(key))
+        : [...routeDocumented.keys()].some(covers);
 };
 
 section(
@@ -191,13 +229,27 @@ section(
 section(
     "Route headings for a route no release since 3.0 has had",
     routeHeadings
-        .filter((heading) => !routeKnown.has(heading.key))
+        .filter(
+            (heading) =>
+                !routeKnown.has(heading.key) &&
+                // A section of a path with no method is known when a route sits at or below that path.
+                !(
+                    heading.key.startsWith("ANY ") &&
+                    [...routeKnown].some((pair) => {
+                        const path = loose(pair.split(" ").slice(1).join(" "));
+                        const own = loose(heading.key.slice(4));
+
+                        return path === own || path.startsWith(`${own}/`);
+                    })
+                ),
+        )
         .map((h) => `${h.key} (line ${h.line})`),
 );
 section(
     "Routes removed since 3.0",
     routeHistory.items
-        .filter((item) => !live(item))
+        // SurrealML is outside the scope of the check, as it is in `scripts/features.ts`.
+        .filter((item) => !live(item) && !/ \/ml\//.test(item.name))
         .map((item) => {
             const path = item.name
                 .split(" ")
@@ -217,7 +269,7 @@ section(
         return pairs(item.name).flatMap((pair) => {
             const heading = routeDocumented.get(pair);
 
-            return heading && !sinceMatches(heading.since, added)
+            return heading && !sinceMatches(heading.since, added, heading.body)
                 ? [`${pair}: first in ${added}, page says ${heading.since ?? "nothing"}`]
                 : [];
         });
