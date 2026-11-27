@@ -1,7 +1,7 @@
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { COLLECTION_ROUTES } from "./collections";
 import { type MetaTitleParts, metaTitleCandidates } from "./meta";
-import { getProductFromPath, PRODUCT_META } from "./product";
+import { getProductFromPath, getProductLabelOverride, PRODUCT_META } from "./product";
 
 /** One folder above a page that carries a `__category.json`, nearest the root first. */
 export interface CategoryCrumb {
@@ -201,9 +201,13 @@ function titleParts(id: string, prefix: string, path: string): MetaTitleParts | 
     const productId = getProductFromPath(urlPath);
 
     // Agent Memory is a product of its own, and its section names ("Welcome",
-    // "Integrations") say nothing about which product a page belongs to.
+    // "Integrations") say nothing about which product a page belongs to. A page
+    // tree that shares a product without being it, such as the Agent Filesystem
+    // docs, names itself through `getProductLabelOverride` instead.
     if (productId !== "surrealdb") {
-        return { title, qualifier: PRODUCT_META[productId].label, required: false, detail };
+        const label = getProductLabelOverride(urlPath) ?? PRODUCT_META[productId].label;
+
+        return { title, qualifier: label, required: false, detail };
     }
 
     const section = resolveSection(

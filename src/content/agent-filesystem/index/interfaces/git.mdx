@@ -1,0 +1,195 @@
+---
+position: 10
+title: Git import
+description: "Import a Git repository into Agent Filesystem with surrealfs-rs import-git: which files are copied, which .gitignore rules apply, the git_commit records, and the Git remote helper."
+---
+
+# Git import
+
+The `surrealfs-rs import-git` command copies the working tree of a local Git repository into the filesystem and records the repository's commits in a table. It gives an agent a copy of a codebase that can be read, searched and versioned like any other files. This page explains what the command copies, which files it skips, what it records for commits, and what it does not do.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes the `next` branch of the SurrealFS repository. Importing is available in the Rust program only: the Python SDK, the TypeScript SDK and the MCP server have no equivalent.
+
+> [!WARNING]
+> The `git-remote-surrealfs` helper does not store anything. A `git push` to a `surrealfs://` remote reports success and discards the data. See [The Git remote helper](#the-git-remote-helper).
+
+## Import a repository
+
+<Synopsis>
+surrealfs-rs import-git [-m <MAX_COMMITS>] <REPO_PATH> <TARGET_PATH>
+</Synopsis>
+
+<OptionsTable
+    title="Arguments and options"
+    options={[
+        { "name": "<REPO_PATH>", "required": true, "description": "The path of a repository on your computer. The command reads the directory as it is on disk." },
+        { "name": "<TARGET_PATH>", "required": true, "description": "The Agent Filesystem folder to copy into. A path inside the repository such as `src/app.py` becomes `<TARGET_PATH>/src/app.py`, and a target of `/` puts the files at the root." },
+        { "name": "--max-commits", "short": "-m", "value": "<N>", "default": 50, "description": "How many of the most recent commits to record. A value of `0` records no commits." }
+    ]}
+/>
+
+The command needs a running SurrealDB server, the connection settings and the schema, as described in the [command-line reference](/docs/agent-filesystem/interfaces/command-line#settings-for-surrealfs-rs). The commands below set the connection settings and create a small repository with two commits, a `.gitignore` file and a folder named `node_modules`. The author names, addresses and dates are fixed, so the commit hashes later on this page should match yours:
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_PASS=secret
+export SURREALDB_NS=surrealfs SURREALDB_DB=demo
+
+git init -q -b main acme
+cd acme
+printf 'node_modules/\n*.log\n' > .gitignore
+mkdir -p src node_modules/x
+printf '# Acme API\n' > README.md
+printf 'print("hi")\n' > src/app.py
+printf 'x\n' > node_modules/x/i.js
+printf 'debug\n' > debug.log
+git add -A
+GIT_AUTHOR_NAME='Ada Example' GIT_AUTHOR_EMAIL=ada@example.com GIT_AUTHOR_DATE=2026-10-01T09:00:00Z \
+GIT_COMMITTER_NAME='Ada Example' GIT_COMMITTER_EMAIL=ada@example.com GIT_COMMITTER_DATE=2026-10-01T09:00:00Z \
+git commit -q -m 'Add the app'
+printf '# Acme API v2\n' > README.md
+git add -A
+GIT_AUTHOR_NAME='Grace Example' GIT_AUTHOR_EMAIL=grace@example.com GIT_AUTHOR_DATE=2026-10-08T14:30:00Z \
+GIT_COMMITTER_NAME='Grace Example' GIT_COMMITTER_EMAIL=grace@example.com GIT_COMMITTER_DATE=2026-10-08T14:30:00Z \
+git commit -q -m 'Update README | add usage'
+cd ..
+```
+
+The following session imports that repository:
+
+```bash
+surrealfs-rs init
+surrealfs-rs import-git ./acme /imports/acme
+surrealfs-rs ls /imports/acme
+surrealfs-rs ls /imports/acme/src
+surrealfs-rs cat /imports/acme/README.md
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+Imported 3 files and 2 commits to /imports/acme
+FILE       20 bytes  /imports/acme/.gitignore
+FILE       14 bytes  /imports/acme/README.md
+DIR         0 bytes  /imports/acme/src
+FILE       12 bytes  /imports/acme/src/app.py
+# Acme API v2
+```
+
+The repository also held `node_modules/x/i.js` and `debug.log`. Neither was imported, because the rules in the next section skip them.
+
+### What is copied
+
+The command walks the working directory and not the Git index, so it copies files that Git does not track, and it copies the root `.gitignore` file itself. Each file is written as a text file when its content is valid UTF-8 and as binary data otherwise, and empty files are copied too. A file that cannot be read is skipped without an error. Folders are created as needed.
+
+The command skips a path in these cases:
+
+- **Built-in names.** Any path that has a segment named `.git`, `node_modules`, `target`, `.venv`, `venv`, `__pycache__`, `.DS_Store`, `dist`, `build` or `.turbo` is skipped, at any depth. A project folder that is legitimately named `build`, `dist` or `target` is therefore not imported.
+- **Built-in file endings.** A file whose name ends in `.pyc`, `.swp` or `.DS_Store` is skipped.
+- **Rules from the root `.gitignore`.** The command reads the `.gitignore` file in the root of the repository, ignoring blank lines and lines that start with `#`, and applies the rule forms in the next table.
+
+| Rule form in `.gitignore` | Example | What it skips |
+| --- | --- | --- |
+| A rule that starts with `*` | `*.log` | A file whose name ends with the text after the `*`. Here `debug.log` and `logs/trace.log` are skipped. |
+| Any other rule. A trailing `/` is removed first | `secret.txt`, `sub/` | A path equal to the rule, a path under a folder with that name, and a path with a segment of that name. The rule `secret.txt` skips `secret.txt` and `src/secret.txt`, and the rule `sub/` skips everything under `sub`. |
+
+These `.gitignore` features are not supported, so the files they name are imported:
+
+- Negation with `!`. With the rules `*.log` and `!keep.log`, the file `keep.log` is still skipped.
+- Anchoring with a leading `/`. The rule `/rooted.txt` matches nothing, so `rooted.txt` is imported.
+- The `**` pattern and any wildcard other than a leading `*`. The rules `**/gen` and `tmp/*` match nothing.
+- `.gitignore` files in subfolders, `.git/info/exclude` and global ignore files.
+
+The command copies large files like any other write, and a binary file larger than about 2 MB fails. In a test, a repository that held a 3,000,000-byte random binary file stopped with `Database error: Message too long` and exit status 1. The command stops at the first file that fails, so the files after it are not copied. See the limits in [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers#limits).
+
+The command writes text files with mode `0644`, owned by the caller, which is the `--caller` name or else the `--user` name, and creates folders with mode `0755`. A binary file is owned by `root` with mode `0666`, so any user can overwrite it. An agent that acts as another user can read the imported text files but cannot change them.
+
+### Importing again
+
+Each run copies the files again from the working directory. A file whose content changed gets a new generation, and a file whose content is the same keeps its generation. A file that you delete from the repository stays in the filesystem, because the command only writes. There is no incremental mode, so a re-import of a repository does not mirror deletions.
+
+## Commit records
+
+When the repository has a `.git` folder, the command runs `git log` and stores one record in the `git_commit` table for each commit. The command needs a `git` program on the `PATH`. When `git` is missing or the log fails, it records no commits and reports `0 commits` without an error.
+
+The commits are the latest `--max-commits` commits, 50 by default, and they are stored from the oldest to the newest. Each record holds these fields:
+
+| Field | Type | Contents |
+| --- | --- | --- |
+| `sha` | string | The full commit hash. The field has an index, but no unique index. |
+| `author_name` | string | The author name. |
+| `author_email` | string | The author email address. |
+| `timestamp` | string | The author date in strict ISO 8601 form, exactly as Git prints it. It is a string and not a datetime. |
+| `message` | string | The subject of the commit message, which is its first paragraph with the line breaks folded into spaces. |
+| `target_root` | string | The `<TARGET_PATH>` of the import. |
+| `created_at` | datetime | The time the record was created. |
+
+The permissions of the `git_commit` table let any user read it, and let only a root user or the `indexer` record access create records. The `timestamp` field is a string, so a plain `ORDER BY timestamp` sorts as text and misorders commits whose dates carry different UTC offsets. The query below converts it with `type::datetime()` to sort by time, and reads the commits that the session above recorded. It runs in `surreal sql` against the same namespace and database as the import:
+
+```bash
+surreal sql --endpoint http://127.0.0.1:8000 --username root --password secret \
+    --ns surrealfs --db demo --hide-welcome --multi --pretty <<'SQL'
+SELECT sha, author_name, author_email, message, target_root, type::datetime(timestamp) AS committed_at
+FROM git_commit
+ORDER BY committed_at;
+SQL
+```
+
+```surql title="Sample output"
+-- Query 1 (execution time: 1.369333ms)
+[
+	{
+		author_email: 'ada@example.com',
+		author_name: 'Ada Example',
+		committed_at: d'2026-10-01T09:00:00Z',
+		message: 'Add the app',
+		sha: 'cd0e6c21f4316a29d56fb50f4182f404cc91dd39',
+		target_root: '/imports/acme'
+	},
+	{
+		author_email: 'grace@example.com',
+		author_name: 'Grace Example',
+		committed_at: d'2026-10-08T14:30:00Z',
+		message: 'Update README | add usage',
+		sha: 'fddab43ec6f98ffbba8cfe4ac105019984631298',
+		target_root: '/imports/acme'
+	}
+]
+```
+
+A `|` character in a commit message is kept as written. The command splits the output of `git log` on `|` characters, so a `|` in an author name or an author email address shifts the fields of that record. In a test, a commit by an author named `Ada | Lovelace` gave a record with the author name `Ada `, the author email ` Lovelace` and the timestamp `ada@example.com`. Check the records of a repository whose authors use a `|` in their names.
+
+> [!NOTE]
+> An import records commits only. It does not link a commit to the files that it changed, it records no per-file history, branches or tags, and it does not read submodules. Running the command a second time adds the commits again, because nothing prevents duplicate `sha` values: after a second import with `-m 1`, the commit that was in the first import appears twice in the table. A query such as `SELECT sha, message FROM git_commit GROUP BY sha, message` returns each commit once, and `-m 0` re-imports the files alone.
+
+## The Git remote helper
+
+The `surrealfs-cli` build also produces a second program, `git-remote-surrealfs`. Git runs a program with that name when a remote URL starts with `surrealfs://`. It answers the remote helper protocol with fixed replies and does not connect to a database.
+
+> [!WARNING]
+> The helper is not functional in this release. It answers the `capabilities` and `list` commands with fixed text, acknowledges a `push` with `ok` for the branch, and answers `fetch` with an empty reply. It never reads the URL for a database address, and it transfers no objects in either direction. A push therefore reports success while nothing is stored, and a fetch fails.
+
+With the helper on the `PATH` and a repository that has one commit on `main`:
+
+```bash
+git remote add sfs surrealfs:///proj/acme
+git push sfs main
+surrealfs-rs ls /proj
+git fetch sfs
+```
+
+```text title="Output"
+To surrealfs:///proj/acme
+ * [new branch]      main -> main
+Error: Not found: An error occurred: sfs:not_found
+fatal: bad object 0000000000000000000000000000000000000000
+error: surrealfs:///proj/acme did not send all necessary objects
+```
+
+The `Error: Not found` line is the result of `surrealfs-rs ls /proj`, and the `fatal` and `error` lines come from `git fetch`. The push exits with status 0 and the folder `/proj` does not exist afterwards. Use `import-git` to copy a repository into the filesystem.
+
+## See also
+
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line) for the connection settings and every other `surrealfs-rs` command.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) for the generations that a re-import creates.
+- [Search](/docs/agent-filesystem/concepts/search) for finding text in the imported files.

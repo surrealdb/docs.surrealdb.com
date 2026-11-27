@@ -75,6 +75,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "agent-memory/learn", id: "agent-memory/learn" },
     { prefix: "agent-memory/operate", id: "agent-memory/operate" },
     { prefix: "agent-memory", id: "agent-memory/index" },
+    { prefix: "agent-filesystem", id: "agent-filesystem/index" },
     { prefix: "", id: "index" },
 ];
 

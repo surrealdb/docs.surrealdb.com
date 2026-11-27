@@ -1,0 +1,164 @@
+---
+position: 1
+title: Groups and sharing
+description: "Groups that share the middle mode digit of a file, and share links that record a token, a path and an expiry. Limits in this release."
+---
+
+# Groups and sharing
+
+A group is a named set of users that share the access which the middle digit of a file's mode describes. A share link is a record that names a path, a token and an optional expiry. This page covers both and states, for each, which parts work in this release.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, and each limitation that applies is listed where it matters.
+
+> [!IMPORTANT]
+> Groups and share links are available through the Rust command-line tool, `surrealfs-rs`, and through the database functions. The Python library has no group methods, does not read the group digit, and returns `None` for the `group` field of a file. A share link is a stored record: no server in this release accepts a share token as access to a file.
+
+The examples use `surrealfs-rs`, which the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) shows how to build. Its default database is `surrealfs`, so the examples set the connection explicitly:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc SURREALDB_NS=agents SURREALDB_DB=files
+export SURREALDB_USER=root SURREALDB_PASS=secret
+surrealfs-rs init
+```
+
+## Groups
+
+Two tables hold the data. The `user_group` table has a unique `name` and an optional `description`. The `group_member` table has a `group_name` and a `user_id`, and each pair is unique. A membership is a pair of strings, so the database does not check that `user_id` names a record in the `user` table. It does not check that a group exists when a file's group is set either.
+
+Groups are managed with a system credential. Under [record access](/docs/agent-filesystem/security/record-access), every record user can list the groups and their members, and none can change them.
+
+### Group commands
+
+| Command | Effect |
+| --- | --- |
+| `group create <NAME> -d <DESCRIPTION>` | Creates a group. A second `create` for the same name keeps the existing group and its description |
+| `group add <GROUP> <USER>` | Adds a user to a group, and creates the group when it does not exist. Adding a member twice has no further effect |
+| `group remove <GROUP> <USER>` | Removes a user from a group |
+| `group list` | Lists the groups and their descriptions |
+| `group members <GROUP>` | Lists the members of a group and when each was added |
+| `chgrp <PATH> [GROUP]` | Sets the group of a file or folder. Omitting `GROUP` clears it |
+
+Always pass `-d` to `group create`. Without it, the command prints `Error: Not found: Group <NAME>`, exits with status 1 and creates no group. `group add` creates a missing group without a description.
+
+Two of the commands do not report an unknown name. `group remove` prints `Removed '<USER>' from group '<GROUP>'` whether or not the user was a member, `group members` prints nothing for a group that does not exist, and the exit status of both is 0. Run `group members` afterwards to check the result.
+
+Only the owner of a file, or `root`, may change its group. When another user tries, the tool prints `Error: Not found: <path>` and not a permission error, because it does not report the reason the database refused.
+
+### Set the mode and the group
+
+The `chmod <PATH> <MODE>` command sets the mode of a file or folder. The tool reads a mode that starts with `0` or `0o` as octal and any other number as decimal, and it does not check the range or the caller. The command `chmod /teams/docs/plan.md 640` therefore stores `0o1200`, which lets the owner write and gives nobody read access, and `9999` is accepted. Always write the leading zero, as in `0640`.
+
+The `chgrp` command sets only the group. The group digit of the mode then decides what the members of the group may do.
+
+### Example
+
+The session below gives the group `docs` read access to a plan. Alice owns the file, Bob is a member of the group, and Carol is not. The `--caller` option states which user runs each command. It is a label that the tool sends to the database, and nothing authenticates it. See [Permissions](/docs/agent-filesystem/security/permissions#how-permissions-are-enforced).
+
+```bash
+surrealfs-rs --caller alice mkdir -p /teams/docs
+surrealfs-rs --caller alice write /teams/docs/plan.md "Launch plan: draft one."
+surrealfs-rs group create docs -d "Documentation team"
+surrealfs-rs group add docs alice
+surrealfs-rs group add docs bob
+surrealfs-rs group members docs
+surrealfs-rs --caller alice chmod /teams/docs/plan.md 0640
+surrealfs-rs --caller alice chgrp /teams/docs/plan.md docs
+surrealfs-rs --caller bob cat /teams/docs/plan.md
+surrealfs-rs --caller carol cat /teams/docs/plan.md
+```
+
+```text title="Sample output"
+Created directory /teams/docs
+Wrote 23 bytes to /teams/docs/plan.md
+Group 'docs' created
+Added 'alice' to group 'docs'
+Added 'bob' to group 'docs'
+alice                added=Some(2026-10-14T22:37:57.443414Z)
+bob                  added=Some(2026-10-14T22:37:57.487889Z)
+Updated mode for /teams/docs/plan.md to 640
+Updated group for /teams/docs/plan.md to Some("docs")
+Launch plan: draft one.
+Error: Permission denied: An error occurred: sfs:denied
+```
+
+The mode `0640` gives the owner read and write, the group read, and everyone else nothing. Bob uses the group digit because he belongs to `docs`, so `cat` succeeds. Carol falls through to the other digit, so `cat` is refused with `sfs:denied`.
+
+The refusal applies to `cat` only. Carol can still read the file with `grep` or copy it with `cp`, because those commands do not check the caller. The [permissions page](/docs/agent-filesystem/security/permissions#how-permissions-are-enforced) lists which commands check it.
+
+### How the group digit applies
+
+A file uses its group digit for a user who is not the owner, when the file has a `group` and the user is a member of it. The user `root` counts as a member of every group. For the order of the three digits, see [Mode bits](/docs/agent-filesystem/security/permissions#mode-bits).
+
+The group also takes part in the [gate](/docs/agent-filesystem/security/permissions#reachability-and-the-gate). When a folder is closed to others, has a group, and has its group-execute bit set, members of the group may pass through it, and the `gate` of the files below it lists `group:<name>`. After `chmod 0750` and `chgrp docs` on `/teams/docs`, the file `/teams/docs/plan.md` reports the gate `alice,group:docs`.
+
+### Where groups apply
+
+| Operation | Groups are used |
+| --- | --- |
+| Reading a file with `cat` in the Rust tool, or with the `fn::sfs_read` function | Yes |
+| Selecting from the `file` table under record access | Yes |
+| Creating, renaming and removing entries in a folder under record access | Yes, through the group digit of the folder |
+| Updating the content of a file under record access | No. The field rule uses the owner and other digits, so the update is ignored and the content stays as it was |
+| Full-text, vector and hybrid search, and the tables for chunks, sections, symbols and digests | No. They use the owner and other digits |
+| Any operation in the Python library | No |
+| Writes, copies and deletions through the Rust tool | They do not check the caller, so the group digit plays no part |
+| Backups and archive exports | The group is not saved. A backup manifest records `"group": null` |
+
+A group member who holds the write bit therefore cannot change file content under record access in this release, even though the bit is set. Search does not show group members the files that the group digit lets them read.
+
+## Share links
+
+A share link is a record in the `share` table with these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The path that the link names |
+| `token` | A random string of 32 letters and digits, unique across the table |
+| `mode` | A string that is stored as given. The command-line default is `r`, and the schema default is `ro` |
+| `created_by` | The caller that created the link |
+| `expires_at` | The expiry time. The field is empty when the link has no expiry |
+| `revoked` | `false` until the link is revoked |
+
+### Share link commands
+
+| Command | Effect |
+| --- | --- |
+| `share create <PATH> [-m <MODE>] [-e <SECONDS>]` | Creates a link and prints the token. The path must exist. Without `-e`, or with `-e 0`, the link never expires |
+| `share list` | Lists the links that are not revoked. `root` sees every link, and any other caller sees the links it created |
+| `share resolve <TOKEN>` | Prints the link, or `Share link not found or expired` when the token is missing, revoked or past its expiry |
+| `share revoke <TOKEN>` | Marks the link as revoked. Only the creator or `root` can revoke a link |
+
+```bash
+surrealfs-rs --caller alice write /reports/q3.md "Quarterly report"
+surrealfs-rs --caller alice share create /reports/q3.md -e 3600
+surrealfs-rs --caller alice share list
+```
+
+```text title="Sample output"
+Wrote 16 bytes to /reports/q3.md
+Created share link:
+  Token: hoOY0gTWbXAJ5mPalhCQJVLE0XcYkYlT
+  Path:  /reports/q3.md
+  Mode:  r
+  Expires: 2026-10-14 23:38:18.674837 UTC
+hoOY0gTWbXAJ5mPalhCQJVLE0XcYkYlT /reports/q3.md           r      revoked=false
+```
+
+Four behaviours need care:
+
+- **Expiry:** `share resolve` stops returning a link at its expiry, but `share list` still lists an expired link that was not revoked.
+- **Revocation:** `share revoke` prints `Revoked share link with token '<token>'` for every token, including one that does not exist or that another user created. The refusal is not reported, so check `share list` to confirm that the link is gone.
+- **Creation and lookup:** `share create` does not check that the caller can read the path, and `share resolve` returns the link to any caller who holds the token.
+- **Mode:** The `mode` string is stored and returned, and nothing interprets it. The schema comment gives `ro` and `append` as the two values.
+
+> [!WARNING]
+> No part of this release turns a share token into access. The WebDAV and S3 servers never read the `share` table, and `share resolve` only prints the record. A share link is a record of an intended grant, and it does not let another person open the file. To give a user access today, set the owner, mode and group of the file, or give the user a [protocol credential](/docs/agent-filesystem/security/credentials).
+
+Under record access, every record user can read the whole `share` table, including every token. Only the creator or `root` can change or revoke a link.
+
+## Related pages
+
+- [Permissions](/docs/agent-filesystem/security/permissions) describes owners, modes, the gate and where permissions are enforced.
+- [Record access](/docs/agent-filesystem/security/record-access) describes the tables that the database isolates per user and the ones it does not.
+- [Command-line interface](/docs/agent-filesystem/interfaces/command-line) lists every `surrealfs-rs` command.

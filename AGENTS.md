@@ -948,7 +948,12 @@ has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
 section under `integrate/*`, `learn/*`, `operate/*`, `reference/*`
-and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`).
+and `agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
+`agent-filesystem/index`, which serves `/docs/agent-filesystem`. Agent
+Filesystem has no `ProductId` and no switcher button: `getProductFromPath` gives
+its pages the Agent Memory product (header, switcher, accent and search scope),
+and `getProductLabelOverride` makes "Agent Filesystem" the qualifier in the page
+title (see `titleParts` in `src/utils/page-title.ts`).
 Labs entries are not a collection: see [Labs](#labs).
 
 Every doc collection's `+Content.ts` is the same boilerplate:
